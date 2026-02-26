@@ -3,6 +3,18 @@
 	import './layout.css';
     import Parallax from './Parallax.svelte';
 
+	import { onMount } from "svelte";
+    import { afterNavigate } from "$app/navigation";
+    import { applyShakyTitles } from "$lib/shakyTitle";
+
+	onMount(() => {
+        applyShakyTitles();
+
+        afterNavigate(() => {
+            applyShakyTitles();
+        });
+    });
+
 	let { children } = $props();
 </script>
 
