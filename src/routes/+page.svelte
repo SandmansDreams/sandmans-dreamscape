@@ -20,7 +20,7 @@
 		<li>Tools I have made (with UI) or code snippets</li>
 		<li>Articles or posts about things I want to talk about or deem important</li>
 		<li>Some fun web stuff that I thought would be cool</li>
-		<li><SecretText text="Secrets, and perhaps even an ARG"/></li>
+		<li><SecretText text="Secrets, traps, and unique entertainment"/></li>
 		<li>And much more!!!</li>
 	</ul>
 </section>

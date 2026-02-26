@@ -3,6 +3,8 @@
 	import './layout.css';
     import Parallax from './Parallax.svelte';
 
+	import homepageSong from "$lib/audio/Homepage Music.wav"
+
 	import { onMount } from "svelte";
     import { afterNavigate } from "$app/navigation";
     import { applyShakyTitles } from "$lib/shakyTitle";
@@ -28,7 +30,10 @@
 			{@render children()}
 			<div class="big-spacer"></div>
 		</div>
+
 		<div class="vignette"></div>
+
+		<audio class="audio-" controls src="{homepageSong}"></audio>
 	</main>
 
 	<footer>

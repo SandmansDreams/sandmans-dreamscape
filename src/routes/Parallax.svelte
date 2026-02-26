@@ -1,11 +1,18 @@
 <script lang="ts">
     import { onMount, onDestroy } from "svelte"
+    import { browser } from "$app/environment"
+
+    import L1 from "$lib/images/parallax/NoodleField L1.png"
+    import L2 from "$lib/images/parallax/NoodleField L2.png"
+    import L3 from "$lib/images/parallax/NoodleField L3.png"
+    import L4 from "$lib/images/parallax/NoodleField L4.png"
+    import L5 from "$lib/images/parallax/NoodleField L5.png"
 
     const baseSpeed = 0.02
     const baseBlur = 7
 
-    let container: HTMLDivElement
     let layers: HTMLElement[] = []
+    let frame: number
 
     function animateParallax() {
         const scrollY = window.scrollY;
@@ -24,30 +31,36 @@
             }
         }
 
-        requestAnimationFrame(animateParallax);
+        frame = requestAnimationFrame(animateParallax);
     }
     
     onMount(() => {
+        if (!browser) return
         animateParallax()
+    })
+
+    onDestroy(() => {
+        if (!browser) return
+        cancelAnimationFrame(frame)
     })
 </script>
 
-<div bind:this={container} class="parallax-container">
+<div class="parallax-container">
     <div class="parallax-container">
         <div bind:this={layers[0]} class="parallax-layer" 
-            style="background-image: url('/parallax/NoodleField L1.png'); scale: 1; filter: blur(8px);" 
+            style="background-image: url('{L1}'); scale: 1; filter: blur(8px);" 
         ></div>
         <div bind:this={layers[1]} class="parallax-layer" 
-            style="background-image: url('/parallax/NoodleField L2.png'); scale: 1.1; filter: blur(6px);" 
+            style="background-image: url('{L2}'); scale: 1.1; filter: blur(6px);" 
         ></div>
         <div bind:this={layers[2]} class="parallax-layer" 
-            style="background-image: url('/parallax/NoodleField L3.png'); scale: 1.2; filter: blur(3px);" 
+            style="background-image: url('{L3}'); scale: 1.2; filter: blur(3px);" 
         ></div>
         <div bind:this={layers[3]} class="parallax-layer" 
-            style="background-image: url('/parallax/NoodleField L4.png'); scale: 1.5; filter: blur(1px);" 
+            style="background-image: url('{L4}'); scale: 1.5; filter: blur(1px);" 
         ></div>
         <div bind:this={layers[4]} class="parallax-layer" 
-            style="background-image: url('/parallax/NoodleField L5.png'); scale: 2;" 
+            style="background-image: url('{L5}'); scale: 2;" 
         ></div>
     </div>
 </div>
