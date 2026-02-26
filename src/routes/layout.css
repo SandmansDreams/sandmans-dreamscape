@@ -1,105 +1,124 @@
-@import '@fontsource/fira-mono';
+* {
+    box-sizing: border-box;
+}
 
-:root {
-	--font-body:
-		Arial, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell,
-		'Open Sans', 'Helvetica Neue', sans-serif;
-	--font-mono: 'Fira Mono', monospace;
-	--color-bg-0: rgb(202, 216, 228);
-	--color-bg-1: hsl(209, 36%, 86%);
-	--color-bg-2: hsl(224, 44%, 95%);
-	--color-theme-1: #ff3e00;
-	--color-theme-2: #4075a6;
-	--color-text: rgba(0, 0, 0, 0.7);
-	--column-width: 42rem;
-	--column-margin-top: 4rem;
-	font-family: var(--font-body);
-	color: var(--color-text);
+html, body {
+    height: 100%;
+    font-family: "Jersey 10", "Jost", Arial, sans-serif;
 }
 
 body {
-	min-height: 100vh;
-	margin: 0;
-	background-attachment: fixed;
-	background-color: var(--color-bg-1);
-	background-size: 100vw 100vh;
-	background-image:
-		radial-gradient(50% 50% at 50% 50%, rgba(255, 255, 255, 0.75) 0%, rgba(255, 255, 255, 0) 100%),
-		linear-gradient(180deg, var(--color-bg-0) 0%, var(--color-bg-1) 15%, var(--color-bg-2) 50%);
+    margin: 0;
+    background-color: #c5c5c5;
+    justify-content: center;
+    align-items: center; 
+    color: rgb(255, 255, 255);
+    
 }
 
-h1,
-h2,
-p {
-	font-weight: 400;
+main {
+	
 }
 
-p {
-	line-height: 1.5;
-}
-
-a {
-	color: var(--color-theme-1);
-	text-decoration: none;
-}
-
-a:hover {
-	text-decoration: underline;
+button {
+    padding: 0.5rem 1rem;
+    font-size: 1rem;
+    cursor: pointer;
 }
 
 h1 {
-	font-size: 2rem;
-	text-align: center;
+    font-size: 40pt;
 }
 
 h2 {
-	font-size: 1rem;
+    font-size: xx-large;
 }
 
-pre {
-	font-size: 16px;
-	font-family: var(--font-mono);
-	background-color: rgba(255, 255, 255, 0.45);
-	border-radius: 3px;
-	box-shadow: 2px 2px 6px rgb(255 255 255 / 25%);
-	padding: 0.5em;
-	overflow-x: auto;
-	color: var(--color-text);
+h1, h2 {
+    text-align: center;
 }
 
-.text-column {
-	display: flex;
-	max-width: 48rem;
-	flex: 0.6;
-	flex-direction: column;
-	justify-content: center;
-	margin: 0 auto;
+h1, h2, h3, h4, h5, h6 {
+    font-family: "Rubik Pixels", "Jost", sans-serif;
 }
 
-input,
-button {
-	font-size: inherit;
-	font-family: inherit;
+p {
+    font-size: 18pt;
+    text-indent: 2rem;
+    text-align: justify;
 }
 
-button:focus:not(:focus-visible) {
-	outline: none;
+.quote {
+    font-size: 24pt;
+    text-align: center;
+    width: 100%;
+    color: rgb(187, 187, 187);
+    text-shadow: rgb(99, 99, 99) 3px 3px 1px;
 }
 
-@media (min-width: 720px) {
-	h1 {
-		font-size: 2.4rem;
-	}
+.vignette {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 999;
+
+    background: radial-gradient(
+        ellipse at center,
+        rgba(0,0,0,0) 45%,
+        rgba(0,0,0,0.3) 85%,
+        rgba(0,0,0,0.7) 100%
+    );
 }
 
-.visually-hidden {
-	border: 0;
-	clip: rect(0 0 0 0);
-	height: auto;
-	margin: 0;
-	overflow: hidden;
-	padding: 0;
-	position: absolute;
-	width: 1px;
-	white-space: nowrap;
+.big-spacer {
+	height: 5000vh;
+}
+
+.content-container {
+    position: relative;
+    background-color: rgba(0, 0, 0, 0.25);
+	width: 100%;
+    height: 100%;
+    justify-self: center;
+    padding: 1rem 2rem;
+    border: double 10px rgba(0, 0, 0, 0.5);
+    border-radius: 3rem;
+}
+
+.ugly-text {
+    font-family: "Coral Pixels", sans-serif;
+}
+
+.shaky-word {
+    display: inline-block;
+}
+
+.shaky-letter {
+    display: inline-block;
+    transition: transform .75s ease;
+    margin: 0;
+    line-height: fit-content;
+    transform-origin: center;
+    animation: float 3s ease-in-out infinite;
+    cursor: pointer;
+    text-shadow: 2px 2px 3px rgba(255, 255, 255, 0.9);
+}
+
+@keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-5px); }
+}
+
+
+.fade-in {
+    opacity: 0;
+    transform: translateY(50px);
+    animation: fadeIn 1.5s ease forwards;
+}
+
+@keyframes fadeIn {
+    to {
+        opacity: 1;
+        transform: translateY(0px);
+    }
 }

@@ -1,21 +1,27 @@
 <script lang="ts">
-	import Header from './Header.svelte';
+	//import Header from './Header.svelte';
 	import './layout.css';
+    import Parallax from './Parallax.svelte';
 
 	let { children } = $props();
 </script>
 
 <div class="app">
-	<Header />
+	<!-- <Header /> -->
 
 	<main>
-		{@render children()}
+		<Parallax>
+		</Parallax>
+		
+		<div class="content-container fade-in">
+			{@render children()}
+			<div class="big-spacer"></div>
+		</div>
+		<div class="vignette"></div>
 	</main>
 
 	<footer>
-		<p>
-			visit <a href="https://svelte.dev/docs/kit">svelte.dev/docs/kit</a> to learn about SvelteKit
-		</p>
+
 	</footer>
 </div>
 
@@ -43,10 +49,6 @@
 		justify-content: center;
 		align-items: center;
 		padding: 12px;
-	}
-
-	footer a {
-		font-weight: bold;
 	}
 
 	@media (min-width: 480px) {
