@@ -22,8 +22,7 @@
 	<!-- <Header /> -->
 
 	<main>
-		<Parallax>
-		</Parallax>
+		<Parallax/>
 		
 		<div class="content-container fade-in">
 			{@render children()}

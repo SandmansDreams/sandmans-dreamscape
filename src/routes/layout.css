@@ -48,6 +48,10 @@ p {
     text-align: justify;
 }
 
+ol, ul {
+	font-size: 18pt;
+}
+
 .quote {
     font-size: 24pt;
     text-align: center;
@@ -87,6 +91,7 @@ p {
 
 .ugly-text {
     font-family: "Coral Pixels", sans-serif;
+	font-size: 14pt;
 }
 
 .shaky-word {
