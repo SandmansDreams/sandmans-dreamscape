@@ -1,54 +1,79 @@
 <script lang="ts">
     import { onMount, onDestroy } from "svelte"
+    import { browser } from "$app/environment";
 
     export let text = "Hover Me"
-    export let interval: number | null = null
+    //export let interval: number | null = null
     const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!@#$%^&*()"
     
     let displayText = text
+    let frame: number
+    let progress = 0
     let isHovering = false
+    let lastTime = 0
 
-    function startScramble() {
-        if (interval) return;
+    function randomChar() {
+        return characters[
+            Math.floor(Math.random() * characters.length)
+        ];
+    }
 
-        interval = window.setInterval(() => {
-            if (isHovering) return;
+    function loop(time: number) {
+        if (!lastTime) lastTime = time;
+        const delta = time - lastTime;
+
+        // Control speed here (bigger = slower reveal)
+        const speed = 30;
+
+        if (delta > speed) {
+            lastTime = time;
+
+            if (isHovering) {
+                progress += 1;
+                if (progress > text.length) {
+                    progress = text.length;
+                }
+            } else {
+                progress = 0;
+            }
 
             displayText = text
                 .split("")
-                .map((char) => {
+                .map((char, i) => {
                     if (char === " ") return " ";
-                    return characters[
-                        Math.floor(Math.random() * characters.length)
-                    ];
+                    if (i < progress) return text[i];
+                    return randomChar();
                 })
                 .join("");
-        }, interval || 50);
+        }
+
+        frame = requestAnimationFrame(loop);
     }
 
-    function stopScramble() {
+    function handleEnter() {
         isHovering = true;
-        displayText = text;
     }
 
-    function resumeScramble() {
+    function handleLeave() {
         isHovering = false;
     }
 
     onMount(() => {
-        startScramble();
+        if (!browser) return
+        frame = requestAnimationFrame(loop)
     });
 
     onDestroy(() => {
-        if (interval) clearInterval(interval);
+        if (!browser) return
+        cancelAnimationFrame(frame)
     });
 </script>
 
 <span
     role="note"
     class="scramble-text"
-    on:mouseenter={stopScramble}
-    on:mouseleave={resumeScramble}
+    on:mouseenter={handleEnter}
+    on:mouseleave={handleLeave}
 >
     {displayText}
 </span>
