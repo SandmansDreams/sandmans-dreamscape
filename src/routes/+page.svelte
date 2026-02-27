@@ -5,7 +5,7 @@
 </script>
 
 <svelte:head>
-	<title>Home</title>
+	<title>Sandman's Dreamscape: Home</title>
 	<meta name="description" content="Where the dreamer's dreams are realized" />
 </svelte:head>
 
@@ -13,8 +13,8 @@
 	<h1>Welcome to Sandman's Dreamscape</h1>
 	<p class="quote">"May your heart not lead you to devestation."</p>
 
-	<p>Hello and welcome! My name is Sandman, but you can also call me Gabriel the Angel or Gabe (not my real name). I am sort of a Jack-of-all-trades, doing coding, writing, art, music, etc. My main focuses right now is on music and coding. I can't wait to share all the stuff I am working on with you!</p>
-	<p>This site will contain a lot of things:</p>
+	<p>Hello and welcome! My name is Gabriel the Angel, but you can call me Gabe or Sandman. I am a sort of "Jack-of-all-trades", doing coding, writing, art, music, etc. My main focuses right now is on music and coding. I can't wait to share all the stuff I am working on with you!</p>
+	<p>This site will (eventually) contain a lot of things:</p>
 	<ul>
 		<li>Projects I am working on or have finished</li>
 		<li>Tools I have made (with UI) or code snippets</li>
