@@ -37,8 +37,24 @@
 
 
     async function loadFromFolder() {
-        const res = await fetch("/api/music");
-        return await res.json();
+        const modules = import.meta.glob(
+            '/src/lib/audio/music/*.{mp3,wav}',
+            {
+                eager: true,
+                import: 'default'
+            }
+        );
+
+        return Object.entries(modules).map(([path, url]) => {
+            const filename = path.split('/').pop() ?? '';
+
+            return {
+                name: filename
+                    .replace(/\.[^/.]+$/, '')
+                    .replace(/[-_]/g, ' '),
+                src: url as string
+            };
+        });
     }
 
     function getRandomIndex(length: number) {
