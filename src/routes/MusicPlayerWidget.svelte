@@ -129,7 +129,7 @@
         else playlist = await loadFromFolder()
         loadTrack(getRandomIndex(playlist.length))
 
-        console.log(JSON.stringify(playlist))
+        //console.log(JSON.stringify(playlist))
 
         audio.addEventListener("play", () => (isPlaying = true));
 		audio.addEventListener("pause", () => (isPlaying = false));
