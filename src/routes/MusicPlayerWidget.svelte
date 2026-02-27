@@ -294,13 +294,6 @@
         align-self: center;
     }
 
-    p {
-        text-indent: 0;
-        font-size: small;
-        margin: 0;
-        line-height: normal;
-    }
-
 	input[type="range"] {
         -webkit-appearance: none;
         appearance: none;
