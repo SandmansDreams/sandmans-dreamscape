@@ -46,10 +46,12 @@ p {
     font-size: 18pt;
     text-indent: 2rem;
     text-align: justify;
+	text-shadow: 2px 2px 0px black;
 }
 
 ol, ul {
 	font-size: 18pt;
+	text-shadow: 2px 2px 0px black;
 }
 
 .quote {

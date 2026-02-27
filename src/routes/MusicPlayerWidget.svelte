@@ -159,6 +159,10 @@
 			if (loopState !== 2) next()
 		})
     })
+
+    $: progressPercent = duration
+        ? `${(currentTime / duration) * 100}%`
+        : "0%";
 </script>
 
 <div class="music-widget">
@@ -166,7 +170,7 @@
         <div class="player">
             <!-- Header -->
             <div class="header">
-                <p>MY MUSIC PLAYER | (Music I have made or are making)</p>
+                <span>MY MUSIC PLAYER | (Music I have made or are making)</span>
                 <button class="close-button" on:click={toggleCollapse}>x</button>
             </div>
             <!-- Controls -->
@@ -211,6 +215,7 @@
         
                     <input
                         type="range"
+                        class="volume-slider"
                         min="0"
                         max="1"
                         step="0.01"
@@ -244,11 +249,13 @@
         
                 <input
                     type="range"
+                    class="progress-slider"
                     min="0"
                     max={duration}
                     step="0.1"
                     bind:value={currentTime}
                     on:input={() => (audio.currentTime = currentTime)}
+                    style={`--progress: ${progressPercent}`}
                 />
         
                 <span>{formatTime(duration)}</span>
@@ -299,31 +306,50 @@
         appearance: none;
         background: transparent;
         cursor: pointer;
-		flex: 1;
-	}
-
-    input[type="range"]::-webkit-slider-runnable-track {
-        height: 8px;
-        background: rgb(160, 160, 160);
-        box-shadow:
-            inset 2px 2px 0 rgb(120,120,120),
-            inset -2px -2px 0 rgb(220,220,220);
+        flex: 1;
+        height: 24px;
+        display: flex;
+        align-items: center;
+        align-self: center;
     }
 
-    input[type="range"]::-moz-range-track {
+    .progress-slider::-webkit-slider-runnable-track {
         height: 8px;
-        background: rgb(160, 160, 160);
         border: inset rgb(189, 189, 189) 3px;
+        background: linear-gradient(
+            to right,
+            rgb(0, 112, 0) 0%,
+            rgb(0, 255, 0) var(--progress),
+            rgb(0, 0, 0) var(--progress),
+            rgb(0, 0, 0)
+        );
     }
 
-    /* Thumb */
+    .progress-slider::-moz-range-track {
+        height: 8px;
+        border: inset rgb(189, 189, 189) 3px;
+        background: rgb(160, 160, 160);
+    }
+
+    .volume-slider::-webkit-slider-runnable-track {
+        height: 6px;
+        background: rgb(0, 0, 0);
+        border: inset rgb(189, 189, 189) 2px;
+    }
+
+    .volume-slider::-moz-range-track {
+        height: 6px;
+        background: rgb(210, 210, 210);
+        border: inset rgb(189, 189, 189) 2px;
+    }
+
     input[type="range"]::-webkit-slider-thumb {
         -webkit-appearance: none;
         width: 16px;
         height: 20px;
         background: rgb(210, 210, 210);
         border: outset rgb(189, 189, 189) 3px;
-        margin-top: -6px; /* corrected */
+        transform: translateY(-10px);
     }
 
     input[type="range"]::-moz-range-thumb {
@@ -333,30 +359,13 @@
         border: outset rgb(189, 189, 189) 3px;
     }
 
-    /* Active press effect */
-    input[type="range"]:active::-webkit-slider-thumb {
-        border: inset rgb(189, 189, 189) 3px;
-    }
 
-    input[type="range"]:active::-moz-range-thumb {
-        border: inset rgb(189, 189, 189) 3px;
-    }
-
-    input[type="range"]::-webkit-slider-runnable-track {
-        background: linear-gradient(
-            to right,
-            rgb(0, 190, 0) 0%,
-            rgb(0, 190, 0) var(--progress, 0%),
-            rgb(160, 160, 160) var(--progress, 0%),
-            rgb(160, 160, 160) 100%
-        );
-    }
-
-        .music-widget {
+    .music-widget {
         position: fixed;
         bottom: 1rem;
         left: 1rem;
         background-color: rgb(173, 173, 173);
+        user-select: none;
     }
 
 	.player {
@@ -410,6 +419,7 @@
         width: 100%;
 		display: flex;
 		gap: 0.5rem;
+        align-items: center;
 	}
 
     .close-button {
