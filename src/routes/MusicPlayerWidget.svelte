@@ -27,7 +27,7 @@
     let playlist: Track[] = []
 
 	let isPlaying = false
-    let isShuffle = true
+    let isShuffle = false
     let isMuted = false
     let loopState = 1
 
@@ -86,11 +86,9 @@
     }
 
     function next() {
-        if (isShuffle) currentIndex = getRandomIndex(playlist.length)
-        else currentIndex = (currentIndex + 1) % playlist.length
+        currentIndex = (currentIndex + 1) % playlist.length
 
         loadTrack(currentIndex)
-        setPlayPause(true)
     }
 
     function previous() {
@@ -99,12 +97,37 @@
             currentIndex = (currentIndex - 1 + playlist.length) % playlist.length;
 
             loadTrack(currentIndex)
-            setPlayPause(true)
         }
     }
 
+    function shuffleArray<T>(arr: T[]) {
+        // Fisher–Yates shuffle
+        const a = arr.slice();
+        for (let i = a.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [a[i], a[j]] = [a[j], a[i]];
+        }
+        return a;
+    }
+
+    function sortAlphabetically(arr: Track[]) {
+        return arr.slice().sort((a, b) => a.name.localeCompare(b.name));
+    }
+
     function toggleShuffle() {
-        isShuffle = !isShuffle
+        isShuffle = !isShuffle;
+
+        if (isShuffle) {
+            // shuffle playlist and start from the first track
+            playlist = shuffleArray(playlist);
+        } else {
+            // restore alphabetical order
+            playlist = sortAlphabetically(playlist);
+        }
+
+        // keep currentIndex within bounds and reload
+        currentIndex = Math.min(currentIndex, playlist.length - 1);
+        loadTrack(currentIndex);
     }
 
     function toggleLoop() {
@@ -130,12 +153,6 @@
 
     function toggleCollapse() {
         $isCollapsed = !$isCollapsed
-    }
-
-    function getCookie(name: string) {
-        const value = `; ${document.cookie}`;
-        const parts = value.split(`; ${name}=`);
-        if (parts.length === 2) return parts.pop()?.split(";").shift();
     }
 
     onMount(async () => {
@@ -362,6 +379,7 @@
         left: 1rem;
         background-color: rgb(173, 173, 173);
         user-select: none;
+        z-index: 10;
     }
 
 	.player {
@@ -380,7 +398,7 @@
 
     .header {
         display: grid;
-        grid-template-columns: auto auto;
+        grid-template-columns: auto 1fr;
         gap: space-between;
         align-items: center;
     }
@@ -423,7 +441,8 @@
         width: 20px;
         height: 20px;
         line-height: 0;
-        display: flex;             
+        display: flex;       
+        justify-self: right;      
         justify-content: center;  
         align-items: center;
     }

@@ -7,6 +7,7 @@
     import { afterNavigate } from "$app/navigation";
     import { applyShakyTitles } from "$lib/shakyTitle";
     import MusicPlayerWidget from './MusicPlayerWidget.svelte';
+    import NavDock from './NavDock.svelte';
 
 	onMount(() => {
         applyShakyTitles();
@@ -25,14 +26,15 @@
 	<main>
 		<Parallax/>
 		
-		<div class="content-container fade-in">
+		<div class="content-container fade-in tinted-border">
 			{@render children()}
-			<div class="big-spacer"></div>
+			<!-- <div class="big-spacer"></div> -->
 		</div>
 
 		<div class="vignette"></div>
 
 		<MusicPlayerWidget />
+		<NavDock />
 	</main>
 
 	<footer>
