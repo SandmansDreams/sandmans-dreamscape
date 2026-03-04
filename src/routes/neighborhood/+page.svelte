@@ -124,13 +124,17 @@
         createLinks();
         
         simulate();
+        
+        window.addEventListener("resize", () => {
+            const rect = graphContainer.getBoundingClientRect();
+            width = rect.width;
+            height = rect.height;
+        });
 
         return () => {
             cancelAnimationFrame(animationId);
         };
     });
-
-
 </script>
 
 <svelte:head>
@@ -206,8 +210,7 @@
         transform: translate(50%, 50%);
     }
     .button-container:hover {
-        transition: .5s ease;
-        transform: scale(1.25);
+        transform: translate(50%, 50%) scale(1.25);
     }
     .button-container p {
         text-indent: 0rem;
