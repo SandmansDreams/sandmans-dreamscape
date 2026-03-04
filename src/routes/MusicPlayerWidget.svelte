@@ -2,15 +2,15 @@
     import { onMount } from "svelte";
     import { persisted } from "$lib/svelte/store"
 
-    import playIcon from "$lib/images/icons/Play-Icon.png"
-    import pauseIcon from "$lib/images/icons/Pause-Icon.png"
-    import nextIcon from "$lib/images/icons/Next-Icon.png"
-    import previousIcon from "$lib/images/icons/Previous-Icon.png"
-    import volumeIcon from "$lib/images/icons/Volume-Icon.png"
-    import muteIcon from "$lib/images/icons/Mute-Icon.png"
-    import shuffleIcon from "$lib/images/icons/Shuffle-Icon.png"
-    import loopIcon from "$lib/images/icons/Loop-Icon.png"
-    import loop1Icon from "$lib/images/icons/Loop-1-Icon.png"
+    import playIcon from "$lib/images/icons/music-player/Play-Icon.png"
+    import pauseIcon from "$lib/images/icons/music-player/Pause-Icon.png"
+    import nextIcon from "$lib/images/icons/music-player/Next-Icon.png"
+    import previousIcon from "$lib/images/icons/music-player/Previous-Icon.png"
+    import volumeIcon from "$lib/images/icons/music-player/Volume-Icon.png"
+    import muteIcon from "$lib/images/icons/music-player/Mute-Icon.png"
+    import shuffleIcon from "$lib/images/icons/music-player/Shuffle-Icon.png"
+    import loopIcon from "$lib/images/icons/music-player/Loop-Icon.png"
+    import loop1Icon from "$lib/images/icons/music-player/Loop-1-Icon.png"
 
     export const tracks: string[] | null = null
     let isCollapsed = persisted("player-collapsed", false)
@@ -27,7 +27,7 @@
     let playlist: Track[] = []
 
 	let isPlaying = false
-    let isShuffle = false
+    let isShuffle = true
     let isMuted = false
     let loopState = 1
 
@@ -86,9 +86,11 @@
     }
 
     function next() {
-        currentIndex = (currentIndex + 1) % playlist.length
+        if (isShuffle) currentIndex = getRandomIndex(playlist.length)
+        else currentIndex = (currentIndex + 1) % playlist.length
 
         loadTrack(currentIndex)
+        setPlayPause(true)
     }
 
     function previous() {
@@ -97,37 +99,12 @@
             currentIndex = (currentIndex - 1 + playlist.length) % playlist.length;
 
             loadTrack(currentIndex)
+            setPlayPause(true)
         }
-    }
-
-    function shuffleArray<T>(arr: T[]) {
-        // Fisher–Yates shuffle
-        const a = arr.slice();
-        for (let i = a.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [a[i], a[j]] = [a[j], a[i]];
-        }
-        return a;
-    }
-
-    function sortAlphabetically(arr: Track[]) {
-        return arr.slice().sort((a, b) => a.name.localeCompare(b.name));
     }
 
     function toggleShuffle() {
-        isShuffle = !isShuffle;
-
-        if (isShuffle) {
-            // shuffle playlist and start from the first track
-            playlist = shuffleArray(playlist);
-        } else {
-            // restore alphabetical order
-            playlist = sortAlphabetically(playlist);
-        }
-
-        // keep currentIndex within bounds and reload
-        currentIndex = Math.min(currentIndex, playlist.length - 1);
-        loadTrack(currentIndex);
+        isShuffle = !isShuffle
     }
 
     function toggleLoop() {
@@ -153,6 +130,12 @@
 
     function toggleCollapse() {
         $isCollapsed = !$isCollapsed
+    }
+
+    function getCookie(name: string) {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) return parts.pop()?.split(";").shift();
     }
 
     onMount(async () => {
@@ -379,7 +362,6 @@
         left: 1rem;
         background-color: rgb(173, 173, 173);
         user-select: none;
-        z-index: 10;
     }
 
 	.player {
@@ -398,7 +380,7 @@
 
     .header {
         display: grid;
-        grid-template-columns: auto 1fr;
+        grid-template-columns: auto auto;
         gap: space-between;
         align-items: center;
     }
@@ -441,8 +423,7 @@
         width: 20px;
         height: 20px;
         line-height: 0;
-        display: flex;       
-        justify-self: right;      
+        display: flex;             
         justify-content: center;  
         align-items: center;
     }

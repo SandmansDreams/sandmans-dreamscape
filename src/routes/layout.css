@@ -51,9 +51,10 @@ ol, ul {
 }
 
 .quote {
-    font-size: 24pt;
+    font-size: 28pt;
     text-align: center;
     justify-self: center;
+    text-indent: 0px;
     width: 100%;
     max-width: 700px;
     color: rgb(187, 187, 187);

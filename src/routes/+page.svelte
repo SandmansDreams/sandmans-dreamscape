@@ -3,36 +3,108 @@
 	import SecretText from "./SecretText.svelte";
 	
 
-	let quoteDisplay: HTMLParagraphElement
-	let quote = "Loading quote..."
+	let quote = $state({
+		quote: "Loading...",
+		attribution: "By noone",
+	})
 
-	const quoteList = [
-		"\"May your heart not lead you to devestation.\" - Sandman, 2026",
-		"\"I'd almost forgotten there were natural ways to die.\" - Sergeant Saunders, Combat",
-		"\"Truth and beauty are often at odds.\" - Seamus Heaney, Poet",
-		"\"I reject your reality, and substitute my own!\" - The Dungeonmaster",
-		"\"Awake I am not here with you, this place, where this life wasn't true, oh please I don't wanna wake up, keep me, inside this life I've dreamed.\" - Orno's song Amethyst",
-		"\"Sometimes I just want to talk and spout nonsense that sounds like eloquence.\" - Sandman",
-		"\"You may fail, but when you fail you are failing forward.\" - Stacy Chu, May 11, 2019",
-		"\"Unhappy is the land that is in need of heroes.\" - Bertolt Brecht, 1900s",
-		"\"You see, what's so scary about God isn't his control, but rather... if he ever lost it.\" - Quantum Break",
-		"\"Sometimes I feel like I was born with a leak. And any goodness I started with just slowly spilled out of me and now it's all gone and I'll never get it back in me. It's too late…\" - Bojack Horseman, Season 1 Episode 9, 2014",
-		"\"Being lazy is an insult to those who believe in you.\" - Someone important to me, 2021",
-		"\"I'm coughing because I am trying to throw up my memories.\" - A friend, 2021",
-		"\"He doesn't have any more teeth. He's lied through them so much they've all withered away.\" - A friend, 2021",
-		"\"I'll hold a gun to your head until you're happy.\" - Sandman, 10:43pm May 25th, 2022",
-		"\"If you can't fight the fear, do it scared.\" - ChasingAlniliam on Reddit, 2022",
-		"\"Has the rot inside your soul spread so far you cannot find value in anything not spoken in numbers?\" - almostsweetangel on Tumblr",
-		"\"Don't bite the hand that feeds you but lick the finger.\" - Sandman",
-		"\"You can't plan magic, but you can certainly make sure you have a bunch of magicians in a room.\" - Arcane Writer Christian, Sundance Interview 2023",
-		"\"There are some diseases that can't be cured.\" - Sandman's Partner",
-		"\"The opposite of crazy is still crazy.\" - No More Mr. Nice Guy",
-		"\"People with real problems don't need to invent monsters to be afraid of.\" - Sandman's Partner, 2025-01-01 10:22",
-		"\"You are dust, and to dust you shall return.\" - God, Genesis 3:19",
+	type Quote = {
+		quote: string,
+		attribution: string,
+	}
+
+	const quoteList: Quote[] = [
+		{ 
+			quote: "May your heart not lead you to devestation.", 
+			attribution: "Sandman, 2026" 
+		},
+		{ 
+			quote: "I'd almost forgotten there were natural ways to die.", 
+			attribution: "Sergeant Saunders, Combat" 
+		},
+		{ 
+			quote: "Truth and beauty are often at odds.", 
+			attribution: "Seamus Heaney, Poet" 
+		},
+		{ 
+			quote: "I reject your reality, and substitute my own!", 
+			attribution: "SAO Abridged Season 1 Finale, but originally The Dungeonmaster" 
+		},
+		{ 
+			quote: "Awake I am not here with you, this place, where this life wasn't true, oh please I don't wanna wake up, keep me, inside this life I've dreamed.", 
+			attribution: "Orno's song Amethyst" 
+		},
+		{ 
+			quote: "Sometimes I just want to talk and spout nonsense that sounds like eloquence.", 
+			attribution: "Sandman" 
+		},
+		{ 
+			quote: "You may fail, but when you fail you are failing forward.", 
+			attribution: "Stacy Chu, May 11, 2019" 
+		},
+		{ 
+			quote: "Unhappy is the land that is in need of heroes.", 
+			attribution: "Bertolt Brecht, 1900s" 
+		},
+		{ 
+			quote: "You see, what's so scary about God isn't his control, but rather... if he ever lost it.", 
+			attribution: "Quantum Break" 
+		},
+		{ 
+			quote: "Sometimes I feel like I was born with a leak. And any goodness I started with just slowly spilled out of me and now it's all gone and I'll never get it back in me. It's too late…", 
+			attribution: "Bojack Horseman, Season 1 Episode 9, 2014" 
+		},
+		{ 
+			quote: "Being lazy is an insult to those who believe in you.", 
+			attribution: "Someone important to me, 2021" 
+		},
+		{ 
+			quote: "I'm coughing because I am trying to throw up my memories.", 
+			attribution: "A friend, 2021" 
+		},
+		{ 
+			quote: "He doesn't have any more teeth. He's lied through them so much they've all withered away.", 
+			attribution: "A friend, 2021" 
+		},
+		{ 
+			quote: "I'll hold a gun to your head until you're happy.", 
+			attribution: "Sandman, 10:43pm May 25th, 2022" 
+		},
+		{ 
+			quote: "If you can't fight the fear, do it scared.", 
+			attribution: "ChasingAlniliam on Reddit, 2022" 
+		},
+		{ 
+			quote: "Has the rot inside your soul spread so far you cannot find value in anything not spoken in numbers?", 
+			attribution: "almostsweetangel on Tumblr" 
+		},
+		{ 
+			quote: "Don't bite the hand that feeds you but lick the finger.", 
+			attribution: "Sandman" 
+		},
+		{ 
+			quote: "You can't plan magic, but you can certainly make sure you have a bunch of magicians in a room.", 
+			attribution: "Arcane Writer Christian, Sundance Interview 2023" 
+		},
+		{ 
+			quote: "There are some diseases that can't be cured.", 
+			attribution: "Sandman's Partner"
+		},
+		{ 
+			quote: "The opposite of crazy is still crazy.", 
+			attribution: "No More Mr. Nice Guy" 
+		},
+		{ 
+			quote: "People with real problems don't need to invent monsters to be afraid of.", 
+			attribution: "Sandman's Partner, 2025-01-01 10:22" 
+		},
+		{ 
+			quote: "You are dust, and to dust you shall return.", 
+			attribution: "God, Genesis 3:19" 
+		},
 	]
 
 	onMount(() => {
-		if (!quoteDisplay) return
 		const randomIndex = Math.floor(Math.random() * quoteList.length)
 		quote = quoteList[randomIndex]
 	})
@@ -40,7 +112,10 @@
 
 <section class="content-container tinted-border">
 	<h1>Welcome to Sandman's Dreamscape</h1>
-	<p class="quote" bind:this={quoteDisplay}>{quote}</p>
+	<div>
+		<p class="quote" style="margin-bottom: 0;">"{quote.quote}"</p>
+		<p class="quote" style="margin-top: 0;">-{quote.attribution}</p>
+	</div>
 
 	<p>Hello and welcome! My name is Gabriel the Angel, but you can call me Gabe or Sandman. I am a sort of "Jack-of-all-trades", doing coding, writing, art, music, etc. My main focuses right now is on music and coding. I can't wait to share all the stuff I am working on with you!</p>
 	<p>This site will (eventually) contain a lot of things:</p>
