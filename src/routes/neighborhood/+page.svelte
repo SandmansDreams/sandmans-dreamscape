@@ -1,66 +1,67 @@
 <script lang="ts">
     import { onMount } from "svelte";
 
-    type Button = {
-        id: string
-        name: string
-        url: string
-        src: string
-    }
+    import type { Button, Node, Link } from "./Simulation.helpers";
+    import { getRandomCenterPoint } from "./Simulation.helpers";
+    import { drawLinks } from "./Simulation.drawing";
+    import { applyAllForces } from "./Simulation.physics";
+    import type { PhysicsConfig } from "./Simulation.physics";
 
-    type Node = Button & {
-        x: number;
-        y: number;
-        vx: number;
-        vy: number;
-        radius: number;
-    }
-
-    type Link = {
-        from: string,
-        to: string
+    const config: PhysicsConfig = {
+        repulsionForce: 5000,
+        springLength: 225,
+        springStrength: 0.003,
+        dampener: 0.9,
+        centeringForce: 0.0001,
     }
 
     const buttons: Button[] = [
         {id: "0", name: "Sandaman", url:"https://sandmans-dreamscape.vercel.app/neighborhood", src:"https://sandmans-dreamscape.vercel.app/thebutton.gif"},
         {id: "1", name: "Onio", url: "https://onio.neocities.org", src: "https://onio.neocities.org/thebutton.gif"},
         {id: "2", name: "Kuroi", url: "https://kuroi.neocities.org/", src: "https://kuroi.com.br/img/button1.png"},
-        {id: "3", name: "Kick", url: "https://kickalt.com/", src: ""},
+        {id: "3", name: "Kick", url: "https://kickalt.com/", src: "https://kickalt.neocities.org/neighborbutton.gif"},
+        {id: "4", name: "Kazmirl", url: "https://dwarvenmeadhall.neocities.org/", src: "https://dwarvenmeadhall.neocities.org/button.gif"},
     ]
 
     const sharedLinks = [
-        ["1", "2"], // Onio and Kuroi
+        ["3", "0"], // Kick to Sandman
+        ["1", "2"], // Onio to Kuroi
+        ["2", "1"], // Kuroi to Onio
+        ["3", "4"], // Kick to Kazmirl
+        ["4", "3"], // Kazmirl to Kick
     ]
 
-    let graphContainer: HTMLDivElement
-    let svgLinks: SVGSVGElement
-    let width = 0
-    let height = 0
+    let graphContainer: HTMLDivElement;
+    let canvasLinks: HTMLCanvasElement;
+    let width = 0;
+    let height = 0;
 
-    let nodes: Node[] = [];
-    let links: Link[] = [];
+    let nodes: Map<string, Node> = new Map();
+    let links: Map<string, Link> = new Map();
     let animationId: number;
+    
+    function affixCenterNode() {
+        const centerNode = nodes.get("0");
+        if (!centerNode) return;
+        const centreX = (width / 2) - (centerNode.radius / 2);
+        const centreY = (height / 2) - (centerNode.radius / 2);
 
-    function getNodeById(id: string): Node | undefined {
-        return nodes.find(n => n.id === id);
+        centerNode.x = centreX;
+        centerNode.y = centreY;
+        centerNode.vx = 0;
+        centerNode.vy = 0;
     }
 
     function updateDOM() {
         // Update links
-        const pathData = links
-            .map(l => {
-                const a = getNodeById(l.from)
-                const b = getNodeById(l.to)
-                if (!a || !b) return "";
-                return `M ${a.x} ${a.y} L ${b.x} ${b.y}`;
-            })
-            .join(" ");
-        
-        const path = svgLinks.querySelector("path");
-        if (path) path.setAttribute("d", pathData);
+        const ctx = canvasLinks.getContext("2d");
+        if (ctx) {
+            ctx.clearRect(0, 0, width, height);
+            drawLinks(links, ctx, 40);
+        }
 
-        // Update nodes
-        nodes.forEach(n => {
+        // Update nodes (absolutely position DOM elements)
+        nodes.forEach((n) => {
             const el = document.getElementById(n.id);
             if (el) {
                 el.style.left = `${n.x - n.radius}px`;
@@ -70,137 +71,64 @@
     }
 
     function simulate() {
-        const repulsion = -200
-        const linkLength = 150
-        const damping = 0.9
-        const orbitalForce = 0.005
-
-        // Repulsion
-        for (let i = 0; i < nodes.length; i++) {
-            for (let j = i + 1; j < nodes.length; j++) {
-                const a = nodes[i]
-                const b = nodes[j]
-
-                const dx = b.x - a.x
-                const dy = b.y - a.y
-                const dist = Math.sqrt(dx * dx + dy * dy) || 1
-
-                const force = repulsion / (dist * dist)
-                const fx = (force * dx) / dist
-                const fy = (force * dy) / dist
-
-                a.vx += fx;
-                a.vy += fy;
-                b.vx -= fx;
-                b.vy -= fy;
-            }
-        }
-
-        // Attraction
-        links.forEach(l => {
-            const from = getNodeById(l.from)
-            const to = getNodeById(l.to)
-            if (!from || !to) return
-
-            const dx = to.x - from.x
-            const dy = to.y - from.y
-            const dist = Math.sqrt(dx * dx + dy * dy) || 1
-
-            const diff = dist - linkLength
-
-            const force = diff * 0.1
-            const fx = (force * dx) / dist
-            const fy = (force * dy) / dist
-
-            from.vx += fx
-            from.vy += fy
-            to.vx -= fx
-            to.vy -= fy
-        })
-
-        // Centering
-        const centreX = width / 2
-        const centreY = height / 2
-
-        nodes.forEach(n => {
-            const dx = centreX - n.x
-            const dy = centreY - n.y
-            n.vx += dx * 0.01
-            n.vy += dy * 0.01
-            
-            // Add orbital spin (tangential velocity)
-            if (n.id !== "0") {
-                const distance = Math.sqrt(dx * dx + dy * dy) || 1
-                const tangentX = -dy / distance
-                const tangentY = dx / distance
-                n.vx += tangentX * orbitalForce
-                n.vy += tangentY * orbitalForce
-            }
-        })
-
-        // Update positions
-        nodes.forEach(n => {
-            const node = n as any;
-            if (node.fx == null) {
-                n.x += n.vx
-                n.vx *= damping
-            }
-            if (node.fy == null) {
-                n.y += n.vy
-                n.vy *= damping
-            }
-
-            // Constrain to bounds
-            const radius = n.radius;
-            n.x = Math.max(radius, Math.min(width - radius, n.x));
-            n.y = Math.max(radius, Math.min(height - radius, n.y));
-        });
-
-        updateDOM()
-        animationId = requestAnimationFrame(simulate)
+        applyAllForces(nodes, links, config, width, height);
+        affixCenterNode()
+        updateDOM();
+        animationId = requestAnimationFrame(simulate);
     }
 
-    onMount (() => {
-        if (!graphContainer) return
+    function createNodes() {
+        nodes = new Map();
+        buttons.forEach(b => {
+            nodes.set(b.id, {
+                ...b,
+                x: getRandomCenterPoint(canvasLinks).x,
+                y: getRandomCenterPoint(canvasLinks).y,
+                vx: 0,
+                vy: 0,
+                radius: 110,
+            });
+        });
+    }
+    
+    function createLinks() {
+        // Create Link objects and store in Map with IDs as L_from_to
+        links = new Map();
+        sharedLinks.forEach(([a, b]) => {
+            const from = nodes.get(a);
+            const to = nodes.get(b);
+            if (from && to) {
+                links.set(`L_${a}_${b}`, { id: `L_${a}_${b}`, from, to });
+            }
+        });
+        // add links to center
+        buttons.forEach(b => {
+            if (b.id !== "0") {
+                const from = nodes.get("0");
+                const to = nodes.get(b.id);
+                if (from && to) {
+                    links.set(`L_0_${to.id}`, { id: `L_0_${to.id}`, from, to });
+                }
+            }
+        });
+    }
+
+    onMount(() => {
+        if (!graphContainer) return;
 
         const rect = graphContainer.getBoundingClientRect();
         width = rect.width;
         height = rect.height;
 
-        nodes = buttons.map(b => ({
-            ...b,
-            x: Math.random() * width,
-            y: Math.random() * height,
-            vx: 0,
-            vy: 0,
-            radius: 40,
-        }));
-
-        links = sharedLinks.map(([a, b]) => ({ from: a, to: b }));
-        // add links to center
-        buttons.forEach(b => {
-            if (b.id !== "0") {
-                links.push({ from: b.id, to: "0" });
-            }
-        });
-
-        // fix center node
-        const centreX = width / 2;
-        const centreY = height / 2;
-        const centerNode = nodes.find(n => n.id === "0") as any;
-        if (centerNode) {
-            centerNode.x = centreX;
-            centerNode.y = centreY;
-            centerNode.fx = centreX;
-            centerNode.fy = centreY;
-        }
-
+        createNodes();
+        createLinks();
+        
         simulate();
 
         return () => {
             cancelAnimationFrame(animationId);
         };
-    })
+    });
 
 
 </script>
@@ -211,14 +139,12 @@
 </svelte:head>
 
 <section>
-	<h1 style="margin: 0">Check Out My Neighbors</h1>
+    <h1 style="margin: 0">Check Out My Neighbors</h1>
     <h2 style="margin: 0">(Other sites I like)</h2>
 
     <div class="graph" bind:this={graphContainer}>
-        <svg bind:this={svgLinks} class="graph-links fade-in-long" {width} {height}>
-            <path stroke="#000" stroke-width="2" fill="none" />
-        </svg>
-        {#each nodes as node}
+        <canvas bind:this={canvasLinks} class="graph-links" width={width} height={height}></canvas>
+        {#each Array.from(nodes.values()) as node}
             <span class="button-container" id={node.id}> 
                 <a href={node.url} target="_blank">
                     {#if node.src !== ""}
@@ -250,7 +176,6 @@
         justify-items: center;
         align-items: center;
     }
-
     .button-code textarea {
         min-height: 100px;
         min-width: 200px;
@@ -267,52 +192,42 @@
 
     .button-container {
         position: absolute;
-        min-width: 100px;
-        min-height: 70px;
-        width: fit-content;
-        height: fit-content;
+        min-width: 110px;
+        min-height: 110px;
         transform-origin: center;
-        /* background-color: rgba(0,0,0,0.25); */
-        background-color: rgb(91, 91, 91);
+        background-color: rgba(0,0,0,1);
         padding: .25rem;
-        border-radius: 1rem;
+        border-radius: 100%;
         justify-content: center;
         align-content: center;
         justify-items: center;
         align-items: center;
         text-align: center;
-        transition: .5s ease;
+        transform: translate(50%, 50%);
     }
-
     .button-container:hover {
         transition: .5s ease;
         transform: scale(1.25);
-        
     }
-
     .button-container p {
         text-indent: 0rem;
         text-align: center;
         line-height: 12pt;
         font-size: 14pt;
     }
-
     .graph {
         position: relative;
         width: 110%;
         height: 70vh;
     }
-
     .graph a {
         color: white;
         width: 88;
         min-height: 31;
     }
-
     .graph p {
         margin: 0;
     }
-
     .graph-links {
         position: absolute;
         top: 0;
@@ -321,13 +236,10 @@
         height: 100%;
         pointer-events: none;
     }
-
     .placeholder {
         width: 88px;
         height: 31px;
         background-color: black;
         color: white;
     }
-
-
 </style>

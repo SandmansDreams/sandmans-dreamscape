@@ -99,14 +99,10 @@
         if (autoScroll) {
             // Remove scroll event if present
             window.removeEventListener("scroll", handleScroll);
-            autoOffset = window.scrollY;
-            lastTimestamp = 0;
             startAuto();
         } else {
             stopAuto();
             lastTimestamp = 0;
-            autoOffset = window.scrollY;
-            updateLayers(window.scrollY);
             // Add scroll event if not present
             window.addEventListener("scroll", handleScroll, { passive: true });
         }
