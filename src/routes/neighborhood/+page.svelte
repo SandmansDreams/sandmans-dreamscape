@@ -1,5 +1,7 @@
 <script lang="ts">
-    import { onMount } from "svelte";
+    import { onMount, tick } from "svelte";
+
+    let simpleMode = false;
 
     import type { Button, Node, Link } from "./Simulation.helpers";
     import { getRandomCenterPoint } from "./Simulation.helpers";
@@ -113,7 +115,7 @@
         });
     }
 
-    onMount(() => {
+    function startGraph() {
         if (!graphContainer) return;
 
         const rect = graphContainer.getBoundingClientRect();
@@ -134,6 +136,42 @@
         return () => {
             cancelAnimationFrame(animationId);
         };
+    }
+
+
+    async function resetGraph() {
+        // Cancel any running animation
+        cancelAnimationFrame(animationId);
+        // Wait for DOM to update so refs are bound
+        await tick();
+        // Set canvas size to current container size
+        if (graphContainer && canvasLinks) {
+            const rect = graphContainer.getBoundingClientRect();
+            width = rect.width;
+            height = rect.height;
+            canvasLinks.width = width;
+            canvasLinks.height = height;
+        }
+        // Recreate nodes and links
+        createNodes();
+        createLinks();
+        // Update DOM once to avoid flicker
+        updateDOM();
+    }
+
+    async function toggleMode() {
+        simpleMode = !simpleMode;
+        if (!simpleMode) {
+            await resetGraph();
+            simulate();
+        } else {
+            cancelAnimationFrame(animationId);
+        }
+    }
+
+    onMount(async () => {
+        await resetGraph();
+        simulate();
     });
 </script>
 
@@ -146,10 +184,13 @@
     <h1 style="margin: 0">Check Out My Neighbors</h1>
     <h2 style="margin: 0">(Other sites I like)</h2>
 
-    <div class="graph" bind:this={graphContainer}>
-        <canvas bind:this={canvasLinks} class="graph-links" width={width} height={height}></canvas>
-        {#each Array.from(nodes.values()) as node}
-            <span class="button-container" id={node.id}> 
+    <div class="center-btn">
+        <button class="simple-button" on:click={toggleMode}>{simpleMode ? "Graph Mode" : "Simple Mode"}</button>
+    </div>
+
+    {#if simpleMode}
+        <div class="neighborhood">
+            {#each Array.from(nodes.values()) as node}
                 <a href={node.url} target="_blank">
                     {#if node.src !== ""}
                         <img src={node.src} alt={node.name} width="88" height="31" style="background-color: grey;">
@@ -158,9 +199,25 @@
                     {/if}
                     <p class="node-label">{node.name}</p>
                 </a>
-            </span>
-        {/each}
-    </div>
+            {/each}
+        </div>
+    {:else}
+        <div class="graph" bind:this={graphContainer}>
+            <canvas bind:this={canvasLinks} class="graph-links" width={width} height={height}></canvas>
+            {#each Array.from(nodes.values()) as node}
+                <span class="button-container" id={node.id}> 
+                    <a href={node.url} target="_blank">
+                        {#if node.src !== ""}
+                            <img src={node.src} alt={node.name} width="88" height="31" style="background-color: grey;">
+                        {:else}
+                            <span class="placeholder">img broke...</span>
+                        {/if}
+                        <p class="node-label">{node.name}</p>
+                    </a>
+                </span>
+            {/each}
+        </div>
+    {/if}
 
     <h2>Or put my button on your site:</h2>
     <div class="button-code tinted-small-border">
@@ -171,9 +228,32 @@
 </section>
 
 <style>
+    .simple-button {
+        margin: 0;
+        padding: .5rem 1rem;
+        border: none;
+        border-radius: .5rem;
+        background-color: rgba(0,0,0,0.25);
+        color: white;
+        font-size: 1rem;
+        cursor: pointer;
+        font-family: inherit;
+        user-select: none;
+    }
+    .simple-button:hover {
+        background-color: rgba(0,0,0,0.5);
+    }
+
+    .center-btn {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        width: 100%;
+        margin: 1.5rem 0;
+    }
     .button-code {
         display: grid;
-        grid-template-columns: 1fr 2fr;
+        grid-template-columns: 1fr 1fr;
         justify-self: center;
         width: 80%;
         height: fit-content;
@@ -244,5 +324,44 @@
         height: 31px;
         background-color: black;
         color: white;
+    }
+
+    .inset {
+        background-color: rgba(0,0,0,0.25);
+        border-radius: 1rem;
+        box-shadow: 0 0 5px rgba(0, 0, 0, 0.5) inset;
+        padding: 1rem;
+    }
+
+    .neighborhood {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 1rem;
+    }
+    .neighborhood a {
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 150px;
+        align-items: center;
+        gap: .5rem;
+        background-color: rgba(255, 255, 255, 0.1);
+        padding: 1rem;
+        justify-items: center;
+        align-items: center;
+        border-radius: 1rem;
+        width: fit-content;
+        height: fit-content;
+    }
+    .neighborhood a:hover {
+         background-color: rgba(255, 255, 255, 0.2);
+    }
+    .neighborhood p {
+        margin: 0;
+        width: 100%;
+        text-align: center;
+        text-indent: 0px;
+        color: rgb(0, 195, 255);
     }
 </style>
