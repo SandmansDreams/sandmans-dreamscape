@@ -8,13 +8,13 @@
 <SlideRevealPanel label="Navigation" side="bottom">
     <nav class="nav-base crt">
         <div class="flex-row"> 
-            <a href="/" class="nav-item">Homepage</a>
-            <a href="/about" class="nav-item"><SecretText text="About (WIP)"/></a>
-            <a href="/neighborhood" class="nav-item">Neighbors</a>
-            <a href="/guestbook" class="nav-item"><SecretText text="Guestbook (WIP)"/></a>
-            <a href="/projects" class="nav-item"><SecretText text="Projects (WIP)"/></a>
-            <a href="/tools" class="nav-item"><SecretText text="Tools (WIP)"/></a>
-            <a href="/articles" class="nav-item"><SecretText text="Articles (WIP)"/></a>
+            <a href="/" class="nav-item" data-sveltekit-noscroll>Homepage</a>
+            <a href="/about" class="nav-item" data-sveltekit-noscroll>About (WIP)</a>
+            <a href="/neighborhood" class="nav-item" data-sveltekit-noscroll>Neighbors</a>
+            <a href="/guestbook" class="nav-item" data-sveltekit-noscroll><SecretText text="Guestbook (WIP)"/></a>
+            <a href="/projects" class="nav-item" data-sveltekit-noscroll><SecretText text="Projects (WIP)"/></a>
+            <a href="/tools" class="nav-item" data-sveltekit-noscroll><SecretText text="Tools (WIP)"/></a>
+            <a href="/articles" class="nav-item" data-sveltekit-noscroll><SecretText text="Articles (WIP)"/></a>
         </div>
     </nav>
 </SlideRevealPanel>

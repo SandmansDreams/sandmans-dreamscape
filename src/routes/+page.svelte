@@ -38,7 +38,7 @@
 	})
 </script>
 
-<section>
+<section class="content-container tinted-border">
 	<h1>Welcome to Sandman's Dreamscape</h1>
 	<p class="quote" bind:this={quoteDisplay}>{quote}</p>
 

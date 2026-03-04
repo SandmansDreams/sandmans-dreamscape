@@ -5,7 +5,7 @@
 	import { onMount } from "svelte";
 	import { fly } from "svelte/transition";
 	import { cubicIn, cubicOut } from 'svelte/easing';
-    import { afterNavigate } from "$app/navigation";
+    import { afterNavigate, beforeNavigate } from "$app/navigation";
 	
     import { applyShakyTitles } from "$lib/shakyTitle";
     import Parallax from './Parallax.svelte';
@@ -13,8 +13,36 @@
     import NavDock from './NavDock.svelte';
 	import SlideRevealPanel from '$lib/svelte/SlideRevealPanel.svelte';
 
+	beforeNavigate(() => {
+		// Smooth scroll to top on navigation
+		// Works for now, but 
+		if (typeof window !== 'undefined') {
+			const scrollDuration = 1000;
+			const startY = window.scrollY;
+			const startTime = performance.now();
+			
+			function animateScroll(now: number) {
+				const elapsed = now - startTime;
+				const progress = Math.min(elapsed / scrollDuration, 1);
+				// Ease in-out cubic
+				const ease = progress < 0.5
+					? 4 * progress * progress * progress
+					: 1 - Math.pow(-2 * progress + 2, 3) / 2;
+				window.scrollTo(0, startY * (1 - ease));
+				if (progress < 1) {
+					requestAnimationFrame(animateScroll);
+				}
+			}
+
+			if (startY > 0) {
+				requestAnimationFrame(animateScroll);
+			}
+		}
+	});
+
 	onMount(() => {
 		applyShakyTitles();
+
 
 		afterNavigate(() => {
 			applyShakyTitles();
@@ -36,7 +64,6 @@
 	   	{#if showUI}
 			{#key data.pathname}
 				<div 
-					class="content-container tinted-border ease-in"
 					in:fly={{ duration: 1500, y: 50, easing: cubicOut, delay: 500 }}
 					out:fly={{ duration: 500, y: -50, easing: cubicIn }}
 				>
@@ -58,7 +85,7 @@
 					</label>
 	
 					<label>
-						Speed: <input type="range" min="-50" max="50" step="0.5" bind:value={parallaxSpeed} style="vertical-align: middle; width: 120px;">
+						Speed: <input type="range" min="-50" max="50" step="0.5" bind:value={parallaxSpeed}>
 						<span>{parallaxSpeed}</span>
 					</label>
 				</div>
@@ -66,6 +93,8 @@
 
 			<MusicPlayerWidget />
 			<NavDock />
+
+			<!-- <div class="big-spacer"></div> -->
 		{:else}
 			<div class="big-spacer"></div>
 
@@ -81,11 +110,13 @@
 				</label>
 
 				<label>
-					Speed: <input type="range" min="-50" max="50" step="0.5" bind:value={parallaxSpeed} style="vertical-align: middle; width: 120px;">
+					Speed: <input type="range" min="-50" max="50" step="0.5" bind:value={parallaxSpeed}>
 					<span>{parallaxSpeed}</span>
 				</label>
 			</div>
 		{/if}
+
+		<div class="vignette"></div>
    	</main>
 </div>
 
@@ -118,13 +149,19 @@
 		flex-direction: column;
 		gap: 0.5rem;
 		background-color: rgba(0,0,0,0.75);
+		margin: 0 auto;
+		min-width: 300px;
 	}
 
-	.parallax-controller label {
+	label {
 		display: grid;
-		grid-template-columns: 1fr 3fr 1fr;
-		justify-content: center;
+		grid-template-columns: 2fr 3fr 1fr;
+		justify-items: center;
 		align-items: center;
 		text-align: center;
+	}
+
+	input[type="range"] {
+		width: 100%;
 	}
 </style>

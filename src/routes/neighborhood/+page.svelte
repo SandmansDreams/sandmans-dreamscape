@@ -220,28 +220,34 @@
     {/if}
 
     <h2>Or put my button on your site:</h2>
-    <div class="button-code tinted-small-border">
-        <a href="https://sandmans-dreamscape.vercel.app/" title="Check out the Dreamscape"><img src="https://sandmans-dreamscape.vercel.app/thebutton.gif" alt="The land of your dreams" width="176" height="62"></a>
-        <textarea class="button-code"><a href="https://sandmans-dreamscape.vercel.app/" title="Check out the Dreamscape"><img src="https://sandmans-dreamscape.vercel.app/thebutton.gif" alt="The land of your dreams" width="88" height="31"></a></textarea>	
+    <div class="button-code inset">
+        <a href="https://gabrieltangel.neocities.org" title="Check out the Dreamscape"><img src="https://sandmans-dreamscape.vercel.app/thebutton.gif" alt="The land of your dreams" width="176" height="62"></a>
+        <textarea class="button-code"><a href="https://gabrieltangel.neocities.org" title="Check out the Dreamscape"><img src="https://sandmans-dreamscape.vercel.app/thebutton.gif" alt="The land of your dreams" width="88" height="31"></a></textarea>	
     </div>
-
 </section>
 
 <style>
+    section {
+        max-width: 80vw;
+        margin: 0 auto;
+    }
+
     .simple-button {
         margin: 0;
         padding: .5rem 1rem;
         border: none;
         border-radius: .5rem;
-        background-color: rgba(0,0,0,0.25);
+        background-color: rgba(0,0,0,0.3);
         color: white;
         font-size: 1rem;
         cursor: pointer;
         font-family: inherit;
         user-select: none;
+        transition: .25s ease;
     }
     .simple-button:hover {
-        background-color: rgba(0,0,0,0.5);
+        background-color: rgba(0,0,0,0.7);
+        transition: .25s ease;
     }
 
     .center-btn {
@@ -253,12 +259,15 @@
     }
     .button-code {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: 1fr 2fr;
         justify-self: center;
-        width: 80%;
+        width: 100%;
         height: fit-content;
         justify-items: center;
         align-items: center;
+        background-color: rgba(0,0,0,0.25);
+        border-radius: 1rem;
+        padding: 1rem;
     }
     .button-code textarea {
         min-height: 100px;
@@ -272,6 +281,11 @@
         border: none;
         padding: 10px;
         color: white;
+        justify-self: right;
+    }
+
+    .button-container img, a {
+        justify-self: center;
     }
 
     .button-container {
@@ -300,7 +314,7 @@
     }
     .graph {
         position: relative;
-        width: 110%;
+        width: 100%;
         height: 70vh;
     }
     .graph a {
@@ -326,19 +340,14 @@
         color: white;
     }
 
-    .inset {
-        background-color: rgba(0,0,0,0.25);
-        border-radius: 1rem;
-        box-shadow: 0 0 5px rgba(0, 0, 0, 0.5) inset;
-        padding: 1rem;
-    }
-
     .neighborhood {
         display: flex;
         flex-direction: row;
         flex-wrap: wrap;
         justify-content: center;
         gap: 1rem;
+        max-width: 80vw;
+        margin: 0 auto;
     }
     .neighborhood a {
         display: flex;
@@ -346,16 +355,18 @@
         flex: 1 1 150px;
         align-items: center;
         gap: .5rem;
-        background-color: rgba(255, 255, 255, 0.1);
+        background-color: rgba(0, 0, 0, 0.3);
         padding: 1rem;
         justify-items: center;
         align-items: center;
         border-radius: 1rem;
         width: fit-content;
         height: fit-content;
+        transition: .25s ease;
     }
     .neighborhood a:hover {
-         background-color: rgba(255, 255, 255, 0.2);
+         background-color: rgba(0, 0, 0, 0.7);
+         transition: .25s ease;
     }
     .neighborhood p {
         margin: 0;
