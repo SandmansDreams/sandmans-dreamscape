@@ -3,6 +3,13 @@
 	<meta name="description" content="About the dreamscape" />
 </svelte:head>
 
+<script>
+	import twitchIcon from "$lib/images/icons/twitch.svg";
+	import youtubeIcon from "$lib/images/icons/youtube.svg";
+	import soundcloudIcon from "$lib/images/icons/soundcloud.png";
+	import githubIcon from "$lib/images/icons/github.svg";
+</script>
+
 <section class="content-container tinted-border"> 
 	<h1>About the Dreamscape</h1>
 	<p>The dreamscape is a place for creativity, learning, exploration, and self-expression. I made it for me and for you. It's purpose is to inspire creativity and help you guys out with anything I have to offer. There will eventually be some tools and code for you guys to reference off of. If there is anything I have that you want to know how to make, let me know and I'll see about posting it!</p>
@@ -39,22 +46,22 @@
 
 <div class="links-table">
 	<a class="link-row" href="https://www.youtube.com/@gabrieltangel" target="_blank" rel="noopener" title="Youtube">
-		<img src="/src/lib/images/icons/youtube.svg" alt="Youtube" class="icon"/>
+		<img src={youtubeIcon} alt="Youtube" class="icon"/>
 		<span class="display-name">Gabriel The Angel</span>
 		<p>I do Minecraft stuff and the occasional Rocket League montage. Might make it more of a general channel.</p>
 	</a>
 	<a class="link-row" href="https://www.twitch.tv/gabrieltangel" target="_blank" rel="noopener" title="Twitch">
-		<img src="/src/lib/images/icons/twitch.svg" alt="Twitch" class="icon" />
+		<img src={twitchIcon} alt="Twitch" class="icon" />
 		<span class="display-name">GabrielTAngel</span>
 		<p>I don't really stream often, but I do sometimes and plan to do it more. Mostly music production streams.</p>
 	</a>
 	<a class="link-row" href="https://soundcloud.com/mpatheticproducer" target="_blank" rel="noopener" title="Soundcloud">
-		<img src="/src/lib/images/icons/soundcloud.png" alt="Soundcloud" class="icon soundcloud-icon" />
+		<img src={soundcloudIcon} alt="Soundcloud" class="icon soundcloud-icon" />
 		<span class="display-name">Mpathetic</span>
 		<p>I don't posty my music really but I am working on it. The good stuff is on this site, but theres some other stuff on here as well.</p>
 	</a>
 	<a class="link-row" href="https://github.com/SandmansDreams" target="_blank" rel="noopener" title="Github">
-		<img src="/src/lib/images/icons/github.svg" alt="Github" class="icon" />
+		<img src={githubIcon} alt="Github" class="icon" />
 		<span class="display-name">Sandman</span>
 		<p>I just be making stuff with code on occasion. Some little project in here but the major ones are private repos.</p>
 	</a>

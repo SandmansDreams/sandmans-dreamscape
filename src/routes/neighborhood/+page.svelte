@@ -363,6 +363,8 @@
         width: fit-content;
         height: fit-content;
         transition: .25s ease;
+        color: white;
+        text-decoration: none;
     }
     .neighborhood a:hover {
          background-color: rgba(0, 0, 0, 0.7);
@@ -373,6 +375,5 @@
         width: 100%;
         text-align: center;
         text-indent: 0px;
-        color: rgb(0, 195, 255);
     }
 </style>
