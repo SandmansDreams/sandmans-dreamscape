@@ -16,10 +16,6 @@ body {
     
 }
 
-main {
-	
-}
-
 button {
     padding: 0.5rem 1rem;
     font-size: 1rem;
@@ -57,7 +53,9 @@ ol, ul {
 .quote {
     font-size: 24pt;
     text-align: center;
+    justify-self: center;
     width: 100%;
+    max-width: 700px;
     color: rgb(187, 187, 187);
     text-shadow: rgb(99, 99, 99) 3px 3px 1px;
 }
@@ -86,6 +84,7 @@ ol, ul {
     height: 100%;
     min-height: 100vh;
     justify-self: center;
+    margin-bottom: 5vh;
 }
 
 .tinted-border {
@@ -142,9 +141,29 @@ ol, ul {
     }
 }
 
+.fade-out-fast {
+    opacity: 1;
+    transform: translateY(0px);
+    animation: fadeOut .5s ease forwards;
+}
+
+@keyframes fadeOut {
+    to {
+        opacity: 0;
+        transform: translateY(50px);
+    }
+}
+
+@keyframes fadeIn {
+    to {
+        opacity: 1;
+        transform: translateY(0px);
+    }
+}
+
 .fade-in-long {
     opacity: 0;
-    animation: fadeInLong 5s ease forwards;
+    animation: fadeInLong 10s ease forwards;
 }
 
 @keyframes fadeInLong {
@@ -157,4 +176,40 @@ ol, ul {
 	position: fixed;
 	left: 0;
 	bottom: 0;
+}
+
+/* From _listless on r/webdev */
+.crt { 
+    text-shadow: 0 0 10px currentColor, 1px 1px rgba(255, 0, 255, 0.5), -1px -1px rgba(0, 255, 255, 0.4);
+    position: relative;
+
+    &:before,
+    &:after {
+        content: "";
+        transform: translateZ(0);
+        pointer-events: none;
+        opacity: 0.5;
+        mix-blend-mode: overlay;
+        position: absolute;
+        height: 100%;
+        width: 100%;
+        left: 0;
+        top: 0;
+        z-index: 1;
+    }
+    &:before {
+        background: repeating-linear-gradient(
+            rgb(218, 49, 49) 0px,
+            rgb(112, 159, 115) 2px,
+            rgb(49, 49, 218) 4px
+        );
+    }
+    &:after {
+        background: repeating-linear-gradient(
+        90deg,
+            rgb(218, 49, 49) 1px,
+            rgb(112, 159, 115) 2px,
+            rgb(49, 49, 218) 3px
+        );
+    }
 }

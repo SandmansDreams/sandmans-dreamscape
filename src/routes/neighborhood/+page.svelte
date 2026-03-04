@@ -22,7 +22,7 @@
     }
 
     const buttons: Button[] = [
-        {id: "0", name: "Sandaman", url:"https://sandmans-dreamscape.vercel.app/neigborhood", src:"https://sandmans-dreamscape.vercel.app/thebutton.gif"},
+        {id: "0", name: "Sandaman", url:"https://sandmans-dreamscape.vercel.app/neighborhood", src:"https://sandmans-dreamscape.vercel.app/thebutton.gif"},
         {id: "1", name: "Onio", url: "https://onio.neocities.org", src: "https://onio.neocities.org/thebutton.gif"},
         {id: "2", name: "Kuroi", url: "https://kuroi.neocities.org/", src: "https://kuroi.com.br/img/button1.png"},
         {id: "3", name: "Kick", url: "https://kickalt.com/", src: ""},
@@ -211,7 +211,8 @@
 </svelte:head>
 
 <section>
-	<h1>Check Out My Neighbors</h1>
+	<h1 style="margin: 0">Check Out My Neighbors</h1>
+    <h2 style="margin: 0">(Other sites I like)</h2>
 
     <div class="graph" bind:this={graphContainer}>
         <svg bind:this={svgLinks} class="graph-links fade-in-long" {width} {height}>
@@ -233,7 +234,7 @@
 
     <h2>Or put my button on your site:</h2>
     <div class="button-code tinted-small-border">
-        <a href="https://sandmans-dreamscape.vercel.app/" title="Check out the Dreamscape"><img src="https://sandmans-dreamscape.vercel.app/thebutton.gif" alt="The land of your dreams" width="88" height="31"></a>
+        <a href="https://sandmans-dreamscape.vercel.app/" title="Check out the Dreamscape"><img src="https://sandmans-dreamscape.vercel.app/thebutton.gif" alt="The land of your dreams" width="176" height="62"></a>
         <textarea class="button-code"><a href="https://sandmans-dreamscape.vercel.app/" title="Check out the Dreamscape"><img src="https://sandmans-dreamscape.vercel.app/thebutton.gif" alt="The land of your dreams" width="88" height="31"></a></textarea>	
     </div>
 
@@ -270,6 +271,7 @@
         min-height: 70px;
         width: fit-content;
         height: fit-content;
+        transform-origin: center;
         /* background-color: rgba(0,0,0,0.25); */
         background-color: rgb(91, 91, 91);
         padding: .25rem;
@@ -285,6 +287,7 @@
     .button-container:hover {
         transition: .5s ease;
         transform: scale(1.25);
+        
     }
 
     .button-container p {
