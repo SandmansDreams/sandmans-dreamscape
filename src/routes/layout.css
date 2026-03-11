@@ -36,6 +36,20 @@ h1, h2 {
 
 h1, h2, h3, h4, h5, h6 {
     font-family: "Rubik Pixels", "Jost", sans-serif;
+    margin: 2rem auto;
+    padding: 1rem auto;
+}
+
+h2, h3, h4, h5, h6 {
+    text-shadow: 2px 2px 0px black;
+}
+
+h2 {
+    font-size: 32pt;
+}
+
+h3 {
+    font-size: 26pt;
 }
 
 p {
@@ -43,11 +57,44 @@ p {
     text-indent: 2rem;
     text-align: justify;
 	text-shadow: 2px 2px 0px black;
+    line-height: 1.25;
 }
 
 ol, ul {
 	font-size: 18pt;
 	text-shadow: 2px 2px 0px black;
+}
+
+ul {
+    list-style-type: square;
+}
+
+li {
+    margin-block: 0.5rem;
+    line-height: 1.25;
+    text-align: justify;
+}
+
+article h2 {
+    border-top: 1px solid white;
+    padding-top: 1rem;
+}
+
+img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    margin: auto auto;
+    border: 3px double white;
+    border-radius: 1rem;
+}
+
+a {
+    color: rgb(95, 210, 255);
+}
+
+a:visited {
+    color: rgb(204, 154, 255);
 }
 
 .quote {
@@ -219,4 +266,18 @@ ol, ul {
             rgb(49, 49, 218) 3px
         );
     }
+}
+
+.default-button {
+    background-color: rgba(0, 0, 0, 0.5);
+    border: none;
+    color: white;
+    padding: 0.5rem 1rem;
+    border-radius: 8rem;
+    font-size: 14pt;
+    font-family: "Jersey 10", "Jost", Arial, sans-serif;
+}
+
+.default-button:hover {
+    background-color: rgba(0, 0, 0, 0.7);
 }

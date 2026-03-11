@@ -14,7 +14,7 @@
             <a href="/guestbook" class="nav-item" data-sveltekit-noscroll><SecretText text="Guestbook (WIP)"/></a>
             <a href="/projects" class="nav-item" data-sveltekit-noscroll><SecretText text="Projects (WIP)"/></a>
             <a href="/tools" class="nav-item" data-sveltekit-noscroll><SecretText text="Tools (WIP)"/></a>
-            <a href="/articles" class="nav-item" data-sveltekit-noscroll><SecretText text="Articles (WIP)"/></a>
+            <a href="/articles" class="nav-item" data-sveltekit-noscroll>Articles</a>
         </div>
     </nav>
 </SlideRevealPanel>
@@ -37,6 +37,7 @@
         gap: 5px;
         border-radius: 1rem;
         overflow: hidden;
+        margin: 0 auto;
     }
 
     .flex-row {
