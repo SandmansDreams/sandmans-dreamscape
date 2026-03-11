@@ -89,6 +89,14 @@ img {
     border-radius: 1rem;
 }
 
+a {
+    color: rgb(95, 210, 255);
+}
+
+a:visited {
+    color: rgb(204, 154, 255);
+}
+
 .quote {
     font-size: 28pt;
     text-align: center;
@@ -260,3 +268,16 @@ img {
     }
 }
 
+.default-button {
+    background-color: rgba(0, 0, 0, 0.5);
+    border: none;
+    color: white;
+    padding: 0.5rem 1rem;
+    border-radius: 8rem;
+    font-size: 14pt;
+    font-family: "Jersey 10", "Jost", Arial, sans-serif;
+}
+
+.default-button:hover {
+    background-color: rgba(0, 0, 0, 0.7);
+}
