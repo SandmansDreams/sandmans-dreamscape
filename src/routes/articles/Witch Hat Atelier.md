@@ -1,15 +1,18 @@
 ---
 title: An Appreciation for Witch Hat Atelier
-description: A note about what I love about the manga Witch Hat Atelier.
-date: '2025-03-11'
+summary: Just yappin on what I love about the manga Witch Hat Atelier.
+date: '2026-03-11'
 tags:
+  - writing
   - manga
   - story
-  - writing
 published: true
 ---
 
+## WARNING: Contains for-sure spoilers for the story of Witch Hat Atelier
+
 ## What is Witch Hat Atelier?
+
 **Witch Hat Atelier (WHA)** is one of my favorite Manga's I've ever read. It is a manga about a young girl who learns about the world of magic that she thought was only accessible to people who were born as witches. In doing so, she makes a terrible mistake, encasing her mother in stone. A witch takes her in to both protect her as well as gain information from her about something he is investigating in which she is now involved. She gets adopted into witch society, using her unique outsider view to preform magic unlike other witches.
 There are many reasons that this manga is my favorite that I would like to break down, but one of the main reasons is what is has taught me about storytelling, meaning, and themes.
 
@@ -28,15 +31,17 @@ WHA has some overarching themes that add a lot to the plot of the story:
 	- Magic is presented as "a means to bring happiness to people", but seeing it in practice makes the reader realize how much is not being done for the people of this world because of the restrictions placed on magic.
 	- There are also issues with magic society, one issue that is brought up is that the, "refusal to accommodate differences is not an admirable quality of witch society", this is referring to the fact that people with disabilities such as blindness are often not given what they need in order to succeed given their issues, especially given what unrestricted magic could do for them
 	- Even the tree that grants magic to the world does terrible things to creatures and is parasitic in nature.
-![[Witch Hat Atelier - On the Subject of Control.png]]
+
+![Witch Hat Atelier - On the Subject of Control](/article-images/witch-hat/Witch%20Hat%20Atelier%20-%20On%20the%20Subject%20of%20Control.png)
+
 - *Overcoming your shortcomings*
 	- There are many characters in the story who learn to overcome issues within themselves or that they have through creative or unorthodox solutions
 - *The capabilities of mankind are terrifying*
 	- Many stories are contained in the series about man's folly and how a persons negative actions have effected the world in permanent ways to either lord themselves above others or harm others, directly or indirectly.
 
-In a story about 14 year old girls learning to be kind witches, you wouldn't normally expect a plot with this depth.
+In a story about 14 year-olds learning to be kind witches, you wouldn't normally expect a plot with this depth.
 
-![[Witch Hat Atelier - Character Motivations.png]]
+![Witch Hat Atelier - Character Motivations](/article-images/witch-hat/Witch%20Hat%20Atelier%20-%20Character%20Motivations.png)
 
 ### Lessons
 WHA also has some incredible lessons imbued within the plot. While it is not necessarily made for kids, the lessons are suitable for all ages:
@@ -66,26 +71,32 @@ WHA also has some incredible lessons imbued within the plot. While it is not nec
 ### The Magic System
 WHA uses a magic system of such simplicity and power that it can create just about anything. Most users create magical tools that function in interesting and creative ways. Additionally, the symbols drawn actually mean something to the point that every spell's function can be interpreted if you know how the system works. There are solid rules that provide the basis for what is possible and how things function. The intricacy and creativity of the author makes this magical world vibrant in a way I have hardly ever seen before.
 Part of what makes magic so difficult to conceal is that it is so easy to perform. It is entirely drawn, and anyone with a pen and specialized ink can perform magic, even on accident in some cases. You only need the tools and knowledge in order to make magic happen.
-![[Witch Hat Atelier - An Introduction to Casting Spells.png]]
 
-![[Witch Hat Atelier - The Tools of Witch Hat.png]]
+![Witch Hat Atelier - An Introduction to Casting Spells](/article-images/witch-hat/Witch%20Hat%20Atelier%20-%20An%20Introduction%20to%20Casting%20Spells.png)
 
-![[Witch Hat Atelier - The contraptions and Seals of Witch Hat.png]]
+![Witch Hat Atelier - The Tools of Witch Hat](/article-images/witch-hat/Witch%20Hat%20Atelier%20-%20The%20Tools%20of%20Witch%20Hat.png)
+
+![Witch Hat Atelier - The contraptions and Seals of Witch Hat](/article-images/witch-hat/Witch%20Hat%20Atelier%20-%20The%20contraptions%20and%20Seals%20of%20Witch%20Hat.png)
 
 ### The Characters
 Each character is imperfectly perfect. What I mean by that is they each have their own flaws, goals, and motives that make them interesting to interact with and interpret the world and events around them in different ways. Each character has their own specialty that they apply to a given situation and are creative enough to adapt it to assist.
 Here are some of the characters and what makes them unique:
 - **Coco** - The main character. Her main goal is to undo her accidental calcification of her mom, and to do so she has to learn the intricacies of magic. She starts initially with a strong love of magic, but as she learns more about the world, she starts to question the established rules and bend them in a a way that makes her considered dangerous to the high council.
-![[Witch Hat Atelier - Coco Side-by-Side.png]]
+
+![Witch Hat Atelier - Coco Side-by-Side](/article-images/witch-hat/Witch%20Hat%20Atelier%20-%20Coco%20Side-by-Side.png)
+
 - **Tetia** - Tetia is one of the girls at the atelier. Her main goal is to crate a spell that is worth being remembered for.
 - **Richeh** - The third girl of the atelier. She despises tests because she doesn't like being told what to do, this stems from experiences in her childhood with her brother where he enjoyed her spells. This experience, along with him leaving, made her never want to draw any spells that weren't completely hers. She ends up learning that she can apply her own spells to problems to solve them in a way that is uniquely hers.
 - **Agott** - Agott is the final girl of the atelier. She is a witch with a strong magical family and something to prove. She is dedicated to being the best at magic and has put in a lot of work to make sure of it.
-![[Witch Hat Atelier - Agott Characterization.png]]
+
+![Witch Hat Atelier - Agott Characterization](/article-images/witch-hat/Witch%20Hat%20Atelier%20-%20Agott%20Characterization.png)
+
 - **Qifrey** - The head of the atelier, he woke up one day missing an eye that was stolen from him by the brimmed caps. Ever since then he has been slowly losing vision and is in a race against the clock to figure out what they did to him, why, and how to potentially reverse it. He has been using forbidden magic and breaking the rules in order to attain his goal, but he is a sympathetic character who seems for now to have the best of intentions.
 
 ### Other
 The world of WHA is alive and vibrant. So many ideas that could only have been concocted by the people of this world whose knowledge of magic run deep exist. This makes the world feel so real and each place visited is its own unique and memorable environment.
 The world itself has been warped by magic of old, leading to unique environments with cool backstories.
-![[Witch Hat Atelier - The World of Witch Hat Atelier.png]]
 
-![[Witch Hat Atelier - World History.png]]
+![Witch Hat Atelier - The World of Witch Hat Atelier](/article-images/witch-hat/Witch%20Hat%20Atelier%20-%20The%20World%20of%20Witch%20Hat%20Atelier.png)
+
+![Witch Hat Atelier - World History](/article-images/witch-hat/Witch%20Hat%20Atelier%20-%20World%20History.png)
