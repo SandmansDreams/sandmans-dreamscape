@@ -37,6 +37,7 @@
         gap: 5px;
         border-radius: 1rem;
         overflow: hidden;
+        margin: 0 auto;
     }
 
     .flex-row {
