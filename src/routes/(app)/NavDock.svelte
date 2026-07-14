@@ -1,6 +1,6 @@
 
 <script>
-    import SecretText from "./SecretText.svelte";
+    import SecretText from "../SecretText.svelte";
     import SlideRevealPanel from "$lib/svelte/SlideRevealPanel.svelte";
 </script>
 
@@ -9,11 +9,11 @@
     <nav class="nav-base crt">
         <div class="flex-row"> 
             <a href="/" class="nav-item" data-sveltekit-noscroll>Homepage</a>
-            <a href="/about" class="nav-item" data-sveltekit-noscroll>About (WIP)</a>
+            <a href="/about" class="nav-item" data-sveltekit-noscroll>About</a>
             <a href="/neighborhood" class="nav-item" data-sveltekit-noscroll>Neighbors</a>
             <a href="/guestbook" class="nav-item" data-sveltekit-noscroll><SecretText text="Guestbook (WIP)"/></a>
             <a href="/projects" class="nav-item" data-sveltekit-noscroll><SecretText text="Projects (WIP)"/></a>
-            <a href="/tools" class="nav-item" data-sveltekit-noscroll><SecretText text="Tools (WIP)"/></a>
+            <a href="/tools" class="nav-item" data-sveltekit-noscroll>Tools</a>
             <a href="/articles" class="nav-item" data-sveltekit-noscroll>Articles</a>
         </div>
     </nav>
