@@ -98,11 +98,17 @@
     let frameId: number;
     let modeId = $state(MODES[0]?.id ?? '');
     let currentMode = $derived(MODES.find((m) => m.id === modeId));
-    let playing = $state(false);
-    let playlist: Track[] = [];
+    let isPlaying = $state(false);
+    let uploadedTracks: Track[] = $state([]);
     let myTracks: Track[] = $state([]);
     let currentTrackIndex = $state(0);
-    let currentPlaylist = $state(myTracks);
+    let currentTrack: Track | null = $state(null)
+    let currentPlaylist: PlaylistId = $state("myTracks");
+    let activePlaylist = $derived(
+        currentPlaylist === "myTracks"
+            ? myTracks
+            : uploadedTracks
+    );
 
     // merge every mode's settings + globals into one values bag, once, at startup
     let values = $state<Record<string, number>>(
@@ -110,6 +116,8 @@
             [...GLOBAL_SETTINGS, ...MODES.flatMap((m) => m.settings)].map((s) => [s.id, s.default])
         )
     );
+
+    type PlaylistId = "myTracks" | "uploadedTracks";
 
     function setUpAudio() {
         audioCtx = new window.AudioContext();
@@ -157,6 +165,11 @@
         });
     }
 
+    function switchPlaylist(id: PlaylistId) {
+        if (currentPlaylist === id) return;
+        currentPlaylist = id;
+    }
+
     function setMode (id: string) {
         modeId = id;
         //currentMode?.onEnter?.();
@@ -166,10 +179,13 @@
         if (i < 0 || i >= plist.length) return;
         currentTrackIndex = i;
         const track = plist[i];
+        currentTrack = track;
         audioEl.src = track.src;
         audioEl.playbackRate = values.songSpeed;
         if (autoplay) {
             audioCtx?.resume().then(() => audioEl.play());
+            isPlaying = true;
+            console.log(isPlaying)
         }
     }
 
@@ -178,6 +194,8 @@
         if (!ctx2d || !analyser || !dataArray || !currentMode) return;
         //resizeCanvas();
         analyser.getByteFrequencyData(dataArray);
+
+        fillCanvas(values["fade"]);
 
         currentMode.draw({
             ctx: ctx2d,
@@ -189,14 +207,19 @@
             devicePixelRatio,
             values,
         });
+    }
 
+    function fillCanvas(fade: number) {
+        if (!ctx2d || !canvasEl) return;
+        
+        ctx2d.fillStyle = `rgba(13, 16, 18, ${fade/100})`;
+        ctx2d.fillRect(0, 0, canvasEl.width, canvasEl.height);
     }
 
     onMount(() => {
         setUpAudio();
         setUpVisual();
         importMyTracks();
-        console.log(myTracks)
         frameId = requestAnimationFrame(draw);
     })
 
@@ -223,7 +246,7 @@
         </div>
 
         <div id="player"
-            class:playing={playing}
+            class:playing={isPlaying}
         >
             <div class="track-row">
                 <div id="trackName">...</div>
@@ -240,8 +263,8 @@
                 <button class="icon-btn" id="prevBtn">
                     <img class="icon" src={previousIcon} alt="skip back"/>
                 </button>
-                <button class="icon-btn" id="playBtn">
-                    <img class="icon" src={playIcon} alt="play"/>
+                <button class="icon-btn {isPlaying ? "active" : ""}" id="playBtn">
+                    <img class="icon" src={isPlaying ? pauseIcon : playIcon} alt="play"/>
                 </button>
                 <button class="icon-btn" id="nextBtn">
                     <img class="icon" src={nextIcon} alt="skip forward"/>
@@ -262,7 +285,7 @@
 
     <div class="viz-wrap">
         {#if currentMode}
-            <div class="axis-label axis-right" id="axisRight">Y</div>
+            <div class="axis-label axis-left" id="axisLeft">Y</div>
             <div class="axis-label axis-top" id="axisTop">X</div>
         {/if}
         <canvas bind:this={canvasEl} id="viz"></canvas>
@@ -280,55 +303,60 @@
         <div id="bottom-container">
             <div id="settings-container">
                 <div id="settings-all" class="inset-container">
-                    <h5>All Settings</h5>
-                    {#each GLOBAL_SETTINGS as s (s.id)}
-                        <div class="setting">
-                            <span class="setting-label">{s.label}</span>
-                            <input
-                            type="range"
-                            min={s.min}
-                            max={s.max}
-                            step={s.step}
-                            bind:value={values[s.id]}
-                            />
-                            <span class="setting-value">
-                                {s.format ? s.format(values[s.id]) : values[s.id]}
-                            </span>
-                        </div>
-                    {/each}
-                </div>
-                
-                <div style="
-                    padding-top: .5rem;
-                    " id="settings-individual"
-                    class="inset-container"
-                >
-                    <h5>Individual Settings</h5>
-                    {#each currentMode?.settings ?? [] as s (s.id)}
-                        <div class="setting">
-                            <span class="setting-label">{s.label}</span>
-                            <input
+                    <h5 class="axis-label sticky">All</h5>
+
+                    <div class="scooch">
+                        {#each GLOBAL_SETTINGS as s (s.id)}
+                            <div class="setting">
+                                <span class="setting-label">{s.label}</span>
+                                <input
                                 type="range"
                                 min={s.min}
                                 max={s.max}
                                 step={s.step}
                                 bind:value={values[s.id]}
-                            />
+                                />
                                 <span class="setting-value">
                                     {s.format ? s.format(values[s.id]) : values[s.id]}
                                 </span>
-                        </div>
-                    {/each}
+                            </div>
+                        {/each}
+                    </div>
+                </div>
+                
+                <div 
+                    id="settings-individual"
+                    class="inset-container"
+                >
+                    <h5 class="axis-label sticky">{currentMode?.label}</h5>
+
+                    <div class="scooch">
+                        {#each currentMode?.settings ?? [] as s (s.id)}
+                            <div class="setting">
+                                <span class="setting-label">{s.label}</span>
+                                <input
+                                    type="range"
+                                    min={s.min}
+                                    max={s.max}
+                                    step={s.step}
+                                    bind:value={values[s.id]}
+                                />
+                                    <span class="setting-value">
+                                        {s.format ? s.format(values[s.id]) : values[s.id]}
+                                    </span>
+                            </div>
+                        {/each}
+                    </div>
                 </div>
             </div>
             
             <div class="inset-container" id="playlist" style="padding: 0;">
                 <div id="playlist-selector">
-                    <button class="active">My Music</button>
-                    <button>Your Music</button>
+                    <button class:active={currentPlaylist === "myTracks"} onclick={() => switchPlaylist("myTracks")}>My Music</button>
+                    <button class:active={currentPlaylist === "uploadedTracks"} onclick={() => switchPlaylist("uploadedTracks")}>Your Music</button>
                 </div>
 
-                {#if currentPlaylist === myTracks}
+                {#if currentPlaylist === "myTracks"}
                     {#each myTracks as track, index}
                         <button
                             class="playlist-item"
@@ -340,21 +368,21 @@
                             </span>
                         </button>
                     {/each}
-                {:else if currentPlaylist === playlist && playlist.length === 0}
-                    <div id="dropzone">
+                {:else if currentPlaylist === "playlist" && uploadedTracks.length === 0}
+                    <div id="dropzone" class="click-zone" style="border-radius: 0 0 1rem 1rem;">
                         <div class="msg">Drop audio files here, or click to upload</div>
                         <input type="file" id="fileInput" multiple>
                     </div>
                 {:else}
-                    {#each playlist as track, index}
+                    <div id="dropzone" class="click-zone" style="border-radius: 0 0 1rem 1rem;"></div>
+                    {#each uploadedTracks as track, index}
                         <button
                             class="playlist-item"
-                            class:active={index === currentTrackIndex}
-                            onclick={() => loadTrack(index, myTracks, true)}
+                            class:playing={index === currentTrackIndex}
+                            onclick={() => loadTrack(index, uploadedTracks, true)}
                         >
-                            <span>
-                                <span class="idx">{(index + 1).toString().padStart(2, '0')}</span>{track.name}
-                            </span>
+                            <span class="idx">{(index + 1).toString().padStart(2, '0')}</span>
+                            <span class="playlist-item-label">{track.name}</span>
                         </button>
                     {/each}
                 {/if}

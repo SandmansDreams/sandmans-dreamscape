@@ -79,7 +79,7 @@ h1 {
 }
 
 h5 {
-  margin: .5rem;
+  margin: 1rem;
 }
 
 section {
@@ -127,14 +127,14 @@ button:active {
   text-transform: uppercase;
   white-space: nowrap;
 }
-.axis-label.axis-right {
+.axis-label.axis-left {
   writing-mode: vertical-rl;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 14px;
   flex-shrink: 0;
-  right: .5%;
+  left: .5%;
   top: 50%;
   transform: translateY(-50%);
 }
@@ -160,9 +160,6 @@ button:active {
   display: grid;
   grid-template-rows: auto auto auto;
   gap: 10px;
-}
-#player:playing {
-  border: 3px solid var(--accent);
 }
 .track-row .seek-row, .btn-row {
   display: flex;
@@ -220,6 +217,12 @@ button:active {
   border-radius: 0;
 }
 
+#playlist {
+  display: flex;
+  flex-direction: column;
+  overscroll-behavior: none;
+}
+
 #settings-container {
   overflow-y: scroll;
   display: grid;
@@ -262,10 +265,17 @@ button:active {
   width: 100%;
   justify-content: center;
   align-content: center;
+  font-family: var(--font-body);
+  font-size: 12pt;
+  line-height: 1.5;
+  color: var(--muted);
 }
 .click-zone:hover {
   cursor: pointer;
   border: 1px dashed var(--accent);
+}
+.click-zone input {
+  display: none;
 }
 
 .glyph {
@@ -289,24 +299,68 @@ button:active {
   position: relative;
   font-family: var(--font-mono);
   font-size: 10pt;
+  overscroll-behavior: none;
+  overflow-x: hidden;
 }
 
 .playlist-item {
   font-family: var(--font-mono);
+  border: none;
   border-bottom: 1px solid var(--line);
-
+  text-align: left;
+  display: flex;
+  gap: 10px;
+  color: white;
+  cursor: pointer;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  min-height: 25px;
+  width: 100%;
+  min-width: 0;
+  border-radius: 0;
+  overflow: hidden;
+}
+.playlist-item-label {
+  flex: 1;
+  min-width: 0;
+}
+.idx {
+  color: var(--muted);
+  margin-right: 10px;
 }
 
 .setting {
   width: 100%;
-  height: 1.5rem;
+  height: 2rem;
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 10px;
   padding-inline: 10px;
 }
 
+.sticky {
+  position: sticky;
+  writing-mode: vertical-rl;
+  justify-self: left;
+  width: 14px;
+  flex-shrink: 0;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  margin: 0;
+  line-height: 0;
+}
 
+.scooch {
+  width: 90%;
+  padding-left: 3%;
+  transform: translateY(-15%);
+}
+
+.playing {
+  color: var(--accent);
+}
 
 /* Firefox */
 * {

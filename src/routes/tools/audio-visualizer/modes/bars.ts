@@ -59,8 +59,10 @@ const Bars: VisualizerMode = {
 
     for (let i = 0; i < barCount; i++) {
       const amplitude = dataArray[i * step] / 255;
-      const tiltAmp = amplitude + (i * tilt) / barCount;
-      if (tiltAmp === 0) continue;
+      if (amplitude === 0) continue;
+
+      const tiltFactor = (i * tilt) / barCount;
+      const tiltAmp = amplitude + tiltFactor;
 
       const barHeight = tiltAmp * canvasHeight * multiplier;
       const barHue = hue + amplitude * 100 + (i * hueRange) / (0.5 * barCount);
