@@ -300,7 +300,8 @@
     let modeId = $state(MODES[0]?.id ?? '');
     let currentMode = $derived(MODES.find((m) => m.id === modeId));
 
-    let isDraggingOver = $state(false);
+    let isDraggingOverPage = $state(false);
+    let dragCounter = 0;
 
     // merge every mode's settings + globals into one values bag, once, at startup
     let values = $state<Record<string, number>>(
@@ -423,7 +424,7 @@
         }
 
         player.setPlaylist("uploadedTracks");
-        player.loadTrack(startIndex, false); // load first newly-added track, don't autoplay
+        //player.loadTrack(startIndex, false); // load first newly-added track, don't autoplay
     }
 
     function onFileInputChange(e: Event) {
@@ -432,19 +433,34 @@
         input.value = ''; // allows re-selecting the same file later
     }
 
-    function onDrop(e: DragEvent) {
+    function onWindowDragEnter(e: DragEvent) {
         e.preventDefault();
-        isDraggingOver = false;
-        if (e.dataTransfer?.files) handleFiles(e.dataTransfer.files);
+        // ignore drags that aren't carrying files (e.g. dragging page text/links around)
+        if (!e.dataTransfer?.types.includes('Files')) return;
+
+        dragCounter++;
+        isDraggingOverPage = true;
     }
 
-    function onDragOver(e: DragEvent) {
-        e.preventDefault();
-        isDraggingOver = true;
+    function onWindowDragOver(e: DragEvent) {
+        e.preventDefault(); // required continuously, or the browser opens the file
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
     }
 
-    function onDragLeave() {
-        isDraggingOver = false;
+    function onWindowDragLeave(e: DragEvent) {
+        e.preventDefault();
+        dragCounter--;
+        if (dragCounter <= 0) {
+            dragCounter = 0;
+            isDraggingOverPage = false;
+        }
+    }
+
+    function onWindowDrop(e: DragEvent) {
+        e.preventDefault();
+        dragCounter = 0;
+        isDraggingOverPage = false;
+        if (e.dataTransfer?.files?.length) handleFiles(e.dataTransfer.files);
     }
 
     onMount(() => {    
@@ -465,6 +481,18 @@
                 player?.togglePlay()
             }
         })
+
+        window.addEventListener('dragenter', onWindowDragEnter);
+        window.addEventListener('dragover', onWindowDragOver);
+        window.addEventListener('dragleave', onWindowDragLeave);
+        window.addEventListener('drop', onWindowDrop);
+
+        return () => {
+            window.removeEventListener('dragenter', onWindowDragEnter);
+            window.removeEventListener('dragover', onWindowDragOver);
+            window.removeEventListener('dragleave', onWindowDragLeave);
+            window.removeEventListener('drop', onWindowDrop);
+        };
     })
 
     $effect(() => {
@@ -499,17 +527,18 @@
         <header>
             <h1>VISUALIZE</h1>
 
-            <div id="stream-zone" class="click-zone">
+            <!-- <div id="stream-zone" class="click-zone">
                 <div class="glyph">◎</div>
                 <div class="msg">Stream audio directly from your computer (coming soon???)</div>
-            </div>
+            </div> -->
+            <div></div>
             
             <div id="player"
                 class:playing={player.isPlaying}
             >
                 <div class="track-row">
                     <div id="trackName">{`${player?.currentTrackIndex}: ${player?.currentTrack?.name ?? "..."}`}</div>
-                    <div id="trackMeta">{`PList: ${player.currentPlaylist?.name ?? "-"}`}</div>
+
                 </div>
                 
                 <div class="seek-row">
@@ -631,29 +660,26 @@
                         {/each}
                     {:else if player.currentPlaylist?.id === "uploadedTracks" && player.getPlaylist("uploadedTracks")?.tracks.length === 0}
                         <!-- svelte-ignore <a11y_no_static_element_interactions, a11y_click_events_have_key_events> -->
-                        <div 
+                        <button 
                             id="dropzone" 
-                            class="click-zone" 
+                            class="click-zone"
                             style="border-radius: 0 0 1rem 1rem;"
-                            class:dragging={isDraggingOver}
-                            ondragover={onDragOver}
-                            ondragleave={onDragLeave}
-                            ondrop={onDrop}
+                            class:dragging={isDraggingOverPage}
                             onclick={() => document.getElementById('fileInput')?.click()}
                         >
-                            <div class="msg">Drop audio files here, or click to upload</div>
+                            <div>Drop audio files on the page, or click here to upload</div>
                             <input type="file" accept="audio/" id="fileInput" multiple onchange={onFileInputChange}>
-                        </div>
+                        </button>
                     {:else}
-                        <div id="dropzone" class="click-zone" 
-                            style="
-                                border-radius: 0 0 1rem 1rem;
-                                position:absolute;
-                                z-index: -10;
-                            "
+                        <!-- svelte-ignore <a11y_no_static_element_interactions, a11y_click_events_have_key_events, a11y_consider_explicit_label> -->
+                        <button 
+                            id="dropzone" 
+                            class="playlist-item" 
+                            onclick={() => document.getElementById('fileInput')?.click()}
                         >
-                            <input type="file" id="fileInput" multiple>
-                        </div>
+                            <div style="width: 100%; text-align: center; justify-self: center;">UPLOAD TRACK</div>
+                            <input type="file" accept="audio/" id="fileInput" multiple onchange={onFileInputChange}>
+                        </button>
                         {#each player.currentPlaylist?.tracks as track, index}
                             <button
                                 class="playlist-item"
