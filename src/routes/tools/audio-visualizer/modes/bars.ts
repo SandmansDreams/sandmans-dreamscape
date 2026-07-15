@@ -3,11 +3,10 @@ import type { VisualizerMode } from "../visualizerHelpers";
 const Bars: VisualizerMode = {
   id: "bars",
   label: "Bars",
-  axisLabels: { right: "AMPLITUDE", top: "FREQUENCY (LOW → HIGH)" },
+  axisLabels: { vertical: "AMPLITUDE", horizontal: "FREQUENCY (LOW → HIGH)" },
   settings: [
     {
-      id: "barCount",
-      type: "range",
+      id: "barsBarCount",
       label: "Bars",
       min: 1,
       max: 1024,
@@ -15,8 +14,7 @@ const Bars: VisualizerMode = {
       default: 64,
     },
     {
-      id: "barWidth",
-      type: "range",
+      id: "barsWidth",
       label: "Bar Width",
       min: 0.1,
       max: 1.5,
@@ -25,8 +23,7 @@ const Bars: VisualizerMode = {
       format: (v) => `${v}x`,
     },
     {
-      id: "tilt",
-      type: "range",
+      id: "barsTilt",
       label: "Tilt",
       min: 0,
       max: 2,
@@ -34,19 +31,31 @@ const Bars: VisualizerMode = {
       default: 0.25,
     },
     {
-      id: "ampNumbers",
-      type: "toggle",
+      id: "barsAmpNumbers",
       label: "Amp Numbers",
-      default: 0, 
+      min: 0,
+      max: 1,
+      step: 1,
+      default: 1,
       format: (v) => `${v === 0 ? "OFF" : "ON" }`,
     },
+    {
+      id: "barsFontSize",
+      label: "Font Size",
+      min: 1,
+      max: 200,
+      step: 1,
+      default: 14,
+      format: (v) => `${v}pt`,
+    }
   ],
   draw({ ctx, canvasWidth, canvasHeight, dataArray, bufferLength, values }) {
     const {
-      barCount,
-      barWidth: widthMult,
-      tilt,
-      ampNumbers,
+      barsBarCount: barCount,
+      barsWidth: widthMult,
+      barsTilt: tilt,
+      barsAmpNumbers: ampNumbers,
+      barsFontSize: fontSize,
       hue,
       hueRange,
       brightness,
@@ -59,6 +68,7 @@ const Bars: VisualizerMode = {
 
     for (let i = 0; i < barCount; i++) {
       const amplitude = dataArray[i * step] / 255;
+
       if (amplitude === 0) continue;
 
       const tiltFactor = (i * tilt) / barCount;
@@ -77,10 +87,11 @@ const Bars: VisualizerMode = {
 
       if (!ampNumbers) continue;
 
-      ctx.font = `${11 * devicePixelRatio}px 'Space Mono', monospace`;
+      ctx.font = `${fontSize}px 'Space Mono', monospace`;
+      ctx.textAlign = "center";
       ctx.fillText(
         `${Math.round(amplitude * 100)}`,
-        (i * baseWidth) + barWidth / 2, 
+        (i * barWidth) + barWidth / 2, 
         (canvasHeight - barHeight) - 10
       );
     }

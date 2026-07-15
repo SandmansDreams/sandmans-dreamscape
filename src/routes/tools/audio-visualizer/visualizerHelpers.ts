@@ -2,17 +2,21 @@
 export type Track = {
     name: string,
     src: string,
-    length: number,
+}
+
+export type Playlist = {
+    id: string,
+    name: string,
+    tracks: Track[]
 }
 
 export interface Setting {
     id: string,
     label: string,
-    type: 'range' | 'toggle',
     default: number,
-    min?: number,
-    max?: number,
-    step?: number,
+    min: number,
+    max: number,
+    step: number,
     format?: (v: number) => string;
 }
 
@@ -25,12 +29,13 @@ export interface ModeParams {
     timestamp: number;
     devicePixelRatio: number;
     values: Record<string, number>; // merged global + this mode's own settings
+    frameId?: number
 }
 
 export type VisualizerMode = {
     id: string,
     label: string,
-    axisLabels: { top: string; right: string };
+    axisLabels: { horizontal: string; vertical: string };
     settings: Setting[];
     draw: (params: ModeParams) => void;
 }
