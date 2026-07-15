@@ -242,9 +242,9 @@
         {
             id: "songSpeed",
             label: "Speed",
-            min: 0.05,
+            min: 0.1,
             max: 5,
-            step: 0.05,
+            step: 0.1,
             default: 1,
             format: (v) => `${v}x`,
         },
@@ -289,8 +289,6 @@
     // Elements
     let canvasEl = $state<HTMLCanvasElement | null>(null);
     let ctx2d = $state<CanvasRenderingContext2D | null>(null);
-    let rightCanvasAxisEl: HTMLDivElement;
-    let topCanvasAxisEl: HTMLDivElement;
 
     // State
     let player = $state<AudioPlayer | null>(null);
@@ -432,6 +430,7 @@
 
         if (!player) return;
         player.setRate(values["songSpeed"])
+        player.setPreservePitch(Boolean(values["preservePitch"]))
     })
 
     onDestroy(() => {
