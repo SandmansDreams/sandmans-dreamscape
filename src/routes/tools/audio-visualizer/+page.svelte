@@ -198,6 +198,7 @@
         setFormant() {} // Is implementable?
 
         destroy() {
+            this.getPlaylist("uploadedTracks")?.tracks.forEach(t => URL.revokeObjectURL(t.src));
             this.source.disconnect();
             this.analyzer.disconnect();
             this.context.close();
@@ -299,6 +300,8 @@
     let modeId = $state(MODES[0]?.id ?? '');
     let currentMode = $derived(MODES.find((m) => m.id === modeId));
 
+    let isDraggingOver = $state(false);
+
     // merge every mode's settings + globals into one values bag, once, at startup
     let values = $state<Record<string, number>>(
         Object.fromEntries(
@@ -399,6 +402,51 @@
         // ctx2d.imageSmoothingEnabled = false;
     }
 
+    function handleFiles(files: FileList | File[]) {
+        if (!player) return;
+
+        const audioFiles = Array.from(files).filter(f => f.type.startsWith('audio/')); // Only accepts audio tracks
+        if (audioFiles.length === 0) return;
+
+        const playlist = player.getPlaylist("uploadedTracks");
+        const startIndex = playlist?.tracks.length ?? 0;
+
+        for (const file of audioFiles) {
+            if (playlist?.tracks.find((t) => t.name === file.name)) continue;
+
+            const track: Track = {
+                name: file.name,
+                src: URL.createObjectURL(file),
+            };
+
+            player.addTrackToPlaylist(track, "uploadedTracks");
+        }
+
+        player.setPlaylist("uploadedTracks");
+        player.loadTrack(startIndex, false); // load first newly-added track, don't autoplay
+    }
+
+    function onFileInputChange(e: Event) {
+        const input = e.target as HTMLInputElement;
+        if (input.files) handleFiles(input.files);
+        input.value = ''; // allows re-selecting the same file later
+    }
+
+    function onDrop(e: DragEvent) {
+        e.preventDefault();
+        isDraggingOver = false;
+        if (e.dataTransfer?.files) handleFiles(e.dataTransfer.files);
+    }
+
+    function onDragOver(e: DragEvent) {
+        e.preventDefault();
+        isDraggingOver = true;
+    }
+
+    function onDragLeave() {
+        isDraggingOver = false;
+    }
+
     onMount(() => {    
         player = new AudioPlayer();
         importMyTracks(); // Calls loadTrack(0)
@@ -449,11 +497,11 @@
 <section>
     {#if player}
         <header>
-            <h1>SIGNAL</h1>
+            <h1>VISUALIZE</h1>
 
             <div id="stream-zone" class="click-zone">
                 <div class="glyph">◎</div>
-                <div class="msg">Stream audio directly from your computer</div>
+                <div class="msg">Stream audio directly from your computer (coming soon???)</div>
             </div>
             
             <div id="player"
@@ -582,12 +630,30 @@
                             </button>
                         {/each}
                     {:else if player.currentPlaylist?.id === "uploadedTracks" && player.getPlaylist("uploadedTracks")?.tracks.length === 0}
-                        <div id="dropzone" class="click-zone" style="border-radius: 0 0 1rem 1rem;">
+                        <!-- svelte-ignore <a11y_no_static_element_interactions, a11y_click_events_have_key_events> -->
+                        <div 
+                            id="dropzone" 
+                            class="click-zone" 
+                            style="border-radius: 0 0 1rem 1rem;"
+                            class:dragging={isDraggingOver}
+                            ondragover={onDragOver}
+                            ondragleave={onDragLeave}
+                            ondrop={onDrop}
+                            onclick={() => document.getElementById('fileInput')?.click()}
+                        >
                             <div class="msg">Drop audio files here, or click to upload</div>
-                            <input type="file" id="fileInput" multiple>
+                            <input type="file" accept="audio/" id="fileInput" multiple onchange={onFileInputChange}>
                         </div>
                     {:else}
-                        <div id="dropzone" class="click-zone" style="border-radius: 0 0 1rem 1rem;"></div>
+                        <div id="dropzone" class="click-zone" 
+                            style="
+                                border-radius: 0 0 1rem 1rem;
+                                position:absolute;
+                                z-index: -10;
+                            "
+                        >
+                            <input type="file" id="fileInput" multiple>
+                        </div>
                         {#each player.currentPlaylist?.tracks as track, index}
                             <button
                                 class="playlist-item"
