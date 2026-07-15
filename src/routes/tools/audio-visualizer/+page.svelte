@@ -62,7 +62,11 @@
 
         updateFrequencyData() {
             this.analyzer.getByteFrequencyData(this.dataArray);
-        }     
+        }
+
+        updateTimeData() {
+            this.analyzer.getByteTimeDomainData(this.dataArray);
+        }
 
         addPlaylist(playlist: Playlist) {
             if (this.getPlaylist(playlist.id)) return; // If a playlist by that name exists, ignore
@@ -271,10 +275,12 @@
 
     import Bars from "./modes/bars"
     import Radial from "./modes/radial"
+    import Wave from "./modes/wave"
 
     const MODES = [
         Bars,
         Radial,
+        Wave,
     ]
 
     // Import image assets
@@ -360,7 +366,11 @@
         frameId = requestAnimationFrame(draw);
         if (!player || !currentMode || !canvasEl || !ctx2d) return;
 
-        player.updateFrequencyData(); // Required
+        if (modeId = "wave") {
+            player.updateTimeData();
+        } else {
+            player.updateFrequencyData(); // Required
+        }
 
         fillCanvas(values["fade"]);
 

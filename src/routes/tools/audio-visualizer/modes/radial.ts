@@ -114,6 +114,7 @@ const Radial: VisualizerMode = {
 
     const angleStep = (Math.PI * 2) / bars;
     const step = Math.floor(bufferLength / bars);
+    const minLightness = 15;
 
     for (let i = 0; i < bars; i++) {
         const amplitude = dataArray[i * step] / 255;
@@ -135,7 +136,7 @@ const Radial: VisualizerMode = {
 
         const hueAdd = (i * hueRange) / (0.5 * bars);
         const barHue = hue + amplitude * 100 + hueAdd;
-        ctx.fillStyle = `hsl(${barHue}, 100%, ${Math.max(15, amplitude * brightness)}%)`;
+        ctx.fillStyle = `hsl(${barHue}, 100%, ${minLightness + amplitude * (brightness - minLightness)}%)`;
 
         ctx.beginPath();
 
