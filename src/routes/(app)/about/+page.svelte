@@ -70,52 +70,8 @@
 </section>
 
 <style>
-	.links-table {
-		display: flex;
-		flex-direction: column;
-		gap: 1.1rem;
-		margin: 1.5rem auto;
-		width: fit-content;
-		background: rgba(0,0,0,0.3);
-		border-radius: 1.1rem;
-		padding: 1.2rem 1.5rem;
-		font-family: inherit;
-		justify-items: center;
-	}
-
-	.links-table a, .links-table p {
-		color: white;
-		text-decoration: none;
-		font-weight: bold;
-		text-shadow: none;
-		margin: 0;
-		text-indent: 0;
-	}
-
 	p {
 		padding-inline: 1rem;
-	}
-
-
-	.link-row {
-		display: grid;
-		grid-template-columns: 1fr 3fr 10fr;
-		align-items: center;
-		gap: .5rem;
-		padding: .25rem .5rem;
-		border-radius: 0.7rem;
-		transition: background 0.18s;
-		background-color: rgba(0,0,0,0.1);
-	}
-	.link-row:hover {
-		background: rgba(255,255,255,0.09);
-	}
-
-	.icon {
-		width: 2.5rem;
-		height: 2.5rem;
-		display: block;
-		justify-self: center;
 	}
 
 	/* Orange filter for Soundcloud PNG */

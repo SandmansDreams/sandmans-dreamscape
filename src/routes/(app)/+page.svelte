@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import SecretText from "./SecretText.svelte";
+	import SecretText from "../SecretText.svelte";
 	
 
 	let quote = $state({

@@ -1,6 +1,5 @@
-<!-- Empty root layout to allow for unique pages -->
-
 <script>
+    import "./layout.css"
     let { children } = $props(); 
 </script>
 
