@@ -19,8 +19,10 @@ function getFirstImagePath(markdown: string): string | null {
 async function getPosts() {
 	let posts: Post[] = []
 
-	const paths = import.meta.glob('/src/routes/articles/*.md', { eager: true })
-	const rawPaths = import.meta.glob('/src/routes/articles/*.md', {
+	const paths = import.meta.glob('/src/routes/\\(app\\)/articles/*.md', { eager: true })
+	//console.log('glob matched paths:', Object.keys(paths))
+
+	const rawPaths = import.meta.glob('/src/routes/\\(app\\)/articles/*.md', {
 		eager: true,
 		query: '?raw',
 		import: 'default'

@@ -112,7 +112,7 @@
 
 <section class="content-container tinted-border">
 	<h1>Welcome to Sandman's Dreamscape</h1>
-	<div>
+	<div style="margin: auto;">
 		<p class="quote" style="margin-bottom: 0;">"{quote.quote}"</p>
 		<p class="quote" style="margin-top: 0;">-{quote.attribution}</p>
 	</div>

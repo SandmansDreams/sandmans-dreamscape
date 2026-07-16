@@ -1,11 +1,8 @@
 <script lang="ts">
     /* ToDo:
-        - Settings storage
-        - Implement rest of modes
-        - More effects: pitch? reverb?
+        - Implement new modes: stereo traveller (like minimeters), gnoimeter, stereo visualizer
+        - Effects: pitch? reverb?
         - Stream from computer audio
-        - Center quote text on Firefox (main page)
-        - ARTICLES DON'T WORK?! cant acces property getContent is null
     */
     import { onMount, onDestroy } from "svelte"
     import { browser } from "$app/environment"
