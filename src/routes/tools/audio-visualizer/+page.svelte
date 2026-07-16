@@ -1,8 +1,5 @@
 <script lang="ts">
     /* ToDo:
-        - Speed changes when loading new track
-        - Multiplier does not apply to radial
-        - Clamp wave to visible canvas height
         - Settings storage
         - Implement rest of modes
         - More effects: pitch? reverb?
@@ -116,6 +113,7 @@
             if (trackIndex < 0 || trackIndex >= this.currentPlaylist.tracks.length) return;
 
             this.currentTrackIndex = trackIndex;
+            const speed = this.audioEl.playbackRate
 
             const position = this.playOrder.indexOf(trackIndex);
             if (position >= 0) this.orderPosition = position;
@@ -124,6 +122,7 @@
             this.currentTrack = track;
             this.audioEl.src = track.src;
             this.duration = this.audioEl.duration;
+            this.audioEl.playbackRate = speed
 
             if (autoplay) {
                 this.play();
@@ -268,7 +267,7 @@
             label: "Speed",
             min: 0.1,
             max: 5,
-            step: 0.1,
+            step: 0.05,
             default: 1,
             format: (v) => `${v}x`,
         },
