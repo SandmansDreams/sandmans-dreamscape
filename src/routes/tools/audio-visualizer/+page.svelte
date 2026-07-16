@@ -4,9 +4,14 @@
         - Implement rest of modes
         - More effects: pitch? reverb?
         - Stream from computer audio
+        - Center quote text on Firefox (main page)
+        - ARTICLES DON'T WORK?! cant acces property getContent is null
     */
     import { onMount, onDestroy } from "svelte"
+    import { browser } from "$app/environment"
     import { type Track, type Setting, type Playlist } from "./visualizerHelpers"
+
+    const STORAGE_KEY = 'visualizer-settings';
 
     class AudioPlayer {
         readonly audioEl = new Audio();
@@ -327,12 +332,29 @@
     let isDraggingOverPage = $state(false);
     let dragCounter = 0;
 
-    // merge every mode's settings + globals into one values bag, once, at startup
-    let values = $state<Record<string, number>>(
-        Object.fromEntries(
-            [...GLOBAL_SETTINGS, ...MODES.flatMap((m) => m.settings)].map((s) => [s.id, s.default])
-        )
+     // merge every mode's settings + globals into one values bag, once, at startup
+    const defaultValues = Object.fromEntries(
+        [...GLOBAL_SETTINGS, ...MODES.flatMap((m) => m.settings)].map((s) => [s.id, s.default])
     );
+
+    let values = $state<Record<string, number>>(loadStoredValues(defaultValues));
+    let saveTimeout: ReturnType<typeof setTimeout>;
+
+    function loadStoredValues(defaults: Record<string, number>): Record<string, number> {
+        if (!browser) return defaults
+
+        try {
+            const raw = localStorage.getItem(STORAGE_KEY)
+            if (!raw) return defaults
+
+            const stored = JSON.parse(raw)
+
+            // Restore settings and merge with any new added settings
+            return {...defaults, ...stored}
+        } catch {
+            return defaults;
+        }
+    }
 
     function formatTime(duration: number) {
         if (!isFinite(duration)) return "0:00";
@@ -524,6 +546,16 @@
     })
 
     $effect(() => {
+        const snapshot = JSON.stringify(values); // establishes the reactive dependency
+        if (!browser) return;
+
+        clearTimeout(saveTimeout);
+        saveTimeout = setTimeout(() => {
+            localStorage.setItem(STORAGE_KEY, snapshot);
+        }, 300);
+    })
+
+    $effect(() => {
         if (!canvasEl) return;
 
         innerWidth;
@@ -531,7 +563,9 @@
 
         ctx2d = canvasEl.getContext("2d");
         resizeCanvas();
+    })
 
+    $effect(() => {
         if (!player) return;
         player.setRate(values["songSpeed"])
         player.setPreservePitch(Boolean(values["preservePitch"]))
@@ -565,7 +599,7 @@
                 class:playing={player.isPlaying}
             >
                 <div class="track-row">
-                    <div id="trackName">{`${player?.currentTrackIndex}: ${player?.currentTrack?.name ?? "..."}`}</div>
+                    <div id="trackName">{`${player?.currentTrackIndex + 1}: ${player?.currentTrack?.name ?? "..."}`}</div>
 
                 </div>
                 
