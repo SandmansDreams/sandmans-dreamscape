@@ -1,7 +1,7 @@
 <script lang="ts">
     /* ToDo:
-        - Implement shuffle
         - Speed changes when loading new track
+        - Multiplier does not apply to radial
         - Clamp wave to visible canvas height
         - Settings storage
         - Implement rest of modes
@@ -21,16 +21,20 @@
         readonly frequencyArray: Uint8Array<ArrayBuffer>;
         readonly timeArray: Uint8Array<ArrayBuffer>
 
-        playlists: Playlist[] = $state([]);
+        private playOrder = $state<number[]>([]);
+        private orderPosition = $state(0)
+        private playlists: Playlist[] = $state([]);
         currentTrack = $state<Track | null>(null);
         currentPlaylist = $state<Playlist | null>(null);
         currentTrackIndex = $state(0);
+
         time: number = $state(0);
         duration: number = $state(0);
         isPlaying = $state(false);
         isLooping = $state(true);
-        isShuffling = $state(false);
         isMuted = $state(false);
+        isShuffling = $state(false);
+
 
 
         constructor() {
@@ -64,9 +68,10 @@
 
             this.audioEl.onended = () => {
                 if (this.isLooping) {
-                    this.play()
+                    this.play();
                 } else {
-                    this.loadTrack(this.currentTrackIndex + 1)
+                    this.skip();
+                    this.play();
                 }
             }
         }
@@ -81,15 +86,21 @@
 
             this.playlists.push(playlist);
 
-            if (!this.currentPlaylist) { this.currentPlaylist = playlist }
+            if (!this.currentPlaylist) {
+                this.currentPlaylist = playlist;
+                this.buildPlayOrder();
+            }
         }
 
         addTrackToPlaylist (track: Track, playlistId: string) {
             const playlist = this.getPlaylist(playlistId);
-
             if (!playlist) return;
 
             playlist.tracks.push(track);
+
+            if (this.currentPlaylist?.id === playlistId) {
+                this.buildPlayOrder();
+            }
         }
 
         getPlaylist(playlistId: string) {
@@ -100,26 +111,25 @@
             return this.currentPlaylist?.tracks[trackId]
         }
 
-        async loadTrack(trackIndex: number, autoplay = true) {
+        async loadTrack(trackIndex: number, autoplay = false) {
             if (!this.currentPlaylist) return
-
             if (trackIndex < 0 || trackIndex >= this.currentPlaylist.tracks.length) return;
 
             this.currentTrackIndex = trackIndex;
 
+            const position = this.playOrder.indexOf(trackIndex);
+            if (position >= 0) this.orderPosition = position;
+
             const track = this.currentPlaylist.tracks[trackIndex];
             this.currentTrack = track;
             this.audioEl.src = track.src;
-
             this.duration = this.audioEl.duration;
 
-            if (autoplay) { this.play() }
-            else {
-                if (this.isPlaying) {
-                    this.play()
-                } else {
-                    this.pause()
-                }
+            if (autoplay) {
+                this.play();
+            } else {
+                if (this.isPlaying) this.play();
+                else this.pause();
             }
         }
 
@@ -133,10 +143,7 @@
         
         toggleShuffle() { 
             this.isShuffling = !this.isShuffling
-
-            if (this.isShuffling) {
-                // Play from shuffled order?
-            }
+            this.buildPlayOrder();
         }   
         
         toggleMute() { 
@@ -162,43 +169,25 @@
             this.audioEl.currentTime = time;
         }
 
-        skipForward() {
-            if (!this.currentPlaylist) return
+        skip(directionKey?: string) {
+            if (this.playOrder.length === 0) return
 
-            const nextIndex = this.currentTrackIndex + 1;
-            const lastTrackIndex = this.currentPlaylist.tracks.length - 1;
-
-            if (nextIndex > lastTrackIndex) {
-                this.currentTrackIndex = 0;
-                this.loadTrack(0, false)
+            if (directionKey === "back") {
+                this.orderPosition = (this.orderPosition - 1 + this.playOrder.length) % this.playOrder.length;
+                this.loadTrack(this.playOrder[this.orderPosition], false);
             } else {
-                this.currentTrackIndex = nextIndex;
-                this.loadTrack(nextIndex, false)
-            }
-        }
-
-        skipBack() {
-            if (!this.currentPlaylist) return
-
-            const previousIndex = this.currentTrackIndex - 1;
-            const lastTrackIndex = this.currentPlaylist.tracks.length - 1;
-
-            if (previousIndex < 0) {
-                this.currentTrackIndex = lastTrackIndex;
-                this.loadTrack(lastTrackIndex, false)
-            } else {
-                this.currentTrackIndex = previousIndex;
-                this.loadTrack(previousIndex, false)
+                this.orderPosition = (this.orderPosition + 1) % this.playOrder.length
+                this.loadTrack(this.playOrder[this.orderPosition], false)
             }
         }
 
         setVolume(volume: number) { this.gain.gain.value = volume }
 
         setPlaylist(playlistId: string) {
-            if (!this.currentPlaylist) return
+            if (this.currentPlaylist?.id === playlistId) return
 
-            if (this.currentPlaylist.id === playlistId) return;
-            this.currentPlaylist = this.getPlaylist(playlistId);
+            this.currentPlaylist = this.getPlaylist(playlistId)
+            this.buildPlayOrder()
         }
 
         setRate(rateMult: number) { this.audioEl.playbackRate = rateMult }
@@ -214,6 +203,28 @@
             this.source.disconnect();
             this.analyzer.disconnect();
             this.context.close();
+        }
+
+        private buildPlayOrder() {
+            if (!this.currentPlaylist) {
+                this.playOrder = [];
+                return;
+            }
+
+            const indices = this.currentPlaylist.tracks.map((_, i) => i);
+            
+            if (this.isShuffling) {
+                // Fisher-Yates Shuffle
+                for (let i = indices.length - 1; i > 0; i--) {
+                    let j = Math.floor(Math.random() * (i + 1));
+                    [indices[i], indices[j]] = [indices[j], indices[i]];
+                }
+            }
+
+            this.playOrder = indices;
+
+            const position = this.playOrder.indexOf(this.currentTrackIndex);
+            this.orderPosition = position >= 0 ? position : 0;
         }
     }
 
@@ -566,13 +577,13 @@
                 </div>
 
                 <div class="btn-row">
-                    <button class="icon-btn" id="prevBtn" onclick={() => player?.skipBack()}>
+                    <button class="icon-btn" id="prevBtn" onclick={() => player?.skip("back")}>
                         <img class="icon" src={previousIcon} alt="skip back"/>
                     </button>
                 <button class="icon-btn {player.isPlaying ? "active" : ""}" id="playBtn" onclick={() => player?.togglePlay()}>
                         <img class="icon" src={player.isPlaying ? pauseIcon : playIcon} alt="play"/>
                     </button>
-                    <button class="icon-btn" id="nextBtn" onclick={() => player?.skipForward()}>
+                    <button class="icon-btn" id="nextBtn" onclick={() => player?.skip()}>
                         <img class="icon" src={nextIcon} alt="skip forward"/>
                     </button>
                     <button class="icon-btn {player.isShuffling ? "active" : ""}" id="shuffleBtn" onclick={() => player?.toggleShuffle()}>

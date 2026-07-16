@@ -3,6 +3,7 @@ import type { VisualizerMode } from "../visualizerHelpers";
 const Radial: VisualizerMode = {
   id: "radial",
   label: "Radial",
+  dataType: "frequency",
   axisLabels: { vertical: "AMPLITUDE", horizontal: "FREQUENCY (LOW → HIGH)" },
   settings: [
     {
@@ -98,7 +99,7 @@ const Radial: VisualizerMode = {
         radialRotationSpeed: rotationSpeed,
         hue,
         hueRange,
-        ampMult,
+        multiplier,
         brightness,
     } = values;
 
@@ -125,7 +126,7 @@ const Radial: VisualizerMode = {
 
         const innerRadius = radius;
 
-        const safeAmpMult = Number.isFinite(ampMult) ? ampMult : 1;
+        const safeAmpMult = Number.isFinite(multiplier) ? multiplier : 1;
         const outerRadius = radius + tiltAmp * radius * safeAmpMult;
 
         const arcWidth = angleStep * widthMult;
