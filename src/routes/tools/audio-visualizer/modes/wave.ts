@@ -6,6 +6,7 @@ import type { VisualizerMode } from "../visualizerHelpers";
 const Wave: VisualizerMode = {
   id: "wave",
   label: "Wave",
+  dataType: "time",
   axisLabels: { vertical: "AMPLITUDE", horizontal: "TIME" },
   settings: [
     {

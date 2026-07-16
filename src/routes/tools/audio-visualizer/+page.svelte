@@ -1,5 +1,6 @@
 <script lang="ts">
     /* ToDo:
+        - Implement shuffle
         - Settings storage
         - Implement rest of modes
         - More effects: pitch? reverb?
@@ -15,7 +16,8 @@
         readonly gain = this.context.createGain();
         readonly source = this.context.createMediaElementSource(this.audioEl);
         readonly bufferLength: number;
-        readonly dataArray: Uint8Array<ArrayBuffer>;
+        readonly frequencyArray: Uint8Array<ArrayBuffer>;
+        readonly timeArray: Uint8Array<ArrayBuffer>
 
         playlists: Playlist[] = $state([]);
         currentTrack = $state<Track | null>(null);
@@ -38,7 +40,8 @@
             this.gain.connect(this.context.destination);
 
             this.bufferLength = this.analyzer.frequencyBinCount;
-            this.dataArray = new Uint8Array(this.bufferLength);
+            this.frequencyArray = new Uint8Array(this.bufferLength);
+            this.timeArray = new Uint8Array(this.bufferLength);
 
             // Event Listeners
             this.audioEl.onloadedmetadata = () => {
@@ -66,12 +69,9 @@
             }
         }
 
-        updateFrequencyData() {
-            this.analyzer.getByteFrequencyData(this.dataArray);
-        }
-
-        updateTimeData() {
-            this.analyzer.getByteTimeDomainData(this.dataArray);
+        updateData() {
+            this.analyzer.getByteFrequencyData(this.frequencyArray);
+            this.analyzer.getByteTimeDomainData(this.timeArray);
         }
 
         addPlaylist(playlist: Playlist) {
@@ -372,21 +372,21 @@
         frameId = requestAnimationFrame(draw);
         if (!player || !currentMode || !canvasEl || !ctx2d) return;
 
-        if (modeId = "wave") {
-            player.updateTimeData();
-        } else {
-            player.updateFrequencyData(); // Required
-        }
+        // Required
+        player.updateData();
 
         fillCanvas(values["fade"]);
 
         const rect = canvasEl.getBoundingClientRect();
+        const dataArray = currentMode.dataType === "time"
+            ? player.timeArray
+            : player.frequencyArray
 
         currentMode.draw({
             ctx: ctx2d!,
             canvasWidth: rect.width,
             canvasHeight: rect.height,
-            dataArray: player.dataArray,
+            dataArray: dataArray,
             bufferLength: player.bufferLength,
             timestamp,
             devicePixelRatio,

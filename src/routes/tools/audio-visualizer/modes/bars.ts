@@ -3,6 +3,7 @@ import type { VisualizerMode } from "../visualizerHelpers";
 const Bars: VisualizerMode = {
   id: "bars",
   label: "Bars",
+  dataType: "frequency",
   axisLabels: { vertical: "AMPLITUDE", horizontal: "FREQUENCY (LOW → HIGH)" },
   settings: [
     {

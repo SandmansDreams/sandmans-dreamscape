@@ -37,5 +37,6 @@ export type VisualizerMode = {
     label: string,
     axisLabels: { horizontal: string; vertical: string };
     settings: Setting[];
+    dataType: string;
     draw: (params: ModeParams) => void;
 }
