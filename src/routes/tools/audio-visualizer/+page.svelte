@@ -1,6 +1,8 @@
 <script lang="ts">
     /* ToDo:
         - Implement shuffle
+        - Speed changes when loading new track
+        - Clamp wave to visible canvas height
         - Settings storage
         - Implement rest of modes
         - More effects: pitch? reverb?
