@@ -82,5 +82,7 @@
     .scramble-text {
         display: inline-block;
         cursor: pointer;
+        font-family: monospace;
+        font-size: 12pt;
     }
 </style>

@@ -1,4 +1,10 @@
 <script lang="ts">
+    /* ToDo:
+        - Settings storage
+        - Implement rest of modes
+        - More effects: pitch? reverb?
+        - Stream from computer audio
+    */
     import { onMount, onDestroy } from "svelte"
     import { type Track, type Setting, type Playlist } from "./visualizerHelpers"
 

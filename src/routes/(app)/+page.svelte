@@ -117,6 +117,15 @@
 		<p class="quote" style="margin-top: 0;">-{quote.attribution}</p>
 	</div>
 
+	<div class="tinted-border">
+		<h3>Changelog!</h3>
+		<ul>
+			<li>Created an <i><SecretText text="audio visualizer"/></i> you can find under tools</li>
+			<li>Added several new songs</li>
+			<li>Updated backend stuff</li>
+		</ul>
+	</div>
+
 	<p>Hello and welcome! My name is Gabriel the Angel, but you can call me Gabe or Sandman. I am a sort of "Jack-of-all-trades", doing coding, writing, art, music, etc. My main focuses right now is on music and coding. I can't wait to share all the stuff I am working on with you!</p>
 	<p>This site will (eventually) contain a lot of things:</p>
 	<ul>
