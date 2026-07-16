@@ -300,10 +300,13 @@
     import Radial from "./modes/radial"
     import Wave from "./modes/wave"
 
+    import Spectrogram from "./modes/spectrogram"
+
     const MODES = [
         Bars,
         Radial,
         Wave,
+        Spectrogram,
     ]
 
     // Import image assets
