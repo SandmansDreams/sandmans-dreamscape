@@ -25,20 +25,11 @@ const Spectrogram: VisualizerMode = {
       step: 1,
       default: 1024,
     },
-/*     {
-      id: "spectrogramTilt",
-      label: "Tilt",
-      min: 0,
-      max: 2,
-      step: 0.05,
-      default: 0.25,
-    }, */
   ],
   draw({ ctx, canvasWidth, canvasHeight, dataArray, bufferLength, values }) {
     const {
       spectrogramSpeed: speed,
       spectrogramResolution: resolution,
-      //spectrogramTilt: tilt,
       hue,
       hueRange,
       brightness,
@@ -97,6 +88,8 @@ const Spectrogram: VisualizerMode = {
     for (let row = 0; row < rowCount; row++) {
         const frequencyBinIndex = Math.floor((row / rowCount) * bufferLength);
         const binAmplitude = dataArray[frequencyBinIndex]; // 0-255
+        if (binAmplitude < Math.round(20 * multiplier)) continue // Tighten the smudging
+
         const normalizedAmplitude = binAmplitude / 255; // 0-1
     
         const rowHue = hue + hueRange * normalizedAmplitude;

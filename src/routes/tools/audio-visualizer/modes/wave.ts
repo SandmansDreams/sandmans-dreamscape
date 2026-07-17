@@ -57,29 +57,29 @@ const Wave: VisualizerMode = {
         ctx.lineWidth = thickness;
 
         for (let i = 0; i < bufferLength; i++) {
-        const rawDeviation = dataArray[i] / 128.0 - 1;
-        const shaped = rawDeviation * multiplier;
-        const yPos = centerY + shaped * centerY;
-        const clampedY = Math.max(0, Math.min(yPos, canvasHeight));
+            const rawDeviation = dataArray[i] / 128.0 - 1;
+            const shaped = rawDeviation * multiplier;
+            const yPos = centerY + shaped * centerY;
+            const clampedY = Math.max(0, Math.min(yPos, canvasHeight));
 
-        if (i > 0) {
-            const amplitude = Math.abs(rawDeviation); // 0 = silent, ~1 = loud
-            
-            if (!waveGradient) {
-                ctx.strokeStyle = `hsl(${hue}, 100%, ${(minLightness * brightness / 100) + amplitude * (brightness - minLightness)}%)`;
-            } else {
-                ctx.strokeStyle = `hsl(${hue}, 100%, ${brightness / 2}`;
+            if (i > 0) {
+                const amplitude = Math.abs(rawDeviation); // 0 = silent, ~1 = loud
+                
+                if (!waveGradient) {
+                    ctx.strokeStyle = `hsl(${hue}, 100%, ${(minLightness * brightness / 100) + amplitude * (brightness - minLightness)}%)`;
+                } else {
+                    ctx.strokeStyle = `hsl(${hue}, 100%, ${brightness / 2}%`;
+                }
+                
+                ctx.beginPath();
+                ctx.moveTo(prevX, prevY);
+                ctx.lineTo(x, clampedY);
+                ctx.stroke();
             }
-            
-            ctx.beginPath();
-            ctx.moveTo(prevX, prevY);
-            ctx.lineTo(x, clampedY);
-            ctx.stroke();
-        }
 
-        prevX = x;
-        prevY = clampedY;
-        x += width;
+            prevX = x;
+            prevY = clampedY;
+            x += width;
         }
     },
 };

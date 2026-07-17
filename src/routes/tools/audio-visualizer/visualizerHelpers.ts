@@ -25,6 +25,8 @@ export interface ModeParams {
     canvasWidth: number;
     canvasHeight: number;
     dataArray: Uint8Array;
+    leftArray: Uint8Array;
+    rightArray: Uint8Array;
     bufferLength: number;
     timestamp: number;
     devicePixelRatio: number;

@@ -106,7 +106,7 @@ const Radial: VisualizerMode = {
     if (frameId === undefined || frameId === null) return // First frame is 0 which is falsy
 
     const rotationRadians = isRotating
-        ? (frameId * rotationSpeed * Math.PI) / 180
+        ? (frameId * (rotationSpeed / 100) * Math.PI) / 180
         : (rotation * Math.PI) / 180;
 
     const centerX = canvasWidth / 2;

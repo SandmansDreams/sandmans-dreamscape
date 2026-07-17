@@ -13,12 +13,17 @@
     class AudioPlayer {
         readonly audioEl = new Audio();
         readonly context = new AudioContext();
-        readonly analyzer = this.context.createAnalyser();
+        readonly analyser = this.context.createAnalyser();
         readonly gain = this.context.createGain();
+        readonly splitter = this.context.createChannelSplitter(2);
+        readonly leftAnalyser = this.context.createAnalyser();
+        readonly rightAnalyser = this.context.createAnalyser();
         readonly source = this.context.createMediaElementSource(this.audioEl);
         readonly bufferLength: number;
         readonly frequencyArray: Uint8Array<ArrayBuffer>;
-        readonly timeArray: Uint8Array<ArrayBuffer>
+        readonly timeArray: Uint8Array<ArrayBuffer>;
+        readonly leftArray: Uint8Array<ArrayBuffer>;
+        readonly rightArray: Uint8Array<ArrayBuffer>;
 
         private playOrder = $state<number[]>([]);
         private orderPosition = $state(0)
@@ -34,19 +39,28 @@
         isMuted = $state(false);
         isShuffling = $state(false);
 
-
-
         constructor() {
             // Prepares the audio
-            this.analyzer.fftSize = 2048;
+            this.analyser.fftSize = this.leftAnalyser.fftSize = this.rightAnalyser.fftSize = 2048;
             this.audioEl.crossOrigin = 'anonymous';
-            this.source.connect(this.analyzer);
-            this.analyzer.connect(this.gain);
-            this.gain.connect(this.context.destination);
 
-            this.bufferLength = this.analyzer.frequencyBinCount;
+            // Route audio Source -> Gain -> Output
+            this.source.connect(this.gain)
+            this.gain.connect(this.context.destination)
+
+            // Dual mono analyzer (no output)
+            this.source.connect(this.analyser)
+            
+            // Stereo analyzer (no output)
+            this.source.connect(this.splitter)
+            this.splitter.connect(this.leftAnalyser, 0)
+            this.splitter.connect(this.rightAnalyser, 1)
+
+            this.bufferLength = this.analyser.frequencyBinCount;
             this.frequencyArray = new Uint8Array(this.bufferLength);
             this.timeArray = new Uint8Array(this.bufferLength);
+            this.leftArray = new Uint8Array(this.leftAnalyser.frequencyBinCount);
+            this.rightArray = new Uint8Array(this.rightAnalyser.frequencyBinCount);
 
             // Event Listeners
             this.audioEl.onloadedmetadata = () => {
@@ -76,8 +90,10 @@
         }
 
         updateData() {
-            this.analyzer.getByteFrequencyData(this.frequencyArray);
-            this.analyzer.getByteTimeDomainData(this.timeArray);
+            this.analyser.getByteFrequencyData(this.frequencyArray);
+            this.analyser.getByteTimeDomainData(this.timeArray);
+            this.leftAnalyser.getByteFrequencyData(this.leftArray);
+            this.rightAnalyser.getByteFrequencyData(this.rightArray);
         }
 
         addPlaylist(playlist: Playlist) {
@@ -112,6 +128,7 @@
 
         async loadTrack(trackIndex: number, autoplay = false) {
             if (!this.currentPlaylist) return
+            if (trackIndex === this.currentTrackIndex) return
             if (trackIndex < 0 || trackIndex >= this.currentPlaylist.tracks.length) return;
 
             this.currentTrackIndex = trackIndex;
@@ -202,7 +219,7 @@
         destroy() {
             this.getPlaylist("uploadedTracks")?.tracks.forEach(t => URL.revokeObjectURL(t.src));
             this.source.disconnect();
-            this.analyzer.disconnect();
+            this.analyser.disconnect();
             this.context.close();
         }
 
@@ -296,13 +313,14 @@
     import Bars from "./modes/bars"
     import Radial from "./modes/radial"
     import Wave from "./modes/wave"
-
+    import Stereo from "./modes/stereo"
     import Spectrogram from "./modes/spectrogram"
 
     const MODES = [
         Bars,
         Radial,
         Wave,
+        Stereo,
         Spectrogram,
     ]
 
@@ -416,11 +434,16 @@
             ? player.timeArray
             : player.frequencyArray
 
+        const leftArray = player.leftArray
+        const rightArray = player.rightArray
+
         currentMode.draw({
             ctx: ctx2d!,
             canvasWidth: rect.width,
             canvasHeight: rect.height,
             dataArray: dataArray,
+            leftArray,
+            rightArray,
             bufferLength: player.bufferLength,
             timestamp,
             devicePixelRatio,
@@ -432,7 +455,7 @@
     function fillCanvas(fade: number) {
         if (!ctx2d || !canvasEl) return;
         
-        ctx2d.fillStyle = `rgba(13, 16, 18, ${fade/100})`;
+        ctx2d.fillStyle = `rgba(0, 0, 0, ${fade/100})`;
         ctx2d.fillRect(0, 0, canvasEl.width, canvasEl.height);
     }
 
@@ -523,7 +546,7 @@
             tracks: []
         })
 
-        frameId = requestAnimationFrame(draw);
+        //frameId = requestAnimationFrame(draw);
 
         addEventListener("keydown", (e) => {
             if (e.key === " ") {
@@ -569,6 +592,16 @@
         if (!player) return;
         player.setRate(values["songSpeed"])
         player.setPreservePitch(Boolean(values["preservePitch"]))
+    })
+
+    $effect(() => {
+        if (!player) return
+
+        if (player.isPlaying) {
+            frameId = requestAnimationFrame(draw)
+        } else {
+            cancelAnimationFrame(frameId)
+        }
     })
 
     onDestroy(() => {
