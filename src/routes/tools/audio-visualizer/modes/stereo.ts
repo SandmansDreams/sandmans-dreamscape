@@ -13,6 +13,14 @@ function getEnergy(data: Uint8Array): number {
   return Math.sqrt(sum / data.length);
 }
 
+function sigmoidCurve(x: number, steepness: number, midpoint: number): number {
+  const sigmoid = (t: number) => 1 / (1 + Math.exp(-steepness * (t - midpoint)))
+
+  const y0 = sigmoid(0)
+  const y1 = sigmoid(1)
+  return (sigmoid(x) - y0) / (y1 - y0);
+}
+
 const Stereo: VisualizerMode = {
   id: "stereo",
   label: "Stereo",
@@ -36,6 +44,14 @@ const Stereo: VisualizerMode = {
       step: 0.1,
       default: 1,
       format: (v) => `${v}x`,
+    },
+    {
+      id: "stereoThreshold",
+      label: "Threshold",
+      min: 0.01,
+      max: 1,
+      step: 0.01,
+      default: 0.5,
     },
   ],
   draw({ ctx, canvasWidth, canvasHeight, leftArray, rightArray, values, frameId }) {
@@ -96,7 +112,7 @@ const Stereo: VisualizerMode = {
 
     // Draw left bar
     const leftPeak = getEnergy(leftArray)
-    const leftEmphasizedPeak = leftPeak * ((leftPeak + 0.5) * emphasis)
+    const leftEmphasizedPeak = sigmoidCurve(leftPeak, emphasis, threshold) * ((leftPeak + 0.5) * emphasis)
     const leftHeight = (leftEmphasizedPeak * halfHeight) * multiplier
     const leftHue = hue + (hueRange * leftPeak)
     const leftLightness = Math.max(minLightness, leftPeak * brightness)
@@ -111,7 +127,7 @@ const Stereo: VisualizerMode = {
 
     // Draw right bar
     const rightPeak = getEnergy(rightArray)
-    const rightEmphasizedPeak = rightPeak * ((rightPeak + 0.5) * emphasis) 
+    const rightEmphasizedPeak = sigmoidCurve(rightPeak, emphasis, threshold) * ((rightPeak + 0.5) * emphasis)
     const rightHeight = (rightEmphasizedPeak * halfHeight) * multiplier
     const rightHue = hue + (hueRange * rightPeak)
     const rightLightness = Math.max(minLightness, rightPeak * brightness)
