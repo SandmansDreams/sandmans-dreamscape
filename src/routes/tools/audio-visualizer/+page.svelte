@@ -1,6 +1,6 @@
 <script lang="ts">
     /* ToDo:
-        - Implement new modes: stereo traveller (like minimeters), gnoimeter, stereo visualizer
+        - Implement new modes: gnoimeter, stereo visualizer
         - Effects: pitch? reverb?
         - Stream from computer audio
     */
