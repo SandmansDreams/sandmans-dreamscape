@@ -3,16 +3,14 @@
 
     let canvas: HTMLCanvasElement
     let context: CanvasRenderingContext2D | null
-    const canvasDim = 1000
-    let grids = 20
-    const cellSize = canvasDim / grids
+    const canvasWidth = 1000
+    const canvasHeight = 800
+    const gridCols = canvasWidth * 3 / 100
+    const gridRows = canvasHeight * 3 / 100
+    const cellSize = canvasWidth / gridCols
 
     let scale = $state(1)
     let hoveredCell = $state<Cell | null>(null)
-
-    const testShip = [
-        []
-    ]
 
     type BlockShape = 
         | "full"         
@@ -32,8 +30,8 @@
         shape?: BlockShape
     }
 
-    const grid: Cell[][] = Array.from({ length: grids }, (_, row) =>
-        Array.from({ length: grids }, (_, col) => ({
+    const grid: Cell[][] = Array.from({ length: gridRows }, (_, row) =>
+        Array.from({ length: gridCols }, (_, col) => ({
             col,
             row,
             type: "empty" as CellType,
@@ -94,10 +92,14 @@
             console.error("var {context} not found at function {drawCellChords}")
             return
         }
+
+        const scale = cellSize / 5
         const x = cell.col * cellSize + 5
         const y = cell.row * cellSize + 12
+        const fontSize = scale
 
         context.fillStyle = fillStyle
+        context.font = `${fontSize}px Arial`
         context.fillText(`(${cell.col}, ${cell.row})`, x, y)
     }
 
@@ -146,13 +148,13 @@
 
     function paintTestShape() {
         const setShape = (row: number, col: number, shape: BlockShape) => {
-            if (row < 0 || row >= grids || col < 0 || col >= grids) return
+            if (row < 0 || row >= gridRows || col < 0 || col >= gridCols) return
             grid[row][col].type = "block"
             grid[row][col].shape = shape
         }
 
-        const cy = Math.floor(grids / 2)
-        const cx = Math.floor(grids / 2)
+        const cy = Math.floor(gridRows / 2)
+        const cx = Math.floor(gridCols / 2)
 
         setShape(cy, cx, "full")
         setShape(cy, cx - 1, "full")
@@ -169,8 +171,8 @@
 
     function getCellFromMouseEvent(event: MouseEvent): Cell | null {
         const rect = canvas.getBoundingClientRect()
-        const scaleX = canvasDim / rect.width
-        const scaleY = canvasDim / rect.height
+        const scaleX = canvasWidth / rect.width
+        const scaleY = canvasHeight / rect.height
 
         const x = (event.clientX - rect.left) * scaleX;
         const y = (event.clientY - rect.top) * scaleY;
@@ -178,7 +180,7 @@
         const col = Math.floor(x / cellSize);
         const row = Math.floor(y / cellSize);
     
-        if (col < 0 || col >= grids || row < 0 || row >= grids) return null;
+        if (col < 0 || col >= gridCols || row < 0 || row >= gridRows) return null;
         return grid[row][col] as Cell
     }
 
@@ -257,9 +259,13 @@
 
     function draw() {
         if (!context) return
-        context.clearRect(0,0,canvasDim, canvasDim)
+        context.clearRect(0,0,canvasWidth, canvasHeight)
 
         drawGrid()
+    }
+
+    function scaleCanvas(event: WheelEvent) {
+        scale = scale + event.deltaX
     }
 
     onMount(() => {
@@ -272,20 +278,31 @@
     }) 
 </script>
 
-<main>
-    <div>
+<svelte:window /* onscroll={} *//>
+
+<main class="crt">
+
+    <div id="topBar">
+        <h1>Enders_Game</h1>
+    </div>
+    
+
+    <div id="bottomBar">
 
     </div>
 
     <canvas 
         bind:this={canvas} 
-        width={canvasDim} 
-        height={canvasDim} 
+        width={canvasWidth} 
+        height={canvasHeight} 
         onmousemove={onCanvasMouseMove}
         onmouseleave={handleMouseLeave}
         onclick={onCanvasClick}
         id="renderer" 
-        class="crt"
+        style="
+            width: {canvasWidth}; 
+            height: {canvasHeight};
+        "
     ></canvas>
 </main>
 
@@ -295,6 +312,7 @@
         overflow: hidden;
         overscroll-behavior: none;
         padding: 0;
+        color: aliceblue;
 
         --background: rgb(18, 18, 18);
         --blue: rgba(105, 208, 255, 0.1);
@@ -302,13 +320,11 @@
 
     canvas {
         background-color: var(--background);
-        width: 1000px;
-        height: 1000px;
         position: absolute;
         top: 50%;
         left: 50%;
         transform: translate(-50%, -50%);
-        margin: 0;
+        margin-inline: auto;
         padding: 0;
     }
 
