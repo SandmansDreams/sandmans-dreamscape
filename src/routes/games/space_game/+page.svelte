@@ -3,7 +3,7 @@ App · SVELTE
 <script lang="ts">
     import { onMount } from "svelte";
     import { buildStarMap } from "./render";
-    import { Vector2, Player, Ship, Camera, type InputState, PlayerController, FollowController } from "./types";
+    import { Vector2, Player, Ship, Camera, type InputState, PlayerController, FollowController, CollisionManager } from "./types";
   import { getRandomVector } from "./helpers";
  
     let canvas = $state<HTMLCanvasElement | null>(null)
@@ -25,8 +25,9 @@ App · SVELTE
     let lastTimestamp = 0
     const motionBlur = $state(0.4)
 
-    const shipCount = 100
+    const collisionManger = new CollisionManager()
 
+    const shipCount = 4
     const ships: Ship[] = []
  
     const controller = new PlayerController(input)
@@ -178,6 +179,7 @@ App · SVELTE
  
         if (mode === "flying") {
             player.update(delta)
+            collisionManger.update(ships)
             camera.follow(player.currentShip)
         }
         
