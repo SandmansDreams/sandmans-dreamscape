@@ -20,9 +20,10 @@ App · SVELTE
  
     let frame = 0
     let lastTimestamp = 0
+    const motionBlur = $state(0.4)
  
     const player = new Player(
-        new Vector2(2500, 2500),
+        new Vector2(0, 0),
         new Vector2(0, 0),
         0
     )
@@ -107,7 +108,9 @@ App · SVELTE
     function render() {
         if (!context || !canvas) return;
  
-        context.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+        context.fillStyle = `rgba(0,0,0,${motionBlur})`
+        context.fillRect(0, 0, canvas.clientWidth, canvas.clientHeight)
+        //context.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
  
         // Draw the world (parallax star layers)
         context.save();

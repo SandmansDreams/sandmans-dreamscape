@@ -34,7 +34,7 @@ export class Vector2 {
     }
 
     getSpeed() {
-
+        return Math.hypot(this.x, this.y)
     }
 }
 
@@ -78,7 +78,7 @@ export class Player extends Entity {
         rotation: number,
     ) {
         super(position, velocity, rotation)
-        this.thrust = 0.5
+        this.thrust = 0.1
         this.drag = 0.9999
         this.rotationThrust = 0.001
         this.rotationDrag = 0.99
@@ -158,6 +158,38 @@ export class Player extends Entity {
         ctx.fillStyle = "red"
         ctx.fill()
 
+        ctx.restore()
+
+        this.drawStats(ctx, x, y)
+    }
+
+    private drawStats(ctx: CanvasRenderingContext2D, screenX: number, screenY: number) {
+        const speed = this.velocity.getSpeed()
+ 
+        // Direction as a compass-style degree reading, 0-360
+        const directionDeg = ((this.rotation * 180 / Math.PI) % 360 + 360) % 360
+ 
+        const lines = [
+            `speed: ${speed.toFixed(2)}`,
+            `dir: ${directionDeg.toFixed(1)}°`,
+            `pos: (${Math.round(this.position.x)}, ${Math.round(this.position.y)})`
+        ]
+ 
+        ctx.save()
+ 
+        // Drawn unrotated and after ctx.restore() above, so the text
+        // stays upright regardless of which way the ship is facing.
+        ctx.font = "12px monospace"
+        ctx.fillStyle = "rgba(0, 221, 255, 0.8)"
+        ctx.textBaseline = "top"
+ 
+        const offsetX = 24
+        const lineHeight = 14
+ 
+        lines.forEach((line, i) => {
+            ctx.fillText(line, screenX + offsetX, screenY - lineHeight + i * lineHeight)
+        })
+ 
         ctx.restore()
     }
 }
