@@ -3,12 +3,15 @@ App · SVELTE
 <script lang="ts">
     import { onMount } from "svelte";
     import { buildStarMap } from "./render";
-    import { Vector2, Player, Camera, type InputState } from "./types";
+    import { Vector2, Player, Ship, Camera, type InputState, PlayerController, FollowController } from "./types";
+  import { getRandomVector } from "./helpers";
  
     let canvas = $state<HTMLCanvasElement | null>(null)
     let context = $state<CanvasRenderingContext2D | null>(null)
  
     let starMaps = $state<HTMLCanvasElement[]>([])
+    let mode = $state<"building" | "flying">("flying")
+    let debugMode = $state(true)
  
     const input: InputState = {
         forward: false,
@@ -21,16 +24,16 @@ App · SVELTE
     let frame = 0
     let lastTimestamp = 0
     const motionBlur = $state(0.4)
+
+    const shipCount = 100
+
+    const ships: Ship[] = []
  
-    const player = new Player(
-        new Vector2(0, 0),
-        new Vector2(0, 0),
-        0
-    )
-    player.setInput(input)
+    const controller = new PlayerController(input)
+    let player: Player
  
     const camera = new Camera()
-    camera.position = new Vector2(2500, 2500)
+    camera.position = new Vector2(0, 0)
  
     function resizeCanvas() {
         if (!canvas || !context) return;
@@ -120,7 +123,7 @@ App · SVELTE
         context.restore();
  
         // Draw the player
-        player.draw(context, camera)
+        player.draw(context, camera, debugMode)
     }
  
     function drawLayerLocally(image: HTMLCanvasElement, parallaxFactor: number) {
@@ -173,11 +176,34 @@ App · SVELTE
         const delta = deltaMs / (1000 / 60)
         lastTimestamp = timestamp
  
-        player.update(delta)
-        camera.follow(player)
+        if (mode === "flying") {
+            player.update(delta)
+            camera.follow(player.currentShip)
+        }
+        
         render()
- 
+
         frame = requestAnimationFrame(tick)
+    }
+
+    function toggleMode() {
+        if (mode === "flying") {
+            mode = "building"
+        } else {
+            mode = "flying"
+        }
+    }
+
+    function spawnShips() {
+        for (let s = 0; s < shipCount; s++) {
+            const ship = new Ship(
+                getRandomVector(1000, 1000),
+                getRandomVector(2, 2),
+                0
+            )
+
+            ships.push(ship)
+        }
     }
  
     onMount(() => {
@@ -188,6 +214,12 @@ App · SVELTE
         starMaps?.push(buildStarMap(1000, 1000, 0.2, 4))
         starMaps?.push(buildStarMap(1000, 1000, .05, 7))
         starMaps?.push(buildStarMap(1000, 1000, .006, 12))
+
+        spawnShips()
+        player = new Player(
+            ships,
+            controller,
+        )
  
         frame = requestAnimationFrame(tick)
  
@@ -202,7 +234,7 @@ App · SVELTE
 <div id="container">
     <div id="top-bar" class="ui">
         <h1>Space_Game</h1>
-        <button /* onclick={toggleMode} */>{"Mode = building"}</button>
+        <button onclick={toggleMode}>{`Mode = ${mode}`}</button>
     </div>
  
     <div id="spacer"></div>
