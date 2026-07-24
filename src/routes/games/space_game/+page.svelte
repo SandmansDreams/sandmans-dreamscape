@@ -1,17 +1,27 @@
-
 App · SVELTE
 <script lang="ts">
     import { onMount } from "svelte";
     import { buildStarMap } from "./render";
-    import { Vector2, Player, Ship, Camera, type InputState, PlayerController, FollowController, CollisionManager } from "./types";
-  import { getRandomVector } from "./helpers";
+    import { Vector2, Player, Ship, Camera, type InputState, type DebugOptions, PlayerController, FollowController, CollisionManager } from "./types";
+    import { Asteroid, spawnAsteroidField } from "./entities/asteroid";
+    import { getRandomVector } from "./helpers";
  
     let canvas = $state<HTMLCanvasElement | null>(null)
     let context = $state<CanvasRenderingContext2D | null>(null)
  
     let starMaps = $state<HTMLCanvasElement[]>([])
     let mode = $state<"building" | "flying">("flying")
-    let debugMode = $state(true)
+
+    // Each debug overlay toggles independently.
+    let debugOptions = $state<DebugOptions>({
+        stats: false,
+        vectors: false,
+        hitboxes: false
+    })
+
+    function toggleDebugOption(key: keyof DebugOptions) {
+        debugOptions[key] = !debugOptions[key]
+    }
  
     const input: InputState = {
         forward: false,
@@ -27,8 +37,11 @@ App · SVELTE
 
     const collisionManger = new CollisionManager()
 
-    const shipCount = 4
-    const ships: Ship[] = []
+    const shipCount = 5
+    let ships: Ship[] = $state([])
+    let shipThumbCanvases: (HTMLCanvasElement | null)[] = []
+    const asteroidCount = 200
+    let asteroids: Asteroid[] = []
  
     const controller = new PlayerController(input)
     let player: Player
@@ -119,12 +132,19 @@ App · SVELTE
         // Draw the world (parallax star layers)
         context.save();
         starMaps?.forEach((element, index) => {
-            drawLayerLocally(element, (index + 1) * 0.02)
+            drawLayerLocally(element, (index + 1) * 0.1)
         });
         context.restore();
+
+        // Draw asteroids, skipping ones that are off-screen
+        asteroids.forEach((asteroid) => {
+            if (isVisible(asteroid.position.x, asteroid.position.y, asteroid.radius)) {
+                asteroid.draw(context!, camera, debugOptions)
+            }
+        })
  
         // Draw the player
-        player.draw(context, camera, debugMode)
+        player.draw(context, camera, debugOptions)
     }
  
     function drawLayerLocally(image: HTMLCanvasElement, parallaxFactor: number) {
@@ -167,6 +187,28 @@ App · SVELTE
             y - radius < bottom
         );
     }
+
+    // Renders a live thumbnail of each ship into its own small canvas in the
+    // picker - same rotation, color, and debug overlays as the main view.
+    // Reuses Ship.draw() itself rather than reimplementing the ship art: a
+    // camera centered exactly on the ship makes Ship.draw() place it
+    // dead-center in the thumbnail for free.
+    function renderShipThumbnails() {
+        ships.forEach((ship, index) => {
+            const thumbCanvas = shipThumbCanvases[index]
+            if (!thumbCanvas) return
+
+            const thumbCtx = thumbCanvas.getContext("2d")
+            if (!thumbCtx) return
+
+            thumbCtx.clearRect(0, 0, thumbCanvas.clientWidth, thumbCanvas.clientHeight)
+
+            const thumbCamera = new Camera()
+            thumbCamera.position = ship.position.clone()
+
+            ship.draw(thumbCtx, thumbCamera, debugOptions)
+        })
+    }
  
     function tick(timestamp: number) {
         if (!lastTimestamp) lastTimestamp = timestamp
@@ -179,11 +221,17 @@ App · SVELTE
  
         if (mode === "flying") {
             player.update(delta)
-            collisionManger.update(ships)
+
+            for (const asteroid of asteroids) {
+                asteroid.update(delta)
+            }
+
+            collisionManger.update([...ships, ...asteroids])
             camera.follow(player.currentShip)
         }
         
         render()
+        renderShipThumbnails()
 
         frame = requestAnimationFrame(tick)
     }
@@ -218,6 +266,8 @@ App · SVELTE
         starMaps?.push(buildStarMap(1000, 1000, .006, 12))
 
         spawnShips()
+        asteroids = spawnAsteroidField(asteroidCount, 4000, 4000)
+
         player = new Player(
             ships,
             controller,
@@ -236,6 +286,20 @@ App · SVELTE
 <div id="container">
     <div id="top-bar" class="ui">
         <h1>Space_Game</h1>
+        <div id="debug-toggles">
+            <button
+                class={debugOptions.stats ? "active" : ""}
+                onclick={() => toggleDebugOption("stats")}
+            >Data</button>
+            <button
+                class={debugOptions.vectors ? "active" : ""}
+                onclick={() => toggleDebugOption("vectors")}
+            >Vectors</button>
+            <button
+                class={debugOptions.hitboxes ? "active" : ""}
+                onclick={() => toggleDebugOption("hitboxes")}
+            >Hitboxes</button>
+        </div>
         <button onclick={toggleMode}>{`Mode = ${mode}`}</button>
     </div>
  
@@ -243,17 +307,26 @@ App · SVELTE
  
     <div id="bottom-bar" class="ui">
         <div id="bottom-bar-left">
-            <h3 id="bottom-bar-title-bar">Block Picker</h3>
+            <h3 id="bottom-bar-title-bar">Ship Picker</h3>
             <div id="bottom-bar-options">
-                <button>1</button>
-                <button>2</button>
-                <button>3</button>
+                {#each ships as ship, index}
+                    <button
+                        class="ship-button"
+                        onclick={() => player.setActiveShip(index)}
+                    >
+                        <canvas
+                            bind:this={shipThumbCanvases[index]}
+                            width="72"
+                            height="72"
+                        ></canvas>
+                    </button>
+                {/each}
             </div>
         </div>
         <div id="bottom-bar-right">
             <div id="bottom-bar-selector">
-                <button class="active">Blocks</button>
-                <button>Ships</button>
+                <button>Blocks</button>
+                <button class="active">Ships</button>
                 <button>Other</button>
             </div>
         </div>
@@ -275,8 +348,8 @@ App · SVELTE
         font-family: 'Courier New', Courier, monospace;
  
         --background: rgb(18, 18, 18);
-        --ui-background: rgba(0, 191, 255, 0.1);
-        --ui-background-dark: rgba(0, 191, 255, 0.05);
+        --ui-background: rgba(0, 191, 255, 0.3);
+        --ui-background-dark: rgba(0, 191, 255, 0.1);
         --text-color: rgb(0, 221, 255, 1);
         --blue: rgba(105, 208, 255, 0.1);
     }
@@ -372,6 +445,11 @@ App · SVELTE
         justify-content: space-between;
         border-bottom: solid 3px var(--ui-background);
     }
+
+    #debug-toggles {
+        display: flex;
+        gap: .5rem;
+    }
  
     #bottom-bar {
         position: relative;
@@ -407,6 +485,19 @@ App · SVELTE
         min-width: 100px;
         max-width: 200px;
     }
+    #bottom-bar-options button.ship-button {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: .25rem;
+        min-width: 0;
+        max-width: none;
+    }
+    #bottom-bar-options button.ship-button canvas {
+        display: block;
+        background-color: black;
+        border-radius: 6px;
+    }
     #bottom-bar-right {
         border: 1px solid var(--ui-background);
         background-color: var(--ui-background);
@@ -419,4 +510,3 @@ App · SVELTE
         gap: 10px;
     }
 </style>
- 

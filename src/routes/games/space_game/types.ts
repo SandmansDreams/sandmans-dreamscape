@@ -190,6 +190,18 @@ const NEUTRAL_INPUT: InputState = { forward: false, left: false, backward: false
 
 export type TargetProvider = () => Vector2
 
+// Independent debug overlays - each can be toggled without the others.
+//   stats:    the text readout (speed, rotation, position, etc.)
+//   vectors:  velocity/rotation arrows and steering-target guides
+//   hitboxes: collider outlines
+export type DebugOptions = {
+    stats: boolean
+    vectors: boolean
+    hitboxes: boolean
+}
+
+export const NO_DEBUG: DebugOptions = { stats: false, vectors: false, hitboxes: false }
+
 export class Vector2 {
     constructor(
         public x = 0,
@@ -264,7 +276,7 @@ export abstract class Entity { // A thing that has physics on the game plane
     abstract draw(
         ctx: CanvasRenderingContext2D,
         camera: Camera,
-        debugMode?: boolean
+        debug?: DebugOptions
     ): void
 
     // Called by CollisionManager whenever this entity's collider overlaps
@@ -603,9 +615,9 @@ export class Player {
         }
     }
 
-    draw(ctx: CanvasRenderingContext2D, camera: Camera, debugMode: boolean) {
+    draw(ctx: CanvasRenderingContext2D, camera: Camera, debug: DebugOptions = NO_DEBUG) {
         for (const ship of this.ships) {
-            ship.draw(ctx, camera, debugMode)
+            ship.draw(ctx, camera, debug)
         }
     }
 }
@@ -674,7 +686,7 @@ export class FollowController extends Controller {
             Math.cos(error)
         );
 
-        const maxRotationSpeed = 0.5;
+        const maxRotationSpeed = 0.1;
 
         // Scale rotation speed down as we get closer to facing the target,
         // so the ship eases into alignment instead of overshooting.
@@ -846,7 +858,7 @@ export class Ship extends Entity {
     draw(
         ctx: CanvasRenderingContext2D,
         camera: Camera,
-        debugMode: boolean
+        debug: DebugOptions = NO_DEBUG
     ) {
         const x =
             this.position.x
@@ -873,16 +885,23 @@ export class Ship extends Entity {
         ctx.fillStyle = this.color
         ctx.fill()
 
-        if (debugMode) {
+        if (debug.vectors) {
             this.drawRotationVelocity(ctx)
+        }
+
+        if (debug.hitboxes) {
             this.collider?.drawDebug(ctx)
         }
 
         ctx.restore()
 
-        if (debugMode) {
+        if (debug.stats) {
             this.drawStats(ctx, x, y)
+        }
+
+        if (debug.vectors) {
             this.drawVelocityVector(ctx, x, y)
+
             if (this.controller instanceof FollowController) {
                 this.controller?.paintTarget(this, ctx, camera)
             }
@@ -910,8 +929,8 @@ export class CircleCollider extends Collider {
 
         ctx.translate(this.offset.x, this.offset.y);
 
-        ctx.strokeStyle = "rgba(255, 0, 0, 0.5)";
-        ctx.setLineDash([6, 6]);
+        ctx.strokeStyle = "rgba(255, 0, 0, 0.45)";
+        ctx.setLineDash([6, 6])
         ctx.lineWidth = .5;
 
         ctx.beginPath();
@@ -923,6 +942,12 @@ export class CircleCollider extends Collider {
             Math.PI * 2
         );
         ctx.stroke();
+
+        // Center point
+        ctx.fillStyle = "#00ff00";
+        ctx.beginPath();
+        ctx.arc(0, 0, 2, 0, Math.PI * 2);
+        ctx.fill();
 
         ctx.restore();
     }
