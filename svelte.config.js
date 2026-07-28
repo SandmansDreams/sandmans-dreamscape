@@ -13,6 +13,10 @@ const config = {
 	preprocess: [vitePreprocess(), mdsvex(mdsvexOptions)],
 	kit: {
 		adapter: adapter()
+	},
+	onwarn: (warning, handler) => {
+		if (warning.code.includes("a11y")) return;
+		handler(warning)
 	}
 }
 

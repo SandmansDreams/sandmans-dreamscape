@@ -1,5 +1,7 @@
 import { getRandomVector } from "../helpers"
-import { Vector2, Entity, CircleCollider, Camera, NO_DEBUG, type DebugOptions } from "../types"
+import { CircleCollider, Vector2 } from "../physics"
+import { Camera, NO_DEBUG, type DebugOptions } from "../types"
+import { Entity } from "./entity"
 
 const TWO_PI = Math.PI * 2
 

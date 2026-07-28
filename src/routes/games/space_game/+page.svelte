@@ -1,11 +1,14 @@
 App · SVELTE
 <script lang="ts">
     import { onMount } from "svelte";
-    import { buildStarMap } from "./render";
-    import { Vector2, Player, Ship, Camera, type InputState, type DebugOptions, PlayerController, FollowController, CollisionManager } from "./types";
+    import { buildStarMap, drawLayerLocally } from "./background";
     import { Asteroid, spawnAsteroidField } from "./entities/asteroid";
-    import { getRandomVector } from "./helpers";
+    import { getPositionFromEvent, getRandomVector, isVisible, resizeCanvas } from "./helpers";
   import { VERSION } from "svelte/compiler";
+  import { Camera, Player, type DebugOptions } from "./types";
+  import { FollowController, NEUTRAL_INPUT, PlayerController, type InputState } from "./controller";
+  import { CollisionManager, Vector2 } from "./physics";
+  import { Ship } from "./entities/ship";
  
     let canvas = $state<HTMLCanvasElement | null>(null)
     let context = $state<CanvasRenderingContext2D | null>(null)
@@ -24,13 +27,7 @@ App · SVELTE
         debugOptions[key] = !debugOptions[key]
     }
  
-    const input: InputState = {
-        forward: false,
-        left: false,
-        backward: false,
-        right: false,
-        space: false
-    }
+    const input: InputState = NEUTRAL_INPUT
  
     let frame = 0
     let lastTimestamp = 0
@@ -39,8 +36,8 @@ App · SVELTE
     const collisionManger = new CollisionManager()
 
     const shipCount = 5
-    let ships: Ship[] = $state([])
-    let shipThumbCanvases: (HTMLCanvasElement | null)[] = []
+    let ships = $state<Ship[]>([])
+    let shipThumbCanvases = $state<HTMLCanvasElement[] | null[]>([])
     const asteroidCount = 200
     let asteroids: Asteroid[] = []
  
@@ -49,23 +46,6 @@ App · SVELTE
  
     const camera = new Camera()
     camera.position = new Vector2(0, 0)
- 
-    function resizeCanvas() {
-        if (!canvas || !context) return;
- 
-        const rect = canvas.getBoundingClientRect();
-        const dpr = window.devicePixelRatio || 1;
- 
-        const width = Math.round(rect.width * dpr)
-        const height = Math.round(rect.height * dpr)
- 
-        // Resize the backing buffer to match the displayed size
-        canvas.width = width;
-        canvas.height = height;
- 
-        // Reset any previous transforms and scale for HiDPI displays
-        context.setTransform(dpr, 0, 0, dpr, 0, 0);
-    }
  
     function handleKeyDown(event: KeyboardEvent) {
         switch (event.key.toLowerCase()) {
@@ -133,13 +113,13 @@ App · SVELTE
         // Draw the world (parallax star layers)
         context.save();
         starMaps?.forEach((element, index) => {
-            drawLayerLocally(element, (index + 1) * 0.1)
+            drawLayerLocally(element, (index + 1) * 0.1, context!, camera)
         });
         context.restore();
 
         // Draw asteroids, skipping ones that are off-screen
         asteroids.forEach((asteroid) => {
-            if (isVisible(asteroid.position.x, asteroid.position.y, asteroid.radius)) {
+            if (isVisible(asteroid.position.x, asteroid.position.y, asteroid.radius, canvas!, camera)) {
                 asteroid.draw(context!, camera, debugOptions)
             }
         })
@@ -147,53 +127,7 @@ App · SVELTE
         // Draw the player
         player.draw(context, camera, debugOptions)
     }
- 
-    function drawLayerLocally(image: HTMLCanvasElement, parallaxFactor: number) {
-        const w = image.width;
-        const h = image.height;
- 
-        const x =
-            (-camera.position.x * parallaxFactor) % w;
- 
-        const y =
-            (-camera.position.y * parallaxFactor) % h;
- 
-        for (let ix = -1; ix <= 1; ix++) {
-            for (let iy = -1; iy <= 1; iy++) {
-                context?.drawImage(
-                    image,
-                    x + ix * w,
-                    y + iy * h
-                );
-            }
-        }
-    }
- 
-    function isVisible(
-        x: number,
-        y: number,
-        radius: number
-    ) {
-        if (!canvas) return false
- 
-        const left = camera.position.x - canvas.clientWidth / 2;
-        const right = camera.position.x + canvas.clientWidth / 2;
-        const top = camera.position.y - canvas.clientHeight / 2;
-        const bottom = camera.position.y + canvas.clientHeight / 2;
- 
-        return (
-            x + radius > left &&
-            x - radius < right &&
-            y + radius > top &&
-            y - radius < bottom
-        );
-    }
 
-    // Renders a live thumbnail of each ship into its own small canvas in the
-    // picker - same rotation, color, and debug overlays as the main view.
-    // Reuses Ship.draw() itself rather than reimplementing the ship art: a
-    // camera centered exactly on the ship makes Ship.draw() place it
-    // dead-center in the thumbnail for free.
     function renderShipThumbnails() {
         ships.forEach((ship, index) => {
             const thumbCanvas = shipThumbCanvases[index]
@@ -258,32 +192,21 @@ App · SVELTE
     }
 
     function handleGameClick(event: MouseEvent) {
-        const position = getPositionFromEvent(event)
+        const position = getPositionFromEvent(event, canvas!, camera)
         ships.forEach((ship) => {
             if (ship.controller instanceof FollowController && position) {
                 ship.controller!.setTemporaryTarget(() => position)
             }
         })
     }
-
-    function getPositionFromEvent(event: MouseEvent) {
-        if (!canvas) return
-
-        const rect = canvas.getBoundingClientRect()
-
-        const screenX = event.clientX - rect.left
-        const screenY = event.clientY - rect.top
-
-        const x = screenX - canvas.clientWidth / 2 + camera.position.x
-        const y = screenY - canvas.clientHeight / 2 + camera.position.y
-
-        return new Vector2(x, y)
-    }
  
     onMount(() => {
         if (!canvas) return
+
         context = canvas.getContext("2d")
-        resizeCanvas()
+        if (!context) return
+
+        resizeCanvas(canvas, context)
  
         starMaps?.push(buildStarMap(1000, 1000, 0.2, 4))
         starMaps?.push(buildStarMap(1000, 1000, .05, 7))
@@ -303,7 +226,7 @@ App · SVELTE
     })
 </script>
  
-<svelte:window onkeydown={handleKeyDown} onkeyup={handleKeyUp} onresize={resizeCanvas} /* onscroll={} */></svelte:window>
+<svelte:window onkeydown={handleKeyDown} onkeyup={handleKeyUp} onresize={() => resizeCanvas(canvas!, context!)} /* onscroll={} */></svelte:window>
  
 <div id="overlay" class="crt"></div>
  
@@ -327,6 +250,8 @@ App · SVELTE
         <button onclick={toggleMode}>{`Mode = ${mode}`}</button>
     </div>
  
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div id="spacer" onclick={handleGameClick}></div>
  
     <div id="bottom-bar" class="ui">
@@ -378,7 +303,7 @@ App · SVELTE
         --blue: rgba(105, 208, 255, 0.1);
     }
  
-    h1, h2, h3, h4, h5, h6 {
+    h1, h3 {
         line-height: normal;
         margin: 0;
         padding: 0;

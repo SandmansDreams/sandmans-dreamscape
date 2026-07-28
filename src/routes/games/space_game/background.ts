@@ -1,4 +1,5 @@
-import {Vector2} from "./types"
+import {Vector2} from "./physics"
+import type { Camera } from "./types"
 
 const starColors = [30, 50, 60, 150]
 
@@ -83,4 +84,25 @@ function drawStar(context: CanvasRenderingContext2D, star: Star) {
     }
     context.closePath()
     context.fill()
+}
+
+export function drawLayerLocally(image: HTMLCanvasElement, parallaxFactor: number, context: CanvasRenderingContext2D, camera: Camera) {
+    const w = image.width;
+    const h = image.height;
+
+    const x =
+        (-camera.position.x * parallaxFactor) % w;
+
+    const y =
+        (-camera.position.y * parallaxFactor) % h;
+
+    for (let ix = -1; ix <= 1; ix++) {
+        for (let iy = -1; iy <= 1; iy++) {
+            context?.drawImage(
+                image,
+                x + ix * w,
+                y + iy * h
+            );
+        }
+    }
 }
