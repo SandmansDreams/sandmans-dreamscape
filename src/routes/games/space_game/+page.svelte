@@ -5,6 +5,7 @@ App · SVELTE
     import { Vector2, Player, Ship, Camera, type InputState, type DebugOptions, PlayerController, FollowController, CollisionManager } from "./types";
     import { Asteroid, spawnAsteroidField } from "./entities/asteroid";
     import { getRandomVector } from "./helpers";
+  import { VERSION } from "svelte/compiler";
  
     let canvas = $state<HTMLCanvasElement | null>(null)
     let context = $state<CanvasRenderingContext2D | null>(null)
@@ -255,6 +256,29 @@ App · SVELTE
             ships.push(ship)
         }
     }
+
+    function handleGameClick(event: MouseEvent) {
+        const position = getPositionFromEvent(event)
+        ships.forEach((ship) => {
+            if (ship.controller instanceof FollowController && position) {
+                ship.controller!.setTemporaryTarget(() => position)
+            }
+        })
+    }
+
+    function getPositionFromEvent(event: MouseEvent) {
+        if (!canvas) return
+
+        const rect = canvas.getBoundingClientRect()
+
+        const screenX = event.clientX - rect.left
+        const screenY = event.clientY - rect.top
+
+        const x = screenX - canvas.clientWidth / 2 + camera.position.x
+        const y = screenY - canvas.clientHeight / 2 + camera.position.y
+
+        return new Vector2(x, y)
+    }
  
     onMount(() => {
         if (!canvas) return
@@ -283,7 +307,7 @@ App · SVELTE
  
 <div id="overlay" class="crt"></div>
  
-<div id="container">
+<div id="container" >
     <div id="top-bar" class="ui">
         <h1>Space_Game</h1>
         <div id="debug-toggles">
@@ -303,7 +327,7 @@ App · SVELTE
         <button onclick={toggleMode}>{`Mode = ${mode}`}</button>
     </div>
  
-    <div id="spacer"></div>
+    <div id="spacer" onclick={handleGameClick}></div>
  
     <div id="bottom-bar" class="ui">
         <div id="bottom-bar-left">
@@ -403,6 +427,7 @@ App · SVELTE
         margin-inline: auto;
         padding: 0;
         z-index: 0;
+        pointer-events: none;
     }
  
     .crt {

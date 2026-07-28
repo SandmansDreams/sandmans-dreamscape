@@ -623,16 +623,29 @@ export class Player {
 }
 
 export class FollowController extends Controller {
+    priorTarget: TargetProvider | null = null
+    temporaryTarget: TargetProvider | null = null
+    target: TargetProvider | null
+
     constructor(
-        public target: TargetProvider
+        target: TargetProvider | null
     ) {
         super();
+        this.target = target
     }
 
     update(ship: Ship) {
         this.clearInput();
 
-        const targetPos: Vector2 = this.target()
+        let targetPos: Vector2 | null = null
+
+        if (this.temporaryTarget) {
+            targetPos = this.temporaryTarget()
+        } else {
+            if (this.target) targetPos = this.target()
+        }
+
+        if (!targetPos) return
 
         const desiredDistance = 200
         const distance = getDistance(ship.position, targetPos);
@@ -649,10 +662,6 @@ export class FollowController extends Controller {
             targetPos
                 .clone()
                 .subtract(ship.position);
-
-        if (distance < 10) {
-            return;
-        }
 
         const desiredSpeed =
             distance > arriveRadius
@@ -723,6 +732,19 @@ export class FollowController extends Controller {
         if (velocityError.getSpeed() > 0.5) {
             this.input.space = true;
         }
+
+        if (this.temporaryTarget) {
+            if (distance < 100) {
+                this.target = this.priorTarget
+                
+                this.priorTarget = null
+                this.temporaryTarget = null
+            }
+        }
+
+        if (distance < desiredDistance) {
+            return;
+        }
     }
 
     paintTarget(
@@ -730,7 +752,15 @@ export class FollowController extends Controller {
         ctx: CanvasRenderingContext2D,
         camera: Camera,
     ) {
-        const targetPos: Vector2 = this.target() 
+        let targetPos: Vector2 | null = null
+
+        if (this.temporaryTarget) {
+            targetPos = this.temporaryTarget()
+        } else {
+            if (this.target) targetPos = this.target()
+        }
+
+        if (!targetPos) return
 
         const relativeTargetX =
             targetPos.x
@@ -782,6 +812,15 @@ export class FollowController extends Controller {
         ctx.stroke();
 
         ctx.restore();
+    }
+
+    setTarget(newTarget: TargetProvider) {
+        this.target = newTarget
+    }
+
+    setTemporaryTarget(newTarget: TargetProvider) {
+        this.priorTarget = this.target
+        this.temporaryTarget = newTarget
     }
 }
 
