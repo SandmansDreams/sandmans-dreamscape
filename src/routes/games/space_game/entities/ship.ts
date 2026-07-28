@@ -1,28 +1,30 @@
 import { Entity } from "./entity"
-import { Vector2 } from "../physics"
+import { PhysicsObject, Vector2 } from "../physics"
 import { Controller, FollowController } from "../controller"
 import { CircleCollider } from "../physics"
 import { NEUTRAL_INPUT } from "../controller"
 import { Camera, NO_DEBUG, type DebugOptions } from "../types"
+import { ShipGrid } from "../builder"
 
 export class Ship extends Entity {
-    controller?: Controller
     thrust: number
     rotationThrust: number
     color: string = "grey"
+    grid: ShipGrid
 
     constructor(
         position: Vector2,
         velocity: Vector2,
         rotation: number,
-        // blocks: Block[]
-        // placements: Placement[]
+        controller: Controller,
+        grid: ShipGrid
     ) {
-        super(position, velocity, rotation)
+        super(position, velocity, rotation, controller)
+        this.grid = grid
         this.thrust = 0.1
         this.rotationThrust = 0.001
         this.collider = new CircleCollider(15, new Vector2, this)
-        this.mass = 10
+        this.mass = this.grid.filledCount || 10
     }
 
     update(delta: number) {
@@ -80,30 +82,15 @@ export class Ship extends Entity {
         camera: Camera,
         debug: DebugOptions = NO_DEBUG
     ) {
-        const x =
-            this.position.x
-            - camera.position.x
-            + ctx.canvas.clientWidth / 2
-
-        const y =
-            this.position.y
-            - camera.position.y
-            + ctx.canvas.clientHeight / 2
+        const {x, y} = camera.worldToScreen(this.position.x, this.position.y, ctx.canvas.clientWidth, ctx.canvas.clientHeight)
 
         ctx.save()
 
         ctx.translate(x, y)
         ctx.rotate(this.rotation)
-
-        ctx.beginPath()
-        ctx.moveTo(18, 0)
-        ctx.lineTo(-12, -10)
-        ctx.lineTo(-6, 0)
-        ctx.lineTo(-12, 10)
-        ctx.closePath()
-
-        ctx.fillStyle = this.color
-        ctx.fill()
+        ctx.scale(camera.zoom, camera.zoom)
+        
+        this.grid.draw(ctx, 1)
 
         if (debug.vectors) {
             this.drawRotationVelocity(ctx)
@@ -130,5 +117,9 @@ export class Ship extends Entity {
 
     setColor(string: string) {
         this.color = string
+    }
+
+    onCollision(other: PhysicsObject): void {
+        
     }
 }

@@ -64,22 +64,45 @@ export class Camera {
     position: Vector2 = new Vector2(0, 0)
     drift: number = 0.07
     maxDist: number = 150
+    zoom: number = 1
+    minZoom: number = 0.25
+    maxZoom: number = 4
 
     follow(target: Entity) {
         const dx = target.position.x - this.position.x
         const dy = target.position.y - this.position.y
 
         const distance = Math.hypot(dx, dy)
-
-        // Clamp so drift ramps up smoothly as the target pulls away, capping
-        // at 1 once it's past maxDist (this was Math.max before, which made
-        // the multiplier >= 1 unconditionally and defeated the point of the
-        // "drift" easing).
         const t = Math.min(distance / this.maxDist, 1)
-
         const drift = this.drift * t
 
         this.position.x += dx * drift
         this.position.y += dy * drift
+    }
+
+    worldToScreen(worldX: number, worldY: number, canvasWidth: number, canvasHeight: number): Vector2 {
+        return new Vector2(
+            (worldX - this.position.x) * this.zoom + canvasWidth / 2,
+            (worldY - this.position.y) * this.zoom + canvasHeight / 2
+        )
+    }
+
+    // Inverse of worldToScreen - for turning a click into a world position.
+    screenToWorld(screenX: number, screenY: number, canvasWidth: number, canvasHeight: number): Vector2 {
+        return new Vector2(
+            (screenX - canvasWidth / 2) / this.zoom + this.position.x,
+            (screenY - canvasHeight / 2) / this.zoom + this.position.y
+        )
+    }
+
+    zoomToward(screenX: number, screenY: number, canvasWidth: number, canvasHeight: number, factor: number) {
+        const worldBefore = this.screenToWorld(screenX, screenY, canvasWidth, canvasHeight)
+
+        this.zoom = Math.min(Math.max(this.zoom * factor, this.minZoom), this.maxZoom)
+
+        const worldAfter = this.screenToWorld(screenX, screenY, canvasWidth, canvasHeight)
+
+        this.position.x += worldBefore.x - worldAfter.x
+        this.position.y += worldBefore.y - worldAfter.y
     }
 }

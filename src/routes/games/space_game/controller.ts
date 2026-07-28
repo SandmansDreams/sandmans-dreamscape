@@ -1,5 +1,4 @@
 import type { Entity } from "./entities/entity"
-import type { Ship } from "./entities/ship"
 import { getDistance } from "./helpers"
 import type { Vector2 } from "./physics"
 import type { Camera } from "./types"
@@ -26,6 +25,16 @@ export abstract class Controller { // A thing that makes other things move
     abstract update(entity: Entity, delta: number): void
 }
 
+export class EmptyController extends Controller{
+    constructor() {
+        super()
+    }
+
+    update(): void {
+        return
+    }
+}
+
 export class PlayerController extends Controller {
     constructor(
         private keyboard: InputState
@@ -33,7 +42,7 @@ export class PlayerController extends Controller {
         super()
     }
 
-    update(_ship: Ship, _delta: number) {
+    update(_ship: Entity, _delta: number) {
         Object.assign(this.input, this.keyboard)
     }
 }
@@ -50,7 +59,7 @@ export class FollowController extends Controller {
         this.target = target
     }
 
-    update(ship: Ship) {
+    update(ship: Entity) {
         this.clearInput();
 
         let targetPos: Vector2 | null = null
@@ -91,6 +100,7 @@ export class FollowController extends Controller {
 
         const steering =
             desiredVelocity
+                .clone()
                 .subtract(ship.velocity);
 
         if (steering.getSpeed() < 0.01) {
@@ -164,7 +174,7 @@ export class FollowController extends Controller {
     }
 
     paintTarget(
-        ship: Ship,
+        ship: Entity,
         ctx: CanvasRenderingContext2D,
         camera: Camera,
     ) {
@@ -178,25 +188,15 @@ export class FollowController extends Controller {
 
         if (!targetPos) return
 
-        const relativeTargetX =
-            targetPos.x
-            - camera.position.x
-            + ctx.canvas.clientWidth / 2;
+        const relativeTarget = camera.worldToScreen(
+            targetPos.x, targetPos.y,
+            ctx.canvas.clientWidth, ctx.canvas.clientHeight
+        )
 
-        const relativeTargetY =
-            targetPos.y
-            - camera.position.y
-            + ctx.canvas.clientHeight / 2;
-
-        const relativeShipX = 
-            ship.position.x
-            - camera.position.x
-            + ctx.canvas.clientWidth / 2;
-
-        const relativeShipY = 
-            ship.position.y
-            - camera.position.y
-            + ctx.canvas.clientHeight / 2;
+        const relativeShip = camera.worldToScreen(
+            ship.position.x, ship.position.y,
+            ctx.canvas.clientWidth, ctx.canvas.clientHeight
+        )
 
         const size = 10;
 
@@ -207,15 +207,15 @@ export class FollowController extends Controller {
 
         // Crosshair
         ctx.beginPath();
-        ctx.moveTo(relativeTargetX - size, relativeTargetY);
-        ctx.lineTo(relativeTargetX + size, relativeTargetY);
-        ctx.moveTo(relativeTargetX, relativeTargetY - size);
-        ctx.lineTo(relativeTargetX, relativeTargetY + size);
+        ctx.moveTo(relativeTarget.x - size, relativeTarget.y);
+        ctx.lineTo(relativeTarget.x + size, relativeTarget.y);
+        ctx.moveTo(relativeTarget.x, relativeTarget.y - size);
+        ctx.lineTo(relativeTarget.x, relativeTarget.y + size);
         ctx.stroke();
 
         // Circle
         ctx.beginPath();
-        ctx.arc(relativeTargetX, relativeTargetY, size * 0.6, 0, Math.PI * 2);
+        ctx.arc(relativeTarget.x, relativeTarget.y, size * 0.6, 0, Math.PI * 2);
         ctx.stroke();
 
         // Path
@@ -223,8 +223,8 @@ export class FollowController extends Controller {
         ctx.strokeStyle = "rgba(255, 64, 64, 0.2)";
 
         ctx.beginPath();
-        ctx.moveTo(relativeShipX, relativeShipY);
-        ctx.lineTo(relativeTargetX, relativeTargetY);
+        ctx.moveTo(relativeShip.x, relativeShip.y);
+        ctx.lineTo(relativeTarget.x, relativeTarget.y);
         ctx.stroke();
 
         ctx.restore();
@@ -237,5 +237,72 @@ export class FollowController extends Controller {
     setTemporaryTarget(newTarget: TargetProvider) {
         this.priorTarget = this.target
         this.temporaryTarget = newTarget
+    }
+}
+
+export class AttackController extends Controller {
+    constructor(
+        public target: Entity
+    ) {
+        super();
+    }
+
+    update(
+        body: Entity,
+        delta: number
+    ) {
+        this.clearInput();
+
+        const toTarget =
+            this.target.position
+                .clone()
+                .subtract(body.position);
+
+        const distance = toTarget.getSpeed();
+
+        const desiredAngle = Math.atan2(
+            toTarget.y,
+            toTarget.x
+        );
+
+        let angleError =
+            desiredAngle - body.rotation;
+
+        angleError = Math.atan2(
+            Math.sin(angleError),
+            Math.cos(angleError)
+        );
+
+        // Rotate toward the target
+        if (angleError > 0.05) {
+            this.input.right = true;
+        } else if (angleError < -0.05) {
+            this.input.left = true;
+        }
+
+        const attackRange = 250;
+
+        // Close distance
+        if (
+            distance > attackRange &&
+            Math.abs(angleError) < 0.25
+        ) {
+            this.input.forward = true;
+        }
+
+        // Slow down when close
+        if (
+            distance < attackRange * 0.75 &&
+            body.velocity.getSpeed() > 1
+        ) {
+            this.input.space = true;
+        }
+
+        // TODO:
+        // if (distance < attackRange &&
+        //     Math.abs(angleError) < 0.1)
+        // {
+        //     ship.firePrimaryWeapon();
+        // }
     }
 }

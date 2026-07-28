@@ -6,34 +6,24 @@ export function getDistance(a: Vector2, b: Vector2) {
 }
 
 export function getRandomVector(xMax: number, yMax: number) {
-    const xNegative = Boolean(Math.floor(Math.random()))
-    const yNegative = Boolean(Math.floor(Math.random()))
+    const xNegative = Math.random() < 0.5
+    const yNegative = Math.random() < 0.5
     const x = xNegative ? -Math.random() * xMax : Math.random() * xMax
     const y = yNegative ? -Math.random() * yMax : Math.random() * yMax
 
     return new Vector2(x, y)
 }
 
-export function isVisible(
-    x: number,
-    y: number,
-    radius: number,
-    canvas: HTMLCanvasElement,
-    camera: Camera
-) {
-    if (!canvas) return false
+export function isVisible(x: number, y: number, radius: number, canvas: HTMLCanvasElement, camera: Camera): boolean {
+    const halfWidth = (canvas.clientWidth / 2) / camera.zoom;
+    const halfHeight = (canvas.clientHeight / 2) / camera.zoom;
 
-    const left = camera.position.x - canvas.clientWidth / 2;
-    const right = camera.position.x + canvas.clientWidth / 2;
-    const top = camera.position.y - canvas.clientHeight / 2;
-    const bottom = camera.position.y + canvas.clientHeight / 2;
+    const left = camera.position.x - halfWidth;
+    const right = camera.position.x + halfWidth;
+    const top = camera.position.y - halfHeight;
+    const bottom = camera.position.y + halfHeight;
 
-    return (
-        x + radius > left &&
-        x - radius < right &&
-        y + radius > top &&
-        y - radius < bottom
-    );
+    return x + radius > left && x - radius < right && y + radius > top && y - radius < bottom;
 }
 
 export function getPositionFromEvent(event: MouseEvent, canvas: HTMLCanvasElement, camera: Camera) {
@@ -42,10 +32,7 @@ export function getPositionFromEvent(event: MouseEvent, canvas: HTMLCanvasElemen
     const screenX = event.clientX - rect.left
     const screenY = event.clientY - rect.top
 
-    const x = screenX - canvas.clientWidth / 2 + camera.position.x
-    const y = screenY - canvas.clientHeight / 2 + camera.position.y
-
-    return new Vector2(x, y)
+    return camera.screenToWorld(screenX, screenY, canvas.clientWidth, canvas.clientHeight)
 }
 
 export function resizeCanvas(canvas: HTMLCanvasElement, context: CanvasRenderingContext2D) {

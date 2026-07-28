@@ -87,21 +87,19 @@ function drawStar(context: CanvasRenderingContext2D, star: Star) {
 }
 
 export function drawLayerLocally(image: HTMLCanvasElement, parallaxFactor: number, context: CanvasRenderingContext2D, camera: Camera) {
-    const w = image.width;
-    const h = image.height;
+    const zoom = camera.zoom;
+    const w = image.width * zoom;
+    const h = image.height * zoom;
 
-    const x =
-        (-camera.position.x * parallaxFactor) % w;
-
-    const y =
-        (-camera.position.y * parallaxFactor) % h;
+    const x = (-camera.position.x * parallaxFactor * zoom) % w;
+    const y = (-camera.position.y * parallaxFactor * zoom) % h;
 
     for (let ix = -1; ix <= 1; ix++) {
         for (let iy = -1; iy <= 1; iy++) {
-            context?.drawImage(
+            context.drawImage(
                 image,
-                x + ix * w,
-                y + iy * h
+                0, 0, image.width, image.height,
+                x + ix * w, y + iy * h, w, h
             );
         }
     }

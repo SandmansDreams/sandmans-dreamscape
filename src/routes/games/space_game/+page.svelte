@@ -4,11 +4,12 @@ App · SVELTE
     import { buildStarMap, drawLayerLocally } from "./background";
     import { Asteroid, spawnAsteroidField } from "./entities/asteroid";
     import { getPositionFromEvent, getRandomVector, isVisible, resizeCanvas } from "./helpers";
-  import { VERSION } from "svelte/compiler";
-  import { Camera, Player, type DebugOptions } from "./types";
-  import { FollowController, NEUTRAL_INPUT, PlayerController, type InputState } from "./controller";
-  import { CollisionManager, Vector2 } from "./physics";
-  import { Ship } from "./entities/ship";
+    import { Camera, Player, type DebugOptions } from "./types";
+    import { EmptyController, FollowController, NEUTRAL_INPUT, PlayerController, type InputState } from "./controller";
+    import { CollisionManager, Vector2 } from "./physics";
+    import { Ship } from "./entities/ship";
+    import { BLOCK_MENU, ShipGrid, type BlockShape } from "./builder";
+    import { GridEditor } from "./grid-editor";
  
     let canvas = $state<HTMLCanvasElement | null>(null)
     let context = $state<CanvasRenderingContext2D | null>(null)
@@ -26,6 +27,19 @@ App · SVELTE
     function toggleDebugOption(key: keyof DebugOptions) {
         debugOptions[key] = !debugOptions[key]
     }
+
+    let activePanel = $state<"blocks" | "ships" | "other">("ships")
+
+    function selectPanel(panel: typeof activePanel) {
+        activePanel = panel
+    }
+
+    let selectedBlockShape = $state<BlockShape | null>("empty")
+
+    function chooseShape(shape: BlockShape | null) {
+        selectedBlockShape = shape
+        gridEditor?.selectShape(shape)
+    }
  
     const input: InputState = NEUTRAL_INPUT
  
@@ -35,7 +49,7 @@ App · SVELTE
 
     const collisionManger = new CollisionManager()
 
-    const shipCount = 5
+    const shipCount = 1
     let ships = $state<Ship[]>([])
     let shipThumbCanvases = $state<HTMLCanvasElement[] | null[]>([])
     const asteroidCount = 200
@@ -43,9 +57,11 @@ App · SVELTE
  
     const controller = new PlayerController(input)
     let player: Player
+    let gridEditor: GridEditor
  
     const camera = new Camera()
     camera.position = new Vector2(0, 0)
+
  
     function handleKeyDown(event: KeyboardEvent) {
         switch (event.key.toLowerCase()) {
@@ -117,15 +133,50 @@ App · SVELTE
         });
         context.restore();
 
+        if (mode === "flying") {
+            renderFlyingView()
+        } else {
+            renderBuildView()
+        }
+    }
+
+    function renderFlyingView() {
+        if (!context || !canvas) return;
+
         // Draw asteroids, skipping ones that are off-screen
         asteroids.forEach((asteroid) => {
             if (isVisible(asteroid.position.x, asteroid.position.y, asteroid.radius, canvas!, camera)) {
                 asteroid.draw(context!, camera, debugOptions)
             }
         })
- 
+
         // Draw the player
         player.draw(context, camera, debugOptions)
+    }
+
+    function renderBuildView() {
+        if (!context || !canvas) return;
+
+        // Whatever the builder screen should show — grid, the selected ship's
+        // block layout, a palette, etc. Placeholder for now:
+        context.save()
+        context.strokeStyle = "rgba(0, 221, 255, 0.15)"
+        context.lineWidth = 1
+
+        const gridSize = 40
+        for (let x = 0; x < canvas.clientWidth; x += gridSize) {
+            context.beginPath()
+            context.moveTo(x, 0)
+            context.lineTo(x, canvas.clientHeight)
+            context.stroke()
+        }
+        for (let y = 0; y < canvas.clientHeight; y += gridSize) {
+            context.beginPath()
+            context.moveTo(0, y)
+            context.lineTo(canvas.clientWidth, y)
+            context.stroke()
+        }
+        context.restore()
     }
 
     function renderShipThumbnails() {
@@ -181,10 +232,14 @@ App · SVELTE
 
     function spawnShips() {
         for (let s = 0; s < shipCount; s++) {
+            const controller = new PlayerController(input)
+            const grid = new ShipGrid(50, 80, 1)
             const ship = new Ship(
                 getRandomVector(1000, 1000),
-                getRandomVector(2, 2),
-                0
+                new Vector2(0, 0),
+                0,
+                controller,
+                grid
             )
 
             ships.push(ship)
@@ -199,6 +254,37 @@ App · SVELTE
             }
         })
     }
+
+    function handleWheel(event: WheelEvent) {
+        if (!canvas) return
+
+        event.preventDefault()
+
+        const rect = canvas.getBoundingClientRect()
+        const screenX = event.clientX - rect.left
+        const screenY = event.clientY - rect.top
+
+        // Trackpad pinch arrives as a wheel event with ctrlKey set - Chrome,
+        // Firefox, and Safari all synthesize it this way, so this also
+        // distinguishes it from someone actually holding Ctrl and scrolling.
+        // It needs its own sensitivity since browsers report much larger
+        // deltas for a pinch than for one physical wheel notch.
+        const isPinch = event.ctrlKey
+
+        // deltaMode varies by device/browser: 0 = pixels (trackpads, precision
+        // mice), 1 = lines (most mouse wheels in Firefox), 2 = pages.
+        // Normalize to a pixel-ish scale so zoom speed feels consistent
+        // regardless of which one fired.
+        const deltaY =
+            event.deltaMode === 1 ? event.deltaY * 16 :
+            event.deltaMode === 2 ? event.deltaY * canvas.clientHeight :
+            event.deltaY
+
+        const sensitivity = isPinch ? 0.01 : 0.0015
+        const factor = Math.exp(-deltaY * sensitivity)
+
+        camera.zoomToward(screenX, screenY, canvas.clientWidth, canvas.clientHeight, factor)
+    }
  
     onMount(() => {
         if (!canvas) return
@@ -207,6 +293,7 @@ App · SVELTE
         if (!context) return
 
         resizeCanvas(canvas, context)
+        window.addEventListener("wheel", handleWheel, { passive: false })
  
         starMaps?.push(buildStarMap(1000, 1000, 0.2, 4))
         starMaps?.push(buildStarMap(1000, 1000, .05, 7))
@@ -219,14 +306,19 @@ App · SVELTE
             ships,
             controller,
         )
+
+        gridEditor = new GridEditor(player.currentShip.grid)
  
         frame = requestAnimationFrame(tick)
  
-        return () => cancelAnimationFrame(frame)
+        return () => {
+            cancelAnimationFrame(frame)
+            window.removeEventListener("wheel", handleWheel)
+        }
     })
 </script>
  
-<svelte:window onkeydown={handleKeyDown} onkeyup={handleKeyUp} onresize={() => resizeCanvas(canvas!, context!)} /* onscroll={} */></svelte:window>
+<svelte:window onkeydown={handleKeyDown} onkeyup={handleKeyUp} onresize={() => resizeCanvas(canvas!, context!)}></svelte:window>
  
 <div id="overlay" class="crt"></div>
  
@@ -256,27 +348,56 @@ App · SVELTE
  
     <div id="bottom-bar" class="ui">
         <div id="bottom-bar-left">
-            <h3 id="bottom-bar-title-bar">Ship Picker</h3>
-            <div id="bottom-bar-options">
-                {#each ships as ship, index}
+            {#if activePanel === "ships"}
+                <h3 id="bottom-bar-title-bar">Ship Picker</h3>
+                <div id="bottom-bar-options">
+                    {#each ships as ship, index}
+                        <!-- svelte-ignore a11y_consider_explicit_label -->
+                        <button
+                            class="ship-button"
+                            onclick={() => player.setActiveShip(index)}
+                        >
+                            <canvas
+                                bind:this={shipThumbCanvases[index]}
+                                width="72"
+                                height="72"
+                            ></canvas>
+                        </button>
+                    {/each}
+                </div>
+            {:else if activePanel === "blocks"}
+                <h3 id="bottom-bar-title-bar">Block Picker</h3>
+                <div id="bottom-bar-options">
+                    {#each BLOCK_MENU as option}
+                        <button
+                            class={selectedBlockShape === option.shape ? "active" : ""}
+                            onclick={() => chooseShape(option.shape)}
+                        >
+                            {option.label}
+                        </button>
+                    {/each}
+                    <!-- svelte-ignore a11y_consider_explicit_label -->
                     <button
-                        class="ship-button"
-                        onclick={() => player.setActiveShip(index)}
+                        class={selectedBlockShape === null ? "active" : ""}
+                        onclick={() => chooseShape(null)}
                     >
-                        <canvas
-                            bind:this={shipThumbCanvases[index]}
-                            width="72"
-                            height="72"
-                        ></canvas>
+                        Erase
                     </button>
-                {/each}
-            </div>
+                </div>
+            {/if}
         </div>
+
         <div id="bottom-bar-right">
             <div id="bottom-bar-selector">
-                <button>Blocks</button>
-                <button class="active">Ships</button>
-                <button>Other</button>
+                <button
+                    class={activePanel === "blocks" ? "active" : ""}
+                    onclick={() => selectPanel("blocks")}
+                >Blocks</button>
+                <button
+                    class={activePanel === "ships" ? "active" : ""}
+                    onclick={() => selectPanel("ships")}
+                >Ships</button>
+                <button disabled>Other</button>
             </div>
         </div>
     </div>
@@ -326,20 +447,22 @@ App · SVELTE
         background-color: rgba(0, 191, 255, 0.05);
     }
  
-    button.disabled {
+    button:disabled {
         background-color: rgba(123, 123, 123, 0.3);
-        color: rgba(194, 194, 194, 0.8);
+        color: rgba(121, 121, 121, 0.8);
+        border-color: rgba(121, 121, 121, 0.5);
     }
  
     button.active {
         background-color: rgba(0, 255, 64, 0.3);
-        color: rgba(0, 255, 64, 0.8)
+        color: rgba(0, 255, 64, 0.8);
+        border-color: rgba(0, 255, 64, 0.5);
     }
     button.active:hover {
         background-color: rgba(0, 255, 64, 0.25);
     }
     button.active:active {
-        background-color: rgba(0, 255, 64, 0.05);
+        background-color: rgba(0, 255, 64, 0.1);
     }
  
     #camera {

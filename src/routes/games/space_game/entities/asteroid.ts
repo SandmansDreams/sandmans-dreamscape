@@ -1,7 +1,8 @@
 import { getRandomVector } from "../helpers"
 import { CircleCollider, Vector2 } from "../physics"
 import { Camera, NO_DEBUG, type DebugOptions } from "../types"
-import { Entity } from "./entity"
+import { PhysicsObject } from "../physics"
+import type { Entity } from "./entity"
 
 const TWO_PI = Math.PI * 2
 
@@ -12,7 +13,7 @@ export interface AsteroidOptions {
     jaggedness?: number // 0-1, how irregular the outline is
 }
 
-export class Asteroid extends Entity {
+export class Asteroid extends PhysicsObject {
     radius: number
     private outline: Vector2[]
 
@@ -21,18 +22,12 @@ export class Asteroid extends Entity {
         velocity: Vector2 = new Vector2(0, 0),
         options: AsteroidOptions = {}
     ) {
-        super(position, getRandomVector(1, 1), Math.random() * TWO_PI)
+        super(position, velocity, Math.random() * 30)
 
         this.radius = options.radius ?? 40
 
-        // Mass scales with area (~radius^2) rather than being a flat
-        // number, so a big rock actually feels proportionally heavier
-        // than a small one, not just visually bigger. A ship (mass 10)
-        // colliding with even a small asteroid should barely nudge it.
         this.mass = options.mass ?? this.radius * this.radius * 0.3
 
-        // Free-floating rock: nothing is thrusting against drag, so there's
-        // no reason for it to lose momentum over time like a ship does.
         this.drag = 1
         this.rotationDrag = 1
         this.rotationSpeed = options.rotationSpeed ?? (Math.random() - 0.5) * 0.01
@@ -42,9 +37,6 @@ export class Asteroid extends Entity {
         this.outline = this.generateOutline(options.jaggedness ?? 0.35)
     }
 
-    // Precomputes an irregular polygon once at spawn time so the rock has a
-    // consistent (non-circular) silhouette instead of redrawing a perfect
-    // circle every frame.
     private generateOutline(jaggedness: number): Vector2[] {
         const points: Vector2[] = []
         const vertexCount = 10 + Math.floor(Math.random() * 4)
@@ -69,12 +61,12 @@ export class Asteroid extends Entity {
         camera: Camera,
         debug: DebugOptions = NO_DEBUG
     ) {
-        const x = this.position.x - camera.position.x + ctx.canvas.clientWidth / 2
-        const y = this.position.y - camera.position.y + ctx.canvas.clientHeight / 2
+        const { x, y } = camera.worldToScreen(this.position.x, this.position.y, ctx.canvas.clientWidth, ctx.canvas.clientHeight)
 
         ctx.save()
         ctx.translate(x, y)
         ctx.rotate(this.rotation)
+        ctx.scale(camera.zoom, camera.zoom)
 
         ctx.beginPath()
         this.outline.forEach((point, i) => {
@@ -89,7 +81,7 @@ export class Asteroid extends Entity {
         ctx.fillStyle = "#6b6459"
         ctx.fill()
         ctx.strokeStyle = "#3a362f"
-        ctx.lineWidth = 2
+        ctx.lineWidth = 1
         ctx.stroke()
 
         if (debug.hitboxes) {
@@ -106,12 +98,10 @@ export class Asteroid extends Entity {
             this.drawVelocityVector(ctx, x, y)
         }
     }
+
+    onCollision(other: PhysicsObject): void {}
 }
 
-// Convenience spawner for scattering a field of asteroids around the
-// origin. `areaWidth`/`areaHeight` describe the total spread, centered on
-// (0, 0) - e.g. spawnAsteroidField(20, 4000, 4000) spreads 20 rocks across
-// a 4000x4000 region.
 export function spawnAsteroidField(
     count: number,
     areaWidth: number,
@@ -132,7 +122,7 @@ export function spawnAsteroidField(
             (Math.random() - 0.5) * 0.3
         )
 
-        const radius = options.radius ?? 20 + Math.random() * 40
+        const radius = options.radius ?? 20 + Math.random() * 60
 
         asteroids.push(new Asteroid(position, velocity, { ...options, radius }))
     }
