@@ -1,6 +1,7 @@
+import { adjustColorForLight, type GridLightInfo } from "./lighting";
 import type { Placement } from "./placements";
 
-export type BlockShape = "empty" | "full" | "triSE" | "triSW" | "triNE" | "triNW"
+export type BlockShape = "empty" | "full" | "triSE" | "triSW" | "triNE" | "triNW" | "arcNW" | "arcNE" | "arcSE" | "arcSW"
 
 export interface CellPosition {
     row: number,
@@ -20,152 +21,274 @@ export const BLOCK_MENU = [
     { shape: "triNE", label: "Wedge NE" },
     { shape: "triSE", label: "Wedge SE" },
     { shape: "triSW", label: "Wedge SW" },
+    { shape: "arcNW", label: "Arc NW" },
+    { shape: "arcNE", label: "Arc NE" },
+    { shape: "arcSE", label: "Arc SE" },
+    { shape: "arcSW", label: "Arc SW" },
 ] as const
 
 export class ShipGrid {
-    readonly cols: number
-    readonly rows: number
-    readonly cells: Cell[][]
+    readonly cellSize: number
+    readonly nominalCols: number
+    readonly nominalRows: number
+    private cellMap: Map<string, Cell> = new Map()
     defaultColor: string = "grey"
-    private _filledCount: number = 0
 
-    constructor(
-        public width: number,
-        public height: number,
-        public cellSize: number
-    ) {
-        this.cols = Math.ceil(width / cellSize);
-        this.rows = Math.ceil(height / cellSize);
-
-        this.cells = Array.from({ length: this.rows }, (_, row) =>
-            Array.from({ length: this.cols }, (_, column) => ({
-                position: { row, column },
-                shape: "empty" as BlockShape,
-                color: this.defaultColor,
-                placement: null
-            }))
-        );
+    constructor(cellSize: number)
+    constructor(width: number, height: number, cellSize: number)
+    constructor(a: number, b?: number, c?: number) {
+        if (b !== undefined && c !== undefined) {
+            this.cellSize = c
+            this.nominalCols = Math.ceil(a / c)
+            this.nominalRows = Math.ceil(b / c)
+        } else {
+            this.cellSize = a
+            this.nominalCols = 0
+            this.nominalRows = 0
+        }
     }
 
     get filledCount(): number {
-        return this._filledCount
+        return this.cellMap.size
+    }
+
+    private key(col: number, row: number): string {
+        return `${col},${row}`
     }
 
     // --- Cell lookups ---------------------------------------------------
 
-    getCell(column: number, row: number): Cell | null {
-        if (
-            row < 0 ||
-            row >= this.rows ||
-            column < 0 ||
-            column >= this.cols
-        ) {
-            return null;
-        }
+    getCell(column: number, row: number): Cell {
+        const k = this.key(column, row)
+        const existing = this.cellMap.get(k)
+        if (existing) return existing
 
-        return this.cells[row][column];
+        return {
+            position: { row, column },
+            shape: "empty",
+            color: this.defaultColor,
+            placement: null
+        }
     }
 
-    getCellFromPoint(x: number, y: number): Cell | null {
+    getCellFromPoint(x: number, y: number): Cell {
         return this.getCell(
             Math.floor(x / this.cellSize),
             Math.floor(y / this.cellSize)
-        );
+        )
+    }
+
+    getFilledBounds(): { minCol: number, maxCol: number, minRow: number, maxRow: number } | null {
+        if (this.cellMap.size === 0) return null
+        let minCol = Infinity, maxCol = -Infinity
+        let minRow = Infinity, maxRow = -Infinity
+        for (const cell of this.cellMap.values()) {
+            minCol = Math.min(minCol, cell.position.column)
+            maxCol = Math.max(maxCol, cell.position.column)
+            minRow = Math.min(minRow, cell.position.row)
+            maxRow = Math.max(maxRow, cell.position.row)
+        }
+        return { minCol, maxCol, minRow, maxRow }
+    }
+
+    getCenter(): { x: number, y: number } {
+        const bounds = this.getFilledBounds()
+        if (!bounds) {
+            if (this.nominalCols > 0) {
+                return {
+                    x: (this.nominalCols * this.cellSize) / 2,
+                    y: (this.nominalRows * this.cellSize) / 2
+                }
+            }
+            return { x: 0, y: 0 }
+        }
+        return {
+            x: ((bounds.minCol + bounds.maxCol + 1) * this.cellSize) / 2,
+            y: ((bounds.minRow + bounds.maxRow + 1) * this.cellSize) / 2
+        }
+    }
+
+    getBoundingRadius(): number {
+        const center = this.getCenter()
+        let maxDistSq = 0
+        for (const cell of this.cellMap.values()) {
+            const x0 = cell.position.column * this.cellSize
+            const y0 = cell.position.row * this.cellSize
+            const x1 = x0 + this.cellSize
+            const y1 = y0 + this.cellSize
+            for (const [px, py] of [[x0, y0], [x1, y0], [x0, y1], [x1, y1]]) {
+                const dx = px - center.x
+                const dy = py - center.y
+                maxDistSq = Math.max(maxDistSq, dx * dx + dy * dy)
+            }
+        }
+        return Math.sqrt(maxDistSq) || 1
     }
 
     // --- Mutation --------------------------------------------------------
 
     setCell(cell: Cell, shape: BlockShape, color: string, placement: Placement | null) {
-        const wasFilled = cell.shape !== "empty"
-
         cell.shape = shape
         cell.color = color
         cell.placement = placement
 
-        const isFilled = shape !== "empty"
-        if (!wasFilled && isFilled) this._filledCount++
-        if (wasFilled && !isFilled) this._filledCount--
+        const k = this.key(cell.position.column, cell.position.row)
+        if (shape === "empty") {
+            this.cellMap.delete(k)
+        } else {
+            this.cellMap.set(k, cell)
+        }
     }
 
     clearCell(cell: Cell) {
-        if (cell.shape !== "empty") this._filledCount--
         cell.shape = "empty"
         cell.placement = null
+        this.cellMap.delete(this.key(cell.position.column, cell.position.row))
+    }
+
+    // --- Serialization -------------------------------------------------------
+
+    serialize(): object {
+        const cells: { r: number, c: number, s: BlockShape, color: string }[] = []
+        for (const cell of this.cellMap.values()) {
+            cells.push({
+                r: cell.position.row,
+                c: cell.position.column,
+                s: cell.shape,
+                color: cell.color
+            })
+        }
+        return {
+            version: 1,
+            cellSize: this.cellSize,
+            cells
+        }
+    }
+
+    loadFrom(data: { cells: { r: number, c: number, s: BlockShape, color: string }[] }) {
+        this.cellMap.clear()
+        for (const entry of data.cells) {
+            const cell = this.getCell(entry.c, entry.r)
+            this.setCell(cell, entry.s, entry.color, null)
+        }
     }
 
     // --- Drawing ------------------------------------------------------------
 
-    draw(ctx: CanvasRenderingContext2D, zoom: number = 1) {
+    draw(ctx: CanvasRenderingContext2D, zoom: number = 1, showGrid: boolean = false, lightInfo?: GridLightInfo) {
         ctx.save();
         ctx.scale(zoom, zoom);
 
-        for (const row of this.cells) {
-            for (const cell of row) {
-                this.drawCell(ctx, cell);
-            }
+        const center = lightInfo ? this.getCenter() : undefined
+
+        for (const cell of this.cellMap.values()) {
+            this.drawBlock(ctx, cell, lightInfo, center);
+        }
+
+        if (showGrid) {
+            this.drawGridLines(ctx)
+            this.drawCenterCross(ctx)
         }
 
         ctx.restore();
     }
 
-    private drawCell(
-        ctx: CanvasRenderingContext2D,
-        cell: Cell
-    ) {
-        const strokeStyle = "rgba(105, 208, 255, 0.1)"
+    private drawGridLines(ctx: CanvasRenderingContext2D) {
+        const transform = ctx.getTransform()
+        const inv = transform.inverse()
 
-        const x = cell.position.column * this.cellSize;
-        const y = cell.position.row * this.cellSize;
+        const cw = ctx.canvas.width
+        const ch = ctx.canvas.height
 
-        if (cell.shape !== "empty") {
-            this.drawBlock(ctx, cell);
+        const tl = inv.transformPoint({ x: 0, y: 0 })
+        const tr = inv.transformPoint({ x: cw, y: 0 })
+        const bl = inv.transformPoint({ x: 0, y: ch })
+        const br = inv.transformPoint({ x: cw, y: ch })
+
+        const minX = Math.min(tl.x, tr.x, bl.x, br.x)
+        const maxX = Math.max(tl.x, tr.x, bl.x, br.x)
+        const minY = Math.min(tl.y, tr.y, bl.y, br.y)
+        const maxY = Math.max(tl.y, tr.y, bl.y, br.y)
+
+        const startCol = Math.floor(minX / this.cellSize) - 1
+        const endCol = Math.ceil(maxX / this.cellSize) + 1
+        const startRow = Math.floor(minY / this.cellSize) - 1
+        const endRow = Math.ceil(maxY / this.cellSize) + 1
+
+        ctx.strokeStyle = "rgba(105, 208, 255, 0.1)"
+        ctx.lineWidth = 0.5
+        ctx.beginPath()
+
+        const y0 = startRow * this.cellSize
+        const y1 = endRow * this.cellSize
+        for (let col = startCol; col <= endCol; col++) {
+            const x = col * this.cellSize
+            ctx.moveTo(x, y0)
+            ctx.lineTo(x, y1)
         }
 
-        ctx.strokeStyle = strokeStyle;
-        ctx.strokeRect(x, y, this.cellSize, this.cellSize);
+        const x0 = startCol * this.cellSize
+        const x1 = endCol * this.cellSize
+        for (let row = startRow; row <= endRow; row++) {
+            const y = row * this.cellSize
+            ctx.moveTo(x0, y)
+            ctx.lineTo(x1, y)
+        }
 
-        this.drawCellCoordinates(ctx, cell, strokeStyle);
-
-        ctx.fillStyle = "rgba(0, 0, 0, 0)";
-        ctx.strokeStyle = "rgba(0, 0, 0, 0)";
+        ctx.stroke()
     }
 
-    private drawCellCoordinates(
-        ctx: CanvasRenderingContext2D,
-        cell: Cell,
-        fillStyle: string
-    ) {
-        const scale = this.cellSize / 5;
-        const x = cell.position.column * this.cellSize + 5;
-        const y = cell.position.row * this.cellSize + 12;
+    private drawCenterCross(ctx: CanvasRenderingContext2D) {
+        const center = this.getCenter()
+        const arm = this.cellSize * 1.5
 
-        ctx.fillStyle = fillStyle;
-        ctx.font = `${scale}px Arial`;
-        ctx.fillText(`(${cell.position.column}, ${cell.position.row})`, x, y);
+        ctx.strokeStyle = "#ff8c00"
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.moveTo(center.x - arm, center.y)
+        ctx.lineTo(center.x + arm, center.y)
+        ctx.moveTo(center.x, center.y - arm)
+        ctx.lineTo(center.x, center.y + arm)
+        ctx.stroke()
     }
 
     private drawBlock(
         ctx: CanvasRenderingContext2D,
-        cell: Cell
+        cell: Cell,
+        lightInfo?: GridLightInfo,
+        center?: { x: number, y: number }
     ) {
         if (cell.shape === "empty") return;
 
         const x = cell.position.column * this.cellSize;
         const y = cell.position.row * this.cellSize;
 
-        ctx.fillStyle = cell.color ?? "rgba(255, 180, 80, 0.9)";
+        const baseColor = cell.color ?? "rgba(255, 180, 80, 0.9)";
+
+        if (lightInfo && center) {
+            const cellCenterX = x + this.cellSize / 2;
+            const cellCenterY = y + this.cellSize / 2;
+            ctx.fillStyle = adjustColorForLight(baseColor, cellCenterX, cellCenterY, center.x, center.y, lightInfo);
+        } else {
+            ctx.fillStyle = baseColor;
+        }
 
         if (cell.shape === "full") {
             ctx.fillRect(x, y, this.cellSize, this.cellSize);
             return;
         }
 
-        this.drawTriangle(ctx, cell.shape, x, y, this.cellSize, this.cellSize);
+        if (cell.shape.startsWith("arc")) {
+            this.drawArc(ctx, cell.shape as "arcNW" | "arcNE" | "arcSE" | "arcSW", x, y, this.cellSize);
+            return;
+        }
+
+        this.drawTriangle(ctx, cell.shape as "triNW" | "triNE" | "triSW" | "triSE", x, y, this.cellSize, this.cellSize);
     }
 
     private drawTriangle(
         ctx: CanvasRenderingContext2D,
-        shape: Exclude<BlockShape, "full" | "empty">,
+        shape: "triNW" | "triNE" | "triSW" | "triSE",
         x: number,
         y: number,
         w: number,
@@ -183,10 +306,6 @@ export class ShipGrid {
             case "triNE": points = [NE, NW, SE]; break;
             case "triSW": points = [SW, NW, SE]; break;
             case "triSE": points = [SE, NE, SW]; break;
-            default: {
-                const exhaustiveCheck: never = shape;
-                throw new Error(`Unhandled block shape: ${exhaustiveCheck}`);
-            }
         }
 
         ctx.beginPath();
@@ -197,23 +316,137 @@ export class ShipGrid {
         ctx.fill();
     }
 
+    private drawArc(
+        ctx: CanvasRenderingContext2D,
+        shape: "arcNW" | "arcNE" | "arcSE" | "arcSW",
+        x: number,
+        y: number,
+        size: number
+    ) {
+        let cx: number, cy: number, startAngle: number, endAngle: number
+
+        switch (shape) {
+            case "arcNW":
+                cx = x; cy = y
+                startAngle = 0; endAngle = Math.PI / 2
+                break
+            case "arcNE":
+                cx = x + size; cy = y
+                startAngle = Math.PI / 2; endAngle = Math.PI
+                break
+            case "arcSE":
+                cx = x + size; cy = y + size
+                startAngle = Math.PI; endAngle = Math.PI * 1.5
+                break
+            case "arcSW":
+                cx = x; cy = y + size
+                startAngle = Math.PI * 1.5; endAngle = Math.PI * 2
+                break
+        }
+
+        ctx.beginPath()
+        ctx.moveTo(cx, cy)
+        ctx.arc(cx, cy, size, startAngle, endAngle)
+        ctx.closePath()
+        ctx.fill()
+    }
+
     // --- Testing / scaffolding ---------------------------------------------
 
     paintTestShape() {
-        const set = (row: number, column: number, shape: BlockShape) => {
-            const cell = this.getCell(column, row);
-            if (!cell) return;
-            this.setCell(cell, shape, this.defaultColor, null)
+        const hull = "#8a9ba8"
+        const hullDark = "#6b7d8a"
+        const cockpit = "#4a9eff"
+        const cockpitGlow = "#6ab4ff"
+        const accent = "#e07030"
+        const engine = "#c85028"
+        const exhaust = "#ff9944"
+
+        const set = (row: number, col: number, shape: BlockShape, color?: string) => {
+            const cell = this.getCell(col, row);
+            this.setCell(cell, shape, color ?? hull, null)
         };
 
-        const cy = Math.floor(this.rows / 2);
-        const cx = Math.floor(this.cols / 2);
+        const fill = (row: number, colFrom: number, colTo: number, color?: string) => {
+            for (let c = colFrom; c <= colTo; c++) set(row, c, "full", color)
+        };
 
-        set(cy, cx, "full");
-        set(cy, cx - 1, "full");
-        set(cy - 1, cx - 1, "triSE");
-        set(cy - 1, cx, "triSW");
-        set(cy + 1, cx - 1, "triNE");
-        set(cy + 1, cx, "triNW");
+        // Even-width ship symmetric around the line between cols 4 and 5
+
+        // Nose
+        set(0, 4, "full", hullDark);
+        set(0, 5, "full", hullDark);
+
+        // Nose widens
+        set(1, 3, "triSE", hullDark);
+        set(1, 4, "full", cockpitGlow);
+        set(1, 5, "full", cockpitGlow);
+        set(1, 6, "triSW", hullDark);
+
+        // Cockpit
+        set(2, 3, "full", hullDark);
+        set(2, 4, "full", cockpit);
+        set(2, 5, "full", cockpit);
+        set(2, 6, "full", hullDark);
+
+        // Body widens
+        set(3, 2, "triSE", hull);
+        fill(3, 3, 6);
+        set(3, 7, "triSW", hull);
+
+        // Main body
+        for (let r = 4; r <= 5; r++) {
+            set(r, 2, "full", hull);
+            set(r, 3, "full", accent);
+            fill(r, 4, 5, hull);
+            set(r, 6, "full", accent);
+            set(r, 7, "full", hull);
+        }
+
+        // Wings expand
+        set(6, 1, "triSE", accent);
+        set(6, 2, "full", accent);
+        fill(6, 3, 6, hull);
+        set(6, 7, "full", accent);
+        set(6, 8, "triSW", accent);
+
+        // Wings full
+        set(7, 1, "full", accent);
+        set(7, 2, "full", accent);
+        fill(7, 3, 6, hullDark);
+        set(7, 7, "full", accent);
+        set(7, 8, "full", accent);
+
+        // Wings taper
+        set(8, 1, "triNE", accent);
+        set(8, 2, "full", accent);
+        fill(8, 3, 6, hull);
+        set(8, 7, "full", accent);
+        set(8, 8, "triNW", accent);
+
+        // Lower body
+        for (let r = 9; r <= 10; r++) {
+            set(r, 2, "full", hull);
+            set(r, 3, "full", hullDark);
+            fill(r, 4, 5, hull);
+            set(r, 6, "full", hullDark);
+            set(r, 7, "full", hull);
+        }
+
+        // Engine narrows
+        set(11, 2, "triNE", hull);
+        set(11, 3, "full", engine);
+        fill(11, 4, 5, hullDark);
+        set(11, 6, "full", engine);
+        set(11, 7, "triNW", hull);
+
+        // Engine
+        fill(12, 3, 6, engine);
+
+        // Exhaust
+        set(13, 3, "triNE", engine);
+        set(13, 4, "full", exhaust);
+        set(13, 5, "full", exhaust);
+        set(13, 6, "triNW", engine);
     }
 }

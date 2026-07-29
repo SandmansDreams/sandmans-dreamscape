@@ -81,7 +81,7 @@ export class FollowController extends Controller {
 
         const arriveRadius = 250;
         const arriveAngle = Math.PI / 3; // 60°
-        const maxSpeed = 8;
+        const maxSpeed = 800;
 
         const toTarget =
             targetPos
@@ -150,12 +150,7 @@ export class FollowController extends Controller {
             this.input.forward = true;
         }
 
-        const velocityError =
-            desiredVelocity
-                .clone()
-                .subtract(ship.velocity);
-
-        if (velocityError.getSpeed() > 0.5) {
+        if (distance < arriveRadius && ship.velocity.getSpeed() > distance * 0.02) {
             this.input.space = true;
         }
 

@@ -92,7 +92,8 @@ export abstract class PhysicsObject {
             `speed: ${speed.toFixed(2)}`,
             `rotation-speed: ${Math.round(this.rotationSpeed * 10000) / 100}`,
             `dir: ${directionDeg.toFixed(1)}°`,
-            `pos: (${Math.round(this.position.x * 100) / 100}, ${Math.round(this.position.y * 100) / 100})`
+            `pos: (${Math.round(this.position.x * 100) / 100}, ${Math.round(this.position.y * 100) / 100})`,
+            `mass: ${this.mass}`
         ]
  
         ctx.save()
@@ -119,7 +120,7 @@ export abstract class PhysicsObject {
         screenY: number
     ) {
         // Pixels per unit of velocity
-        const scale = 5
+        const scale = 10
 
         const endX = screenX + this.velocity.x * scale
         const endY = screenY + this.velocity.y * scale

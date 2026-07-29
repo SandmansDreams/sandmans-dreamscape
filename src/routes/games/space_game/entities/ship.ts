@@ -5,6 +5,7 @@ import { CircleCollider } from "../physics"
 import { NEUTRAL_INPUT } from "../controller"
 import { Camera, NO_DEBUG, type DebugOptions } from "../types"
 import { ShipGrid } from "../builder"
+import type { GridLightInfo } from "../lighting"
 
 export class Ship extends Entity {
     thrust: number
@@ -23,7 +24,13 @@ export class Ship extends Entity {
         this.grid = grid
         this.thrust = 0.1
         this.rotationThrust = 0.001
-        this.collider = new CircleCollider(15, new Vector2, this)
+        this.mass = this.grid.filledCount || 10
+        this.updateCollider()
+    }
+
+    updateCollider() {
+        const radius = this.grid.getBoundingRadius()
+        this.collider = new CircleCollider(radius, new Vector2(), this)
         this.mass = this.grid.filledCount || 10
     }
 
@@ -56,7 +63,7 @@ export class Ship extends Entity {
             this.velocity.add(
                 Vector2
                     .fromAngle(this.rotation)
-                    .multiply(this.thrust * delta)
+                    .multiply((this.thrust / (this.mass / 10)) * delta)
             );
         }
 
@@ -64,7 +71,7 @@ export class Ship extends Entity {
             this.velocity.add(
                 Vector2
                     .fromAngle(this.rotation + Math.PI)
-                    .multiply(this.thrust * delta)
+                    .multiply((this.thrust / (this.mass / 10)) * delta)
             );
         }
 
@@ -80,7 +87,8 @@ export class Ship extends Entity {
     draw(
         ctx: CanvasRenderingContext2D,
         camera: Camera,
-        debug: DebugOptions = NO_DEBUG
+        debug: DebugOptions = NO_DEBUG,
+        lightInfo?: GridLightInfo
     ) {
         const {x, y} = camera.worldToScreen(this.position.x, this.position.y, ctx.canvas.clientWidth, ctx.canvas.clientHeight)
 
@@ -89,8 +97,6 @@ export class Ship extends Entity {
         ctx.translate(x, y)
         ctx.rotate(this.rotation)
         ctx.scale(camera.zoom, camera.zoom)
-        
-        this.grid.draw(ctx, 1)
 
         if (debug.vectors) {
             this.drawRotationVelocity(ctx)
@@ -99,6 +105,15 @@ export class Ship extends Entity {
         if (debug.hitboxes) {
             this.collider?.drawDebug(ctx)
         }
+
+        // Draw the grid rotated so grid-up (row 0) points in the
+        // ship's forward direction (+x at rotation 0).
+        ctx.save()
+        ctx.rotate(Math.PI / 2)
+        const center = this.grid.getCenter()
+        ctx.translate(-center.x, -center.y)
+        this.grid.draw(ctx, 1, false, lightInfo)
+        ctx.restore()
 
         ctx.restore()
 

@@ -1,21 +1,23 @@
-import { getRandomVector } from "../helpers"
+import { computeGridLight, type GridLightInfo, type LightSource } from "../lighting"
+import { ShipGrid, type BlockShape } from "../builder"
 import { CircleCollider, Vector2 } from "../physics"
 import { Camera, NO_DEBUG, type DebugOptions } from "../types"
 import { PhysicsObject } from "../physics"
-import type { Entity } from "./entity"
-
-const TWO_PI = Math.PI * 2
 
 export interface AsteroidOptions {
     radius?: number
     mass?: number
     rotationSpeed?: number
-    jaggedness?: number // 0-1, how irregular the outline is
+    jaggedness?: number
 }
+
+const ASTEROID_COLORS = [
+    "#6b6459", "#7a7265", "#5e574e", "#847b6f", "#6f6858"
+]
 
 export class Asteroid extends PhysicsObject {
     radius: number
-    private outline: Vector2[]
+    grid: ShipGrid
 
     constructor(
         position: Vector2,
@@ -32,26 +34,85 @@ export class Asteroid extends PhysicsObject {
         this.rotationDrag = 1
         this.rotationSpeed = options.rotationSpeed ?? (Math.random() - 0.5) * 0.01
 
-        this.collider = new CircleCollider(this.radius, new Vector2(), this)
+        const cellSize = Math.max(4, Math.round(this.radius / 5))
+        const gridDim = Math.ceil(this.radius * 2 / cellSize) + 2
+        this.grid = new ShipGrid(gridDim * cellSize, gridDim * cellSize, cellSize)
+        this.generateShape(options.jaggedness ?? 0.35)
 
-        this.outline = this.generateOutline(options.jaggedness ?? 0.35)
+        this.collider = new CircleCollider(this.radius, new Vector2(), this)
     }
 
-    private generateOutline(jaggedness: number): Vector2[] {
-        const points: Vector2[] = []
-        const vertexCount = 10 + Math.floor(Math.random() * 4)
+    private generateShape(jaggedness: number) {
+        const center = this.grid.getCenter()
+        const cx = center.x
+        const cy = center.y
 
+        const vertexCount = 10 + Math.floor(Math.random() * 4)
+        const radii: number[] = []
         for (let i = 0; i < vertexCount; i++) {
-            const angle = (i / vertexCount) * TWO_PI
             const wobble = 1 - jaggedness / 2 + Math.random() * jaggedness
-            points.push(Vector2.fromAngle(angle).multiply(this.radius * wobble))
+            radii.push(this.radius * wobble)
         }
 
-        return points
+        const baseColor = ASTEROID_COLORS[Math.floor(Math.random() * ASTEROID_COLORS.length)]
+        const s = this.grid.cellSize
+
+        const edgeRadiusAt = (px: number, py: number): number => {
+            const dx = px - cx
+            const dy = py - cy
+            const angle = Math.atan2(dy, dx)
+            const norm = ((angle / (Math.PI * 2)) % 1 + 1) % 1
+            const idx = norm * vertexCount
+            const i0 = Math.floor(idx) % vertexCount
+            const i1 = (i0 + 1) % vertexCount
+            const t = idx - Math.floor(idx)
+            return radii[i0] * (1 - t) + radii[i1] * t
+        }
+
+        const isInside = (px: number, py: number): boolean => {
+            const dx = px - cx
+            const dy = py - cy
+            return Math.hypot(dx, dy) < edgeRadiusAt(px, py)
+        }
+
+        const cols = this.grid.nominalCols
+        const rows = this.grid.nominalRows
+        for (let row = 0; row < rows; row++) {
+            for (let col = 0; col < cols; col++) {
+                const x = col * s
+                const y = row * s
+
+                const nw = isInside(x, y)
+                const ne = isInside(x + s, y)
+                const sw = isInside(x, y + s)
+                const se = isInside(x + s, y + s)
+
+                const count = +nw + +ne + +sw + +se
+
+                if (count === 0) continue
+
+                let shape: BlockShape
+
+                if (count === 4) {
+                    shape = "full"
+                } else if (count === 3) {
+                    shape = "full"
+                } else if (count === 2) {
+                    shape = "full"
+                } else {
+                    if (nw) shape = "arcNW"
+                    else if (ne) shape = "arcNE"
+                    else if (sw) shape = "arcSW"
+                    else shape = "arcSE"
+                }
+
+                const cell = this.grid.getCell(col, row)
+                this.grid.setCell(cell, shape, baseColor, null)
+            }
+        }
     }
 
     update(delta: number) {
-        // No controller, no thrust - just drift and tumble.
         this.rotation += this.rotationSpeed * delta
         this.position.add(this.velocity.clone().multiply(delta))
     }
@@ -59,7 +120,8 @@ export class Asteroid extends PhysicsObject {
     draw(
         ctx: CanvasRenderingContext2D,
         camera: Camera,
-        debug: DebugOptions = NO_DEBUG
+        debug: DebugOptions = NO_DEBUG,
+        lightInfo?: GridLightInfo
     ) {
         const { x, y } = camera.worldToScreen(this.position.x, this.position.y, ctx.canvas.clientWidth, ctx.canvas.clientHeight)
 
@@ -68,27 +130,20 @@ export class Asteroid extends PhysicsObject {
         ctx.rotate(this.rotation)
         ctx.scale(camera.zoom, camera.zoom)
 
-        ctx.beginPath()
-        this.outline.forEach((point, i) => {
-            if (i === 0) {
-                ctx.moveTo(point.x, point.y)
-            } else {
-                ctx.lineTo(point.x, point.y)
-            }
-        })
-        ctx.closePath()
-
-        ctx.fillStyle = "#6b6459"
-        ctx.fill()
-        ctx.strokeStyle = "#3a362f"
-        ctx.lineWidth = 1
-        ctx.stroke()
-
-        if (debug.hitboxes) {
-            this.collider?.drawDebug(ctx)
-        }
+        const center = this.grid.getCenter()
+        ctx.translate(-center.x, -center.y)
+        this.grid.draw(ctx, 1, false, lightInfo)
 
         ctx.restore()
+
+        if (debug.hitboxes) {
+            ctx.save()
+            ctx.translate(x, y)
+            ctx.rotate(this.rotation)
+            ctx.scale(camera.zoom, camera.zoom)
+            this.collider?.drawDebug(ctx)
+            ctx.restore()
+        }
 
         if (debug.stats) {
             this.drawStats(ctx, x, y)
@@ -116,7 +171,6 @@ export function spawnAsteroidField(
             (Math.random() - 0.5) * areaHeight
         )
 
-        // Gentle, slow drift - these are big rocks, not projectiles.
         const velocity = new Vector2(
             (Math.random() - 0.5) * 0.3,
             (Math.random() - 0.5) * 0.3

@@ -1,9 +1,9 @@
-import { type BlockShape, type ShipGrid } from "./builder"
+import { type BlockShape, type Cell, type ShipGrid } from "./builder"
 import type { Placement } from "./placements"
 
 export class GridEditor {
     grid: ShipGrid
-    hoveredCell: ReturnType<ShipGrid["getCell"]> = null
+    hoveredCell: Cell | null = null
 
     selectedShape: BlockShape | null = "full"
     selectedPlacement: Placement | null = null
@@ -31,7 +31,6 @@ export class GridEditor {
 
     handleClick(x: number, y: number) {
         const cell = this.grid.getCellFromPoint(x, y)
-        if (!cell) return
 
         if (this.selectedShape === null) {
             this.grid.clearCell(cell)
