@@ -6,6 +6,8 @@ import { NEUTRAL_INPUT } from "../controller"
 import { Camera, NO_DEBUG, type DebugOptions } from "../types"
 import { ShipGrid } from "../builder"
 import type { GridLightInfo } from "../lighting"
+import { Particle } from "../particle"
+import type { Targetable } from "../placements"
 
 export class Ship extends Entity {
     thrust: number
@@ -32,6 +34,34 @@ export class Ship extends Entity {
         const radius = this.grid.getBoundingRadius()
         this.collider = new CircleCollider(radius, new Vector2(), this)
         this.mass = this.grid.filledCount || 10
+    }
+
+    cellToWorld(col: number, row: number): Vector2 {
+        const center = this.grid.getCenter()
+        const localX = col * this.grid.cellSize + this.grid.cellSize / 2 - center.x
+        const localY = row * this.grid.cellSize + this.grid.cellSize / 2 - center.y
+
+        const gridAngle = this.rotation + Math.PI / 2
+        const cos = Math.cos(gridAngle)
+        const sin = Math.sin(gridAngle)
+
+        return new Vector2(
+            this.position.x + localX * cos - localY * sin,
+            this.position.y + localX * sin + localY * cos
+        )
+    }
+
+    updatePlacements(delta: number, targets: Targetable[]): Particle[] {
+        const spawned: Particle[] = []
+
+        this.grid.forEachFilled((cell) => {
+            if (!cell.placement) return
+            const worldPos = this.cellToWorld(cell.position.column, cell.position.row)
+            const particles = cell.placement.update(delta, worldPos, this.rotation, targets)
+            spawned.push(...particles)
+        })
+
+        return spawned
     }
 
     update(delta: number) {
@@ -106,16 +136,42 @@ export class Ship extends Entity {
             this.collider?.drawDebug(ctx)
         }
 
-        // Draw the grid rotated so grid-up (row 0) points in the
-        // ship's forward direction (+x at rotation 0).
         ctx.save()
         ctx.rotate(Math.PI / 2)
         const center = this.grid.getCenter()
         ctx.translate(-center.x, -center.y)
         this.grid.draw(ctx, 1, false, lightInfo)
+
+        this.grid.forEachFilled((cell) => {
+            if (!cell.placement) return
+            const px = cell.position.column * this.grid.cellSize
+            const py = cell.position.row * this.grid.cellSize
+            cell.placement.draw(ctx, px, py, this.grid.cellSize)
+            cell.placement.drawDebug(ctx, px, py, this.grid.cellSize, debug)
+        })
+
         ctx.restore()
 
         ctx.restore()
+
+        if (this.currentHealth < this.maxHealth) {
+            const radius = this.grid.getBoundingRadius()
+            const barWidth = radius * 2 * camera.zoom * 0.8
+            const barHeight = 3
+            const yOffset = -radius * camera.zoom - 8
+
+            const bx = x - barWidth / 2
+            const by = y + yOffset
+            const healthPct = Math.max(0, this.currentHealth / this.maxHealth)
+
+            ctx.fillStyle = "rgba(0, 0, 0, 0.5)"
+            ctx.fillRect(bx, by, barWidth, barHeight)
+
+            const r = Math.round(255 * (1 - healthPct))
+            const g = Math.round(255 * healthPct)
+            ctx.fillStyle = `rgb(${r}, ${g}, 50)`
+            ctx.fillRect(bx, by, barWidth * healthPct, barHeight)
+        }
 
         if (debug.stats) {
             this.drawStats(ctx, x, y)
@@ -135,6 +191,6 @@ export class Ship extends Entity {
     }
 
     onCollision(other: PhysicsObject): void {
-        
+
     }
 }

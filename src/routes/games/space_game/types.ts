@@ -2,6 +2,8 @@ import { FollowController, type PlayerController } from "./controller"
 import type { Entity } from "./entities/entity"
 import type { Ship } from "./entities/ship"
 import type { GridLightInfo } from "./lighting"
+import type { Particle } from "./particle"
+import type { Targetable } from "./placements"
 import { Vector2 } from "./physics"
 
 export type DebugOptions = {
@@ -48,10 +50,15 @@ export class Player {
         return this.ships[this.currentShipId]
     }
 
-    update(delta: number) {
+    update(delta: number, targets?: Targetable[]): Particle[] {
+        const spawned: Particle[] = []
         for (const ship of this.ships) {
             ship.update(delta)
+            if (targets) {
+                spawned.push(...ship.updatePlacements(delta, targets))
+            }
         }
+        return spawned
     }
 
     draw(ctx: CanvasRenderingContext2D, camera: Camera, debug: DebugOptions = NO_DEBUG, lightInfos?: Map<Ship, GridLightInfo>) {

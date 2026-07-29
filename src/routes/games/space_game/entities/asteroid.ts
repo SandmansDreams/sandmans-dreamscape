@@ -18,6 +18,9 @@ const ASTEROID_COLORS = [
 export class Asteroid extends PhysicsObject {
     radius: number
     grid: ShipGrid
+    health: number
+    maxHealth: number
+    dead: boolean = false
 
     constructor(
         position: Vector2,
@@ -29,6 +32,8 @@ export class Asteroid extends PhysicsObject {
         this.radius = options.radius ?? 40
 
         this.mass = options.mass ?? this.radius * this.radius * 0.3
+        this.maxHealth = Math.round(this.radius * 2)
+        this.health = this.maxHealth
 
         this.drag = 1
         this.rotationDrag = 1
@@ -112,6 +117,46 @@ export class Asteroid extends PhysicsObject {
         }
     }
 
+    takeDamage(amount: number): void {
+        this.health -= amount
+        if (this.health <= 0) {
+            this.dead = true
+        }
+    }
+
+    split(): Asteroid[] {
+        if (this.grid.filledCount < 10) return []
+
+        const count = 2 + Math.floor(Math.random() * 6)
+        const children: Asteroid[] = []
+
+        for (let i = 0; i < count; i++) {
+            const angle = (Math.PI * 2 / count) * i + (Math.random() - 0.5) * 0.5
+            const childRadius = this.radius * (0.2 + Math.random() * 0.3)
+
+            if (childRadius < 8) continue
+
+            const spawnDist = this.radius * 0.5
+            const childPos = new Vector2(
+                this.position.x + Math.cos(angle) * spawnDist,
+                this.position.y + Math.sin(angle) * spawnDist
+            )
+
+            const outwardSpeed = 0.5 + Math.random() * 1.5
+            const childVel = new Vector2(
+                this.velocity.x + Math.cos(angle) * outwardSpeed,
+                this.velocity.y + Math.sin(angle) * outwardSpeed
+            )
+
+            children.push(new Asteroid(childPos, childVel, {
+                radius: childRadius,
+                rotationSpeed: (Math.random() - 0.5) * 0.03
+            }))
+        }
+
+        return children
+    }
+
     update(delta: number) {
         this.rotation += this.rotationSpeed * delta
         this.position.add(this.velocity.clone().multiply(delta))
@@ -145,6 +190,10 @@ export class Asteroid extends PhysicsObject {
             ctx.restore()
         }
 
+        if (this.health < this.maxHealth) {
+            this.drawHealthBar(ctx, x, y, camera)
+        }
+
         if (debug.stats) {
             this.drawStats(ctx, x, y)
         }
@@ -152,6 +201,25 @@ export class Asteroid extends PhysicsObject {
         if (debug.vectors) {
             this.drawVelocityVector(ctx, x, y)
         }
+    }
+
+    private drawHealthBar(ctx: CanvasRenderingContext2D, screenX: number, screenY: number, camera: Camera) {
+        const barWidth = this.radius * 2 * camera.zoom * 0.8
+        const barHeight = 3
+        const yOffset = -this.radius * camera.zoom - 8
+
+        const x = screenX - barWidth / 2
+        const y = screenY + yOffset
+
+        const healthPct = Math.max(0, this.health / this.maxHealth)
+
+        ctx.fillStyle = "rgba(0, 0, 0, 0.5)"
+        ctx.fillRect(x, y, barWidth, barHeight)
+
+        const r = Math.round(255 * (1 - healthPct))
+        const g = Math.round(255 * healthPct)
+        ctx.fillStyle = `rgb(${r}, ${g}, 50)`
+        ctx.fillRect(x, y, barWidth * healthPct, barHeight)
     }
 
     onCollision(other: PhysicsObject): void {}

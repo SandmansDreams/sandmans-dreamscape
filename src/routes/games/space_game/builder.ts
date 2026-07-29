@@ -146,6 +146,12 @@ export class ShipGrid {
         this.cellMap.delete(this.key(cell.position.column, cell.position.row))
     }
 
+    forEachFilled(fn: (cell: Cell) => void) {
+        for (const cell of this.cellMap.values()) {
+            fn(cell)
+        }
+    }
+
     // --- Serialization -------------------------------------------------------
 
     serialize(): object {

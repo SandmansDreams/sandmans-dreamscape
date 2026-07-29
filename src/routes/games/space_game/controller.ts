@@ -236,6 +236,9 @@ export class FollowController extends Controller {
 }
 
 export class AttackController extends Controller {
+    private orbitDirection: number = Math.random() < 0.5 ? 1 : -1
+    private strafeTimer: number = 0
+
     constructor(
         public target: Entity
     ) {
@@ -248,56 +251,52 @@ export class AttackController extends Controller {
     ) {
         this.clearInput();
 
+        this.strafeTimer += delta
+
         const toTarget =
             this.target.position
                 .clone()
                 .subtract(body.position);
 
         const distance = toTarget.getSpeed();
+        const targetAngle = Math.atan2(toTarget.y, toTarget.x);
 
-        const desiredAngle = Math.atan2(
-            toTarget.y,
-            toTarget.x
-        );
+        const attackRange = 200;
+        const orbitRange = 150;
 
-        let angleError =
-            desiredAngle - body.rotation;
+        if (distance > attackRange) {
+            let angleError = targetAngle - body.rotation;
+            angleError = Math.atan2(Math.sin(angleError), Math.cos(angleError));
 
-        angleError = Math.atan2(
-            Math.sin(angleError),
-            Math.cos(angleError)
-        );
+            if (angleError > 0.05) this.input.right = true;
+            else if (angleError < -0.05) this.input.left = true;
 
-        // Rotate toward the target
-        if (angleError > 0.05) {
-            this.input.right = true;
-        } else if (angleError < -0.05) {
-            this.input.left = true;
-        }
+            if (Math.abs(angleError) < 0.3) this.input.forward = true;
+        } else {
+            const orbitAngle = targetAngle + (Math.PI / 2) * this.orbitDirection;
 
-        const attackRange = 250;
+            let angleError = orbitAngle - body.rotation;
+            angleError = Math.atan2(Math.sin(angleError), Math.cos(angleError));
 
-        // Close distance
-        if (
-            distance > attackRange &&
-            Math.abs(angleError) < 0.25
-        ) {
+            if (angleError > 0.05) this.input.right = true;
+            else if (angleError < -0.05) this.input.left = true;
+
             this.input.forward = true;
+
+            if (distance < orbitRange) {
+                const awayAngle = targetAngle + Math.PI;
+                let awayError = awayAngle - body.rotation;
+                awayError = Math.atan2(Math.sin(awayError), Math.cos(awayError));
+
+                if (Math.abs(awayError) < 0.4) {
+                    this.input.forward = true;
+                }
+            }
         }
 
-        // Slow down when close
-        if (
-            distance < attackRange * 0.75 &&
-            body.velocity.getSpeed() > 1
-        ) {
-            this.input.space = true;
+        if (this.strafeTimer > 180 + Math.random() * 120) {
+            this.orbitDirection *= -1
+            this.strafeTimer = 0
         }
-
-        // TODO:
-        // if (distance < attackRange &&
-        //     Math.abs(angleError) < 0.1)
-        // {
-        //     ship.firePrimaryWeapon();
-        // }
     }
 }

@@ -11,6 +11,9 @@ App · SVELTE
     import { BLOCK_MENU, ShipGrid, type BlockShape } from "./builder";
     import { GridEditor } from "./grid-editor";
     import { LightSource, computeGridLight, type GridLightInfo } from "./lighting";
+    import { Particle } from "./particle";
+    import { Turret } from "./placements";
+    import { spawnScouter } from "./entities/enemy";
 
     let canvas = $state<HTMLCanvasElement | null>(null)
     let context = $state<CanvasRenderingContext2D | null>(null)
@@ -154,10 +157,13 @@ App · SVELTE
     const collisionManger = new CollisionManager()
 
     const shipCount = 1
+    const scouterCount = 20
     let ships = $state<Ship[]>([])
     let shipThumbCanvases = $state<HTMLCanvasElement[] | null[]>([])
     const asteroidCount = 200
     let asteroids: Asteroid[] = []
+    let particles: Particle[] = []
+    let enemies: Ship[] = []
 
     let lightingEnabled = $state(true)
     const sun = new LightSource(new Vector2(5000, -4000), "#fffbe6", 1.0, 120)
@@ -275,8 +281,21 @@ App · SVELTE
             for (const ship of ships) {
                 shipLightInfos.set(ship, computeGridLight(ship.position, ship.rotation, lights[0], Math.PI / 2))
             }
+            for (const enemy of enemies) {
+                shipLightInfos.set(enemy, computeGridLight(enemy.position, enemy.rotation, lights[0], Math.PI / 2))
+            }
         }
         player.draw(context, camera, debugOptions, shipLightInfos)
+
+        // Draw enemies
+        for (const enemy of enemies) {
+            enemy.draw(context, camera, debugOptions, shipLightInfos?.get(enemy))
+        }
+
+        // Draw particles
+        for (const p of particles) {
+            p.draw(context, camera)
+        }
     }
 
     function renderBuildView() {
@@ -333,13 +352,64 @@ App · SVELTE
         updateCameraTransition(delta)
 
         if (mode === "flying") {
-            player.update(delta)
+            const allTargets = [...asteroids, ...enemies]
+            const newParticles = player.update(delta, allTargets)
+            particles.push(...newParticles)
+
+            for (const enemy of enemies) {
+                enemy.update(delta)
+            }
 
             for (const asteroid of asteroids) {
                 asteroid.update(delta)
             }
 
-            collisionManger.update([...ships, ...asteroids])
+            // Update particles and check hits
+            for (const p of particles) {
+                p.update(delta)
+                if (p.dead) continue
+
+                for (const asteroid of asteroids) {
+                    const dx = p.position.x - asteroid.position.x
+                    const dy = p.position.y - asteroid.position.y
+                    if (Math.hypot(dx, dy) < asteroid.radius) {
+                        asteroid.takeDamage(p.damage)
+                        p.dead = true
+                        break
+                    }
+                }
+                if (p.dead) continue
+
+                for (const enemy of enemies) {
+                    const radius = enemy.grid.getBoundingRadius()
+                    const dx = p.position.x - enemy.position.x
+                    const dy = p.position.y - enemy.position.y
+                    if (Math.hypot(dx, dy) < radius) {
+                        enemy.currentHealth -= p.damage
+                        p.dead = true
+                        break
+                    }
+                }
+            }
+
+            // Remove dead particles
+            particles = particles.filter(p => !p.dead)
+
+            // Remove dead enemies
+            enemies = enemies.filter(e => e.currentHealth > 0)
+
+            // Handle dead asteroids — split them
+            const newAsteroids: Asteroid[] = []
+            asteroids = asteroids.filter(a => {
+                if (a.dead) {
+                    newAsteroids.push(...a.split())
+                    return false
+                }
+                return true
+            })
+            asteroids.push(...newAsteroids)
+
+            collisionManger.update([...ships, ...enemies, ...asteroids])
             if (!cameraTransition) {
                 camera.follow(player.currentShip)
             }
@@ -413,6 +483,18 @@ App · SVELTE
         for (let s = 0; s < shipCount; s++) {
             const grid = new ShipGrid(5)
             grid.paintTestShape()
+
+            // Add turrets to the wing tips
+            const turretCells = [
+                grid.getCell(2, 5),
+                grid.getCell(7, 5),
+            ]
+            for (const cell of turretCells) {
+                const turret = new Turret()
+                cell.placement = turret
+                grid.setCell(cell, cell.shape, cell.color, turret)
+            }
+
             const ship = new Ship(
                 getRandomVector(1000, 1000),
                 new Vector2(0, 0),
@@ -424,6 +506,17 @@ App · SVELTE
             ships.push(ship)
         }
     }
+
+    function spawnScouters() {
+        for (let s = 0; s < scouterCount; s++) {
+            const scouter = spawnScouter(
+                getRandomVector(1000, 1000),
+                player.currentShip
+            )
+            enemies.push(scouter)
+        }
+    }
+
 
     function screenToGrid(screenX: number, screenY: number): [number, number] {
         const grid = player.currentShip.grid
@@ -499,15 +592,18 @@ App · SVELTE
         starMaps?.push(buildStarMap(1000, 1000, .006, 12))
 
         spawnShips()
-        asteroids = spawnAsteroidField(asteroidCount, 4000, 4000)
-
+        
         player = new Player(
             ships,
             controller,
         )
-
+        
         gridEditor = new GridEditor(player.currentShip.grid)
         gridEditor.selectColor(selectedColor)
+        
+        spawnScouters()
+        asteroids = spawnAsteroidField(asteroidCount, 4000, 4000)
+        
  
         frame = requestAnimationFrame(tick)
  
