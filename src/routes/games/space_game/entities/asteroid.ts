@@ -1,23 +1,28 @@
 import { computeGridLight, type GridLightInfo, type LightSource } from "../lighting"
-import { ShipGrid, type BlockShape } from "../builder"
+import { Grid as Grid, type BlockShape } from "../grid"
 import { CircleCollider, Vector2 } from "../physics"
 import { Camera, NO_DEBUG, type DebugOptions } from "../types"
 import { PhysicsObject } from "../physics"
+import { CELL_SIZE, getRandomIntFromRange } from "../helpers"
 
 export interface AsteroidOptions {
     radius?: number
-    mass?: number
     rotationSpeed?: number
     jaggedness?: number
 }
 
 const ASTEROID_COLORS = [
-    "#6b6459", "#7a7265", "#5e574e", "#847b6f", "#6f6858"
+    "hsl(37, 9%, 38%)", 
+    "hsl(37, 9%, 44%)", 
+    "hsl(34, 9%, 34%)", 
+    "hsl(34, 9%, 48%)", 
+    "hsl(42, 12%, 39%)"
 ]
 
 export class Asteroid extends PhysicsObject {
     radius: number
-    grid: ShipGrid
+    grid: Grid
+    gridDim: number
     health: number
     maxHealth: number
     dead: boolean = false
@@ -29,28 +34,26 @@ export class Asteroid extends PhysicsObject {
     ) {
         super(position, velocity, Math.random() * 30)
 
-        this.radius = options.radius ?? 40
+        this.radius = options.radius ?? getRandomIntFromRange(5, 40)
+        this.mass = this.radius * this.radius 
 
-        this.mass = options.mass ?? this.radius * this.radius * 0.3
-        this.maxHealth = Math.round(this.radius * 2)
+        this.maxHealth = Math.round(this.radius)
         this.health = this.maxHealth
 
         this.drag = 1
         this.rotationDrag = 1
-        this.rotationSpeed = options.rotationSpeed ?? (Math.random() - 0.5) * 0.01
+        this.rotationSpeed = options.rotationSpeed ?? (Math.random() - 0.5) * 0.02
 
-        const cellSize = Math.max(4, Math.round(this.radius / 5))
-        const gridDim = Math.ceil(this.radius * 2 / cellSize) + 2
-        this.grid = new ShipGrid(gridDim * cellSize, gridDim * cellSize, cellSize)
+        this.gridDim = Math.ceil(this.radius * 2 / CELL_SIZE) + 2
+        this.grid = new Grid()
         this.generateShape(options.jaggedness ?? 0.35)
 
         this.collider = new CircleCollider(this.radius, new Vector2(), this)
     }
 
     private generateShape(jaggedness: number) {
-        const center = this.grid.getCenter()
-        const cx = center.x
-        const cy = center.y
+        const cx = (this.gridDim * CELL_SIZE) / 2
+        const cy = cx
 
         const vertexCount = 10 + Math.floor(Math.random() * 4)
         const radii: number[] = []
@@ -60,7 +63,11 @@ export class Asteroid extends PhysicsObject {
         }
 
         const baseColor = ASTEROID_COLORS[Math.floor(Math.random() * ASTEROID_COLORS.length)]
-        const s = this.grid.cellSize
+        const baseMatch = baseColor.match(/hsl\((\d+),\s*(\d+)%?,\s*(\d+)%?\)/)
+        const baseH = baseMatch ? parseInt(baseMatch[1]) : 37
+        const baseS = baseMatch ? parseInt(baseMatch[2]) : 9
+        const baseL = baseMatch ? parseInt(baseMatch[3]) : 40
+        const s = CELL_SIZE
 
         const edgeRadiusAt = (px: number, py: number): number => {
             const dx = px - cx
@@ -80,8 +87,20 @@ export class Asteroid extends PhysicsObject {
             return Math.hypot(dx, dy) < edgeRadiusAt(px, py)
         }
 
-        const cols = this.grid.nominalCols
-        const rows = this.grid.nominalRows
+        const craterCount = Math.max(2, Math.floor(this.radius / 10))
+        const craters: { cx: number, cy: number, r: number }[] = []
+        for (let i = 0; i < craterCount; i++) {
+            const angle = Math.random() * Math.PI * 2
+            const dist = Math.random() * this.radius
+            craters.push({
+                cx: cx + Math.cos(angle) * dist,
+                cy: cy + Math.sin(angle) * dist,
+                r: this.radius * (0.1 + Math.random() * 0.15)
+            })
+        }
+
+        const cols = this.gridDim
+        const rows = this.gridDim
         for (let row = 0; row < rows; row++) {
             for (let col = 0; col < cols; col++) {
                 const x = col * s
@@ -111,8 +130,21 @@ export class Asteroid extends PhysicsObject {
                     else shape = "arcSE"
                 }
 
+                const cellCx = x + s / 2
+                const cellCy = y + s / 2
+                const inCrater = craters.some(cr => Math.hypot(cellCx - cr.cx, cellCy - cr.cy) < cr.r)
+
+                const lVariation = getRandomIntFromRange(-4, 4)
+                const sVariation = getRandomIntFromRange(-3, 3)
+                const cellL = inCrater
+                    ? Math.max(5, baseL - getRandomIntFromRange(8, 14) + lVariation)
+                    : Math.max(5, Math.min(95, baseL + lVariation))
+                const cellS = Math.max(0, Math.min(100, baseS + sVariation))
+                const cellColor = `hsl(${baseH}, ${cellS}%, ${cellL}%)`
+
                 const cell = this.grid.getCell(col, row)
-                this.grid.setCell(cell, shape, baseColor, null)
+                this.grid.setCell(cell, shape, cellColor, null)
+                if (inCrater) cell.invertLight = true
             }
         }
     }

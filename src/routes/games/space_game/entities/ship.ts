@@ -4,7 +4,8 @@ import { Controller, FollowController } from "../controller"
 import { CircleCollider } from "../physics"
 import { NEUTRAL_INPUT } from "../controller"
 import { Camera, NO_DEBUG, type DebugOptions } from "../types"
-import { ShipGrid } from "../builder"
+import { Grid } from "../grid"
+import { CELL_SIZE } from "../helpers"
 import type { GridLightInfo } from "../lighting"
 import { Particle } from "../particle"
 import type { Targetable } from "../placements"
@@ -13,14 +14,14 @@ export class Ship extends Entity {
     thrust: number
     rotationThrust: number
     color: string = "grey"
-    grid: ShipGrid
+    grid: Grid
 
     constructor(
         position: Vector2,
         velocity: Vector2,
         rotation: number,
         controller: Controller,
-        grid: ShipGrid
+        grid: Grid
     ) {
         super(position, velocity, rotation, controller)
         this.grid = grid
@@ -38,8 +39,8 @@ export class Ship extends Entity {
 
     cellToWorld(col: number, row: number): Vector2 {
         const center = this.grid.getCenter()
-        const localX = col * this.grid.cellSize + this.grid.cellSize / 2 - center.x
-        const localY = row * this.grid.cellSize + this.grid.cellSize / 2 - center.y
+        const localX = col * CELL_SIZE + CELL_SIZE / 2 - center.x
+        const localY = row * CELL_SIZE + CELL_SIZE / 2 - center.y
 
         const gridAngle = this.rotation + Math.PI / 2
         const cos = Math.cos(gridAngle)
@@ -144,10 +145,10 @@ export class Ship extends Entity {
 
         this.grid.forEachFilled((cell) => {
             if (!cell.placement) return
-            const px = cell.position.column * this.grid.cellSize
-            const py = cell.position.row * this.grid.cellSize
-            cell.placement.draw(ctx, px, py, this.grid.cellSize)
-            cell.placement.drawDebug(ctx, px, py, this.grid.cellSize, debug)
+            const px = cell.position.column * CELL_SIZE
+            const py = cell.position.row * CELL_SIZE
+            cell.placement.draw(ctx, px, py, CELL_SIZE)
+            cell.placement.drawDebug(ctx, px, py, CELL_SIZE, debug)
         })
 
         ctx.restore()

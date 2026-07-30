@@ -1,15 +1,15 @@
-import { type BlockShape, type Cell, type ShipGrid } from "./builder"
+import { type BlockShape, type Cell, type Grid } from "./grid"
 import type { Placement } from "./placements"
 
 export class GridEditor {
-    grid: ShipGrid
+    grid: Grid
     hoveredCell: Cell | null = null
 
     selectedShape: BlockShape | null = "full"
     selectedPlacement: Placement | null = null
     selectedColor: string = "rgba(255, 180, 80, 0.9)"
 
-    constructor(grid: ShipGrid) {
+    constructor(grid: Grid) {
         this.grid = grid
     }
 

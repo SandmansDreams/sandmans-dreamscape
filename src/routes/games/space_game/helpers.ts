@@ -1,6 +1,8 @@
 import { Vector2 } from "./physics";
 import type { Camera } from "./types";
 
+export const CELL_SIZE = 5
+
 export function getDistance(a: Vector2, b: Vector2) {
     return  Math.hypot(b.x - a.x, b.y - a.y)
 }
@@ -48,4 +50,8 @@ export function resizeCanvas(canvas: HTMLCanvasElement, context: CanvasRendering
 
     // Reset any previous transforms and scale for HiDPI displays
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+export function getRandomIntFromRange(min: number, max: number) {
+    return Math.floor(Math.random() * (max - min + 1)) + min
 }

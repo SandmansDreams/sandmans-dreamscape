@@ -1,3 +1,4 @@
+import { CELL_SIZE } from "./helpers";
 import { adjustColorForLight, type GridLightInfo } from "./lighting";
 import type { Placement } from "./placements";
 
@@ -13,6 +14,7 @@ export interface Cell {
     color: string
     shape: BlockShape
     placement: Placement | null
+    invertLight?: boolean
 }
 
 export const BLOCK_MENU = [
@@ -27,26 +29,9 @@ export const BLOCK_MENU = [
     { shape: "arcSW", label: "Arc SW" },
 ] as const
 
-export class ShipGrid {
-    readonly cellSize: number
-    readonly nominalCols: number
-    readonly nominalRows: number
+export class Grid {
     private cellMap: Map<string, Cell> = new Map()
     defaultColor: string = "grey"
-
-    constructor(cellSize: number)
-    constructor(width: number, height: number, cellSize: number)
-    constructor(a: number, b?: number, c?: number) {
-        if (b !== undefined && c !== undefined) {
-            this.cellSize = c
-            this.nominalCols = Math.ceil(a / c)
-            this.nominalRows = Math.ceil(b / c)
-        } else {
-            this.cellSize = a
-            this.nominalCols = 0
-            this.nominalRows = 0
-        }
-    }
 
     get filledCount(): number {
         return this.cellMap.size
@@ -73,8 +58,8 @@ export class ShipGrid {
 
     getCellFromPoint(x: number, y: number): Cell {
         return this.getCell(
-            Math.floor(x / this.cellSize),
-            Math.floor(y / this.cellSize)
+            Math.floor(x / CELL_SIZE),
+            Math.floor(y / CELL_SIZE)
         )
     }
 
@@ -93,18 +78,10 @@ export class ShipGrid {
 
     getCenter(): { x: number, y: number } {
         const bounds = this.getFilledBounds()
-        if (!bounds) {
-            if (this.nominalCols > 0) {
-                return {
-                    x: (this.nominalCols * this.cellSize) / 2,
-                    y: (this.nominalRows * this.cellSize) / 2
-                }
-            }
-            return { x: 0, y: 0 }
-        }
+        if (!bounds) return { x: 0, y: 0 }
         return {
-            x: ((bounds.minCol + bounds.maxCol + 1) * this.cellSize) / 2,
-            y: ((bounds.minRow + bounds.maxRow + 1) * this.cellSize) / 2
+            x: ((bounds.minCol + bounds.maxCol + 1) * CELL_SIZE) / 2,
+            y: ((bounds.minRow + bounds.maxRow + 1) * CELL_SIZE) / 2
         }
     }
 
@@ -112,10 +89,10 @@ export class ShipGrid {
         const center = this.getCenter()
         let maxDistSq = 0
         for (const cell of this.cellMap.values()) {
-            const x0 = cell.position.column * this.cellSize
-            const y0 = cell.position.row * this.cellSize
-            const x1 = x0 + this.cellSize
-            const y1 = y0 + this.cellSize
+            const x0 = cell.position.column * CELL_SIZE
+            const y0 = cell.position.row * CELL_SIZE
+            const x1 = x0 + CELL_SIZE
+            const y1 = y0 + CELL_SIZE
             for (const [px, py] of [[x0, y0], [x1, y0], [x0, y1], [x1, y1]]) {
                 const dx = px - center.x
                 const dy = py - center.y
@@ -166,7 +143,6 @@ export class ShipGrid {
         }
         return {
             version: 1,
-            cellSize: this.cellSize,
             cells
         }
     }
@@ -216,27 +192,27 @@ export class ShipGrid {
         const minY = Math.min(tl.y, tr.y, bl.y, br.y)
         const maxY = Math.max(tl.y, tr.y, bl.y, br.y)
 
-        const startCol = Math.floor(minX / this.cellSize) - 1
-        const endCol = Math.ceil(maxX / this.cellSize) + 1
-        const startRow = Math.floor(minY / this.cellSize) - 1
-        const endRow = Math.ceil(maxY / this.cellSize) + 1
+        const startCol = Math.floor(minX / CELL_SIZE) - 1
+        const endCol = Math.ceil(maxX / CELL_SIZE) + 1
+        const startRow = Math.floor(minY / CELL_SIZE) - 1
+        const endRow = Math.ceil(maxY / CELL_SIZE) + 1
 
         ctx.strokeStyle = "rgba(105, 208, 255, 0.1)"
         ctx.lineWidth = 0.5
         ctx.beginPath()
 
-        const y0 = startRow * this.cellSize
-        const y1 = endRow * this.cellSize
+        const y0 = startRow * CELL_SIZE
+        const y1 = endRow * CELL_SIZE
         for (let col = startCol; col <= endCol; col++) {
-            const x = col * this.cellSize
+            const x = col * CELL_SIZE
             ctx.moveTo(x, y0)
             ctx.lineTo(x, y1)
         }
 
-        const x0 = startCol * this.cellSize
-        const x1 = endCol * this.cellSize
+        const x0 = startCol * CELL_SIZE
+        const x1 = endCol * CELL_SIZE
         for (let row = startRow; row <= endRow; row++) {
-            const y = row * this.cellSize
+            const y = row * CELL_SIZE
             ctx.moveTo(x0, y)
             ctx.lineTo(x1, y)
         }
@@ -246,7 +222,7 @@ export class ShipGrid {
 
     private drawCenterCross(ctx: CanvasRenderingContext2D) {
         const center = this.getCenter()
-        const arm = this.cellSize * 1.5
+        const arm = CELL_SIZE * 1.5
 
         ctx.strokeStyle = "#ff8c00"
         ctx.lineWidth = 1
@@ -266,30 +242,33 @@ export class ShipGrid {
     ) {
         if (cell.shape === "empty") return;
 
-        const x = cell.position.column * this.cellSize;
-        const y = cell.position.row * this.cellSize;
+        const x = cell.position.column * CELL_SIZE;
+        const y = cell.position.row * CELL_SIZE;
 
         const baseColor = cell.color ?? "rgba(255, 180, 80, 0.9)";
 
         if (lightInfo && center) {
-            const cellCenterX = x + this.cellSize / 2;
-            const cellCenterY = y + this.cellSize / 2;
-            ctx.fillStyle = adjustColorForLight(baseColor, cellCenterX, cellCenterY, center.x, center.y, lightInfo);
+            const cellCenterX = x + CELL_SIZE / 2;
+            const cellCenterY = y + CELL_SIZE / 2;
+            const li = cell.invertLight
+                ? { dirX: -lightInfo.dirX, dirY: -lightInfo.dirY, strength: lightInfo.strength }
+                : lightInfo;
+            ctx.fillStyle = adjustColorForLight(baseColor, cellCenterX, cellCenterY, center.x, center.y, li);
         } else {
             ctx.fillStyle = baseColor;
         }
 
         if (cell.shape === "full") {
-            ctx.fillRect(x, y, this.cellSize, this.cellSize);
+            ctx.fillRect(x, y, CELL_SIZE, CELL_SIZE);
             return;
         }
 
         if (cell.shape.startsWith("arc")) {
-            this.drawArc(ctx, cell.shape as "arcNW" | "arcNE" | "arcSE" | "arcSW", x, y, this.cellSize);
+            this.drawArc(ctx, cell.shape as "arcNW" | "arcNE" | "arcSE" | "arcSW", x, y, CELL_SIZE);
             return;
         }
 
-        this.drawTriangle(ctx, cell.shape as "triNW" | "triNE" | "triSW" | "triSE", x, y, this.cellSize, this.cellSize);
+        this.drawTriangle(ctx, cell.shape as "triNW" | "triNE" | "triSW" | "triSE", x, y, CELL_SIZE, CELL_SIZE);
     }
 
     private drawTriangle(

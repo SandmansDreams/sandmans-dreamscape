@@ -3,12 +3,12 @@ App · SVELTE
     import { onMount } from "svelte";
     import { buildStarMap, drawLayerLocally } from "./background";
     import { Asteroid, spawnAsteroidField } from "./entities/asteroid";
-    import { getPositionFromEvent, getRandomVector, isVisible, resizeCanvas } from "./helpers";
+    import { CELL_SIZE, getPositionFromEvent, getRandomVector, isVisible, resizeCanvas } from "./helpers";
     import { Camera, Player, type DebugOptions } from "./types";
     import { EmptyController, FollowController, NEUTRAL_INPUT, PlayerController, type InputState } from "./controller";
     import { CollisionManager, Vector2 } from "./physics";
     import { Ship } from "./entities/ship";
-    import { BLOCK_MENU, ShipGrid, type BlockShape } from "./builder";
+    import { BLOCK_MENU, Grid, type BlockShape } from "./grid";
     import { GridEditor } from "./grid-editor";
     import { LightSource, computeGridLight, type GridLightInfo } from "./lighting";
     import { Particle } from "./particle";
@@ -152,7 +152,7 @@ App · SVELTE
  
     let frame = 0
     let lastTimestamp = 0
-    const motionBlur = $state(0.4)
+    const motionBlur = $state(1)
 
     const collisionManger = new CollisionManager()
 
@@ -314,10 +314,10 @@ App · SVELTE
 
         // Hover highlight
         if (gridEditor?.hoveredCell) {
-            const hx = gridEditor.hoveredCell.position.column * grid.cellSize
-            const hy = gridEditor.hoveredCell.position.row * grid.cellSize
+            const hx = gridEditor.hoveredCell.position.column * CELL_SIZE
+            const hy = gridEditor.hoveredCell.position.row * CELL_SIZE
             context.fillStyle = "rgba(105, 208, 255, 0.25)"
-            context.fillRect(hx, hy, grid.cellSize, grid.cellSize)
+            context.fillRect(hx, hy, CELL_SIZE, CELL_SIZE)
         }
 
         context.restore()
@@ -481,7 +481,7 @@ App · SVELTE
 
     function spawnShips() {
         for (let s = 0; s < shipCount; s++) {
-            const grid = new ShipGrid(5)
+            const grid = new Grid()
             grid.paintTestShape()
 
             // Add turrets to the wing tips

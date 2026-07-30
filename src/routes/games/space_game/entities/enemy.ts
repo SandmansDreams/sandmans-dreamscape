@@ -1,12 +1,12 @@
 import { Ship } from "./ship"
-import { ShipGrid, type BlockShape } from "../builder"
+import { Grid, type BlockShape } from "../grid"
 import { AttackController } from "../controller"
 import { Vector2 } from "../physics"
 import type { Entity } from "./entity"
 import ScouerData from "./shipModels/Scouter.json"
 
 export function spawnScouter(position: Vector2, target: Entity): Ship {
-    const grid = new ShipGrid(5)
+    const grid = new Grid()
     const data = {
         ...ScouerData,
         cells: ScouerData.cells.map(c => ({ ...c, s: c.s as BlockShape }))

@@ -1,4 +1,4 @@
-import type { Cell } from "./builder"
+import type { Cell } from "./grid"
 import { Particle } from "./particle"
 import { Vector2 } from "./physics"
 import type { Camera, DebugOptions } from "./types"
