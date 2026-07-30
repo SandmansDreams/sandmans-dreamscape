@@ -75,6 +75,7 @@ export class Camera {
     zoom: number = 1
     minZoom: number = 0.25
     maxZoom: number = 4
+    rotation: number = 0
 
     follow(target: Entity) {
         const dx = target.position.x - this.position.x

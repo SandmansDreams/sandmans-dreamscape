@@ -19,8 +19,9 @@ export class GridEditor {
     rotationIndex: number = 0
     selectedColor: string = "hsl(0, 0%, 50%)"
 
-    selectedPlacementType: "turret" | "thruster" | "spike" | null = null
+    selectedPlacementType: "turret" | "thruster" | "spike" | "erase" | null = null
     selectedPlacement: Placement | null = null
+    placementRotationIndex: number = 0
 
     constructor(grid: Grid) {
         this.grid = grid
@@ -36,6 +37,7 @@ export class GridEditor {
     }
 
     get canRotate(): boolean {
+        if (this.editorMode === "placements" && this.selectedPlacementType === "spike") return true
         return this.baseShape === "wedge" || this.baseShape === "arc" || this.baseShape === "half"
     }
 
@@ -45,9 +47,17 @@ export class GridEditor {
     }
 
     rotate() {
+        if (this.editorMode === "placements" && this.selectedPlacementType === "spike") {
+            this.placementRotationIndex = (this.placementRotationIndex + 1) % 4
+            return
+        }
         if (this.canRotate) {
             this.rotationIndex = (this.rotationIndex + 1) % 4
         }
+    }
+
+    get spikeRotation(): number {
+        return this.placementRotationIndex * (Math.PI / 2)
     }
 
     selectColor(color: string) {
@@ -83,12 +93,16 @@ export class GridEditor {
                 const spike = new Spike()
                 spike.cell = cell
                 spike.color = cell.color
+                spike.rotation = this.spikeRotation
                 this.grid.setCell(cell, cell.shape, cell.color, spike)
                 this.selectedPlacement = spike
-            } else if (cell.placement) {
-                this.selectedPlacement = cell.placement
-            } else {
+            } else if (this.selectedPlacementType === "erase") {
+                if (cell.placement) {
+                    this.grid.setCell(cell, cell.shape, cell.color, null)
+                }
                 this.selectedPlacement = null
+            } else {
+                this.selectedPlacement = cell.placement ?? null
             }
             return
         }

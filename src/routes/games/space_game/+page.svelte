@@ -52,6 +52,8 @@ App · SVELTE
         toPos: Vector2
         fromZoom: number
         toZoom: number
+        fromRotation: number
+        toRotation: number
         progress: number
         onComplete: () => void
     }
@@ -259,7 +261,7 @@ App · SVELTE
     const collisionManger = new CollisionManager()
 
     const shipCount = 1
-    const scouterCount = 20
+    const scouterCount = 100
     let ships = $state<Ship[]>([])
     let shipThumbCanvases = $state<HTMLCanvasElement[] | null[]>([])
     const asteroidCount = 200
@@ -268,12 +270,14 @@ App · SVELTE
     let enemies: Ship[] = []
 
     let lightingEnabled = $state(true)
-    const sun = new LightSource(new Vector2(5000, -4000), "#fffbe6", 1.0, 120)
+    const sun = new LightSource(new Vector2(5000, -4000), "#a832a4", 1.0, 120)
     const lights: LightSource[] = [sun]
 
     const controller = new PlayerController(input)
     let player: Player
     let gridEditor: GridEditor
+    let selectedPlacementType = $state<"turret" | "thruster" | "spike" | "erase" | null>(null)
+    let selectedPlacement = $state<Placement | null>(null)
 
     const camera = new Camera()
     camera.position = new Vector2(0, 0)
@@ -351,6 +355,13 @@ App · SVELTE
             context.fillRect(0, 0, canvas.clientWidth, canvas.clientHeight)
         }
 
+        context.save()
+        if (camera.rotation !== 0) {
+            context.translate(canvas.clientWidth / 2, canvas.clientHeight / 2)
+            context.rotate(-camera.rotation)
+            context.translate(-canvas.clientWidth / 2, -canvas.clientHeight / 2)
+        }
+
         // Draw the world (parallax star layers)
         context.save();
         starMaps?.forEach((element, index) => {
@@ -363,6 +374,8 @@ App · SVELTE
         } else {
             renderBuildView()
         }
+
+        context.restore()
     }
 
     function renderFlyingView() {
@@ -478,17 +491,28 @@ App · SVELTE
                         const r = CELL_SIZE * 0.4
                         const cx = hx + CELL_SIZE / 2
                         const cy = hy + CELL_SIZE / 2
+                        context.save()
+                        context.translate(cx, cy)
+                        context.rotate(gridEditor.spikeRotation)
                         context.fillStyle = "#888"
                         context.beginPath()
-                        context.moveTo(cx, cy - r * 1.3)
-                        context.lineTo(cx - r * 0.5, cy + r * 0.4)
-                        context.lineTo(cx + r * 0.5, cy + r * 0.4)
+                        context.moveTo(0, -r * 1.3)
+                        context.lineTo(-r * 0.5, r * 0.4)
+                        context.lineTo(r * 0.5, r * 0.4)
                         context.closePath()
                         context.fill()
+                        context.restore()
+                    } else if (gridEditor.selectedPlacementType === "erase") {
+                        if (gridEditor.hoveredCell.placement) {
+                            context.globalAlpha = 0.4
+                            context.fillStyle = "#ff4444"
+                            context.fillRect(hx, hy, CELL_SIZE, CELL_SIZE)
+                        }
                     } else if (gridEditor.hoveredCell.placement) {
-                        context.globalAlpha = 0.4
-                        context.fillStyle = "#ff4444"
-                        context.fillRect(hx, hy, CELL_SIZE, CELL_SIZE)
+                        context.globalAlpha = 0.3
+                        context.strokeStyle = "#44aaff"
+                        context.lineWidth = 0.3
+                        context.strokeRect(hx + 0.15, hy + 0.15, CELL_SIZE - 0.3, CELL_SIZE - 0.3)
                     }
                     context.restore()
                 }
@@ -607,10 +631,23 @@ App · SVELTE
                 position: camera.position.clone(),
                 zoom: camera.zoom
             }
-            mode = "building"
-            activePanel = "blocks"
-            gridEditor = new GridEditor(player.currentShip.grid)
-            gridEditor.selectColor(hslColor())
+            const shipPos = player.currentShip.position.clone()
+            cameraTransition = {
+                fromPos: camera.position.clone(),
+                toPos: shipPos,
+                fromZoom: camera.zoom,
+                toZoom: buildZoom,
+                fromRotation: 0,
+                toRotation: player.currentShip.rotation + Math.PI / 2,
+                progress: 0,
+                onComplete: () => {
+                    camera.rotation = 0
+                    mode = "building"
+                    activePanel = "blocks"
+                    gridEditor = new GridEditor(player.currentShip.grid)
+                    gridEditor.selectColor(hslColor())
+                }
+            }
         } else {
             const restorePos = savedCameraState?.position ?? camera.position.clone()
             const restoreZoom = savedCameraState?.zoom ?? camera.zoom
@@ -620,10 +657,15 @@ App · SVELTE
             cameraTransition = {
                 fromPos: player.currentShip.position.clone(),
                 toPos: restorePos,
-                fromZoom: camera.zoom,
+                fromZoom: buildZoom,
                 toZoom: restoreZoom,
+                fromRotation: player.currentShip.rotation + Math.PI / 2,
+                toRotation: 0,
                 progress: 0,
-                onComplete: () => { savedCameraState = null }
+                onComplete: () => {
+                    camera.rotation = 0
+                    savedCameraState = null
+                }
             }
         }
     }
@@ -637,6 +679,9 @@ App · SVELTE
         camera.position.x = cameraTransition.fromPos.x + (cameraTransition.toPos.x - cameraTransition.fromPos.x) * t
         camera.position.y = cameraTransition.fromPos.y + (cameraTransition.toPos.y - cameraTransition.fromPos.y) * t
         camera.zoom = cameraTransition.fromZoom + (cameraTransition.toZoom - cameraTransition.fromZoom) * t
+        let rotDiff = cameraTransition.toRotation - cameraTransition.fromRotation
+        rotDiff = Math.atan2(Math.sin(rotDiff), Math.cos(rotDiff))
+        camera.rotation = cameraTransition.fromRotation + rotDiff * t
 
         if (cameraTransition.progress >= 1) {
             cameraTransition.onComplete()
@@ -696,12 +741,31 @@ App · SVELTE
         return [gridX, gridY]
     }
 
-    function handleSpacerClick(event: MouseEvent) {
+    let isDragging = false
+
+    function syncFromEditor() {
+        selectedPlacement = gridEditor.selectedPlacement
+        selectedPlacementType = gridEditor.selectedPlacementType
+    }
+
+    function setPlacementType(type: typeof selectedPlacementType) {
+        if (!gridEditor) return
+        gridEditor.selectedPlacementType = type
+        selectedPlacementType = type
+    }
+
+    function handleSpacerMouseDown(event: MouseEvent) {
         if (mode === "building") {
+            isDragging = true
             const [gridX, gridY] = screenToGrid(event.clientX, event.clientY)
             gridEditor.handleClick(gridX, gridY)
-            gridEditor = gridEditor
-        } else {
+            syncFromEditor()
+        }
+    }
+
+    function handleSpacerMouseUp(event: MouseEvent) {
+        isDragging = false
+        if (mode !== "building") {
             const position = getPositionFromEvent(event, canvas!, camera)
             ships.forEach((ship) => {
                 if (ship.controller instanceof FollowController && position) {
@@ -715,9 +779,14 @@ App · SVELTE
         if (mode !== "building" || !canvas) return
         const [gridX, gridY] = screenToGrid(event.clientX, event.clientY)
         gridEditor.handleMouseMove(gridX, gridY)
+        if (isDragging) {
+            gridEditor.handleClick(gridX, gridY)
+            syncFromEditor()
+        }
     }
 
     function handleSpacerMouseLeave() {
+        isDragging = false
         if (mode === "building") {
             gridEditor.handleMouseLeave()
         }
@@ -816,30 +885,34 @@ App · SVELTE
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div id="spacer"
-        onclick={handleSpacerClick}
+        onmousedown={handleSpacerMouseDown}
+        onmouseup={handleSpacerMouseUp}
         onmousemove={handleSpacerMouseMove}
         onmouseleave={handleSpacerMouseLeave}
     >
         {#if mode === "building"}
-            {#if gridEditor?.selectedPlacement}
-                <div id="placement-details">
-                    <h3>{gridEditor.selectedPlacement.displayName}</h3>
-                    <p class="detail-desc">{gridEditor.selectedPlacement.description}</p>
-                    <p class="detail-stat">Level: {gridEditor.selectedPlacement.level}/5</p>
-                    <p class="detail-stat">Weight: {gridEditor.selectedPlacement.weight}</p>
+            <div id="placement-details">
+                {#if selectedPlacement}
+                    <h3>{selectedPlacement.displayName}</h3>
+                    <p class="detail-desc">{selectedPlacement.description}</p>
+                    <p class="detail-stat">Level: {selectedPlacement.level}/5</p>
+                    <p class="detail-stat">Weight: {selectedPlacement.weight}</p>
                     <canvas
                         width="64" height="64"
                         class="detail-preview"
-                        use:drawPlacementDetailPreview={gridEditor.selectedPlacement}
+                        use:drawPlacementDetailPreview={selectedPlacement}
                     ></canvas>
-                    {#if gridEditor.selectedPlacement.level < 5}
-                        <button onclick={() => { gridEditor.upgradeSelectedPlacement(); gridEditor = gridEditor }}>Upgrade</button>
+                    {#if selectedPlacement.level < 5}
+                        <button onclick={() => { gridEditor.upgradeSelectedPlacement(); syncFromEditor() }}>Upgrade</button>
                     {:else}
                         <button disabled>Max Level</button>
                     {/if}
-                    <button class="remove-btn" onclick={() => { gridEditor.removeSelectedPlacement(); gridEditor = gridEditor }}>Remove</button>
-                </div>
-            {/if}
+                    <button class="remove-btn" onclick={() => { gridEditor.removeSelectedPlacement(); syncFromEditor() }}>Remove</button>
+                {:else}
+                    <h3>Details</h3>
+                    <p class="detail-desc">Select a placement to inspect it.</p>
+                {/if}
+            </div>
             <div id="build-sidebar">
                 <h3>Layouts</h3>
                 <div class="sidebar-field">
@@ -920,8 +993,8 @@ App · SVELTE
                 <h3 id="bottom-bar-title-bar">Modules</h3>
                 <div id="bottom-bar-options">
                     <button
-                        class={gridEditor?.selectedPlacementType === "turret" ? "active" : ""}
-                        onclick={() => { if (gridEditor) gridEditor.selectedPlacementType = gridEditor.selectedPlacementType === "turret" ? null : "turret" }}
+                        class={selectedPlacementType === "turret" ? "active" : ""}
+                        onclick={() => setPlacementType(selectedPlacementType === "turret" ? null : "turret")}
                     >
                         <canvas
                             width="32" height="32"
@@ -931,8 +1004,8 @@ App · SVELTE
                         Turret
                     </button>
                     <button
-                        class={gridEditor?.selectedPlacementType === "thruster" ? "active" : ""}
-                        onclick={() => { if (gridEditor) gridEditor.selectedPlacementType = gridEditor.selectedPlacementType === "thruster" ? null : "thruster" }}
+                        class={selectedPlacementType === "thruster" ? "active" : ""}
+                        onclick={() => setPlacementType(selectedPlacementType === "thruster" ? null : "thruster")}
                     >
                         <canvas
                             width="32" height="32"
@@ -942,8 +1015,8 @@ App · SVELTE
                         Thruster
                     </button>
                     <button
-                        class={gridEditor?.selectedPlacementType === "spike" ? "active" : ""}
-                        onclick={() => { if (gridEditor) gridEditor.selectedPlacementType = gridEditor.selectedPlacementType === "spike" ? null : "spike" }}
+                        class={selectedPlacementType === "spike" ? "active" : ""}
+                        onclick={() => setPlacementType(selectedPlacementType === "spike" ? null : "spike")}
                     >
                         <canvas
                             width="32" height="32"
@@ -951,6 +1024,15 @@ App · SVELTE
                             use:drawSpikePreview
                         ></canvas>
                         Spike
+                        {#if selectedPlacementType === "spike"}
+                            <span class="rotate-hint">[R]</span>
+                        {/if}
+                    </button>
+                    <button
+                        class={selectedPlacementType === "erase" ? "active" : ""}
+                        onclick={() => setPlacementType(selectedPlacementType === "erase" ? null : "erase")}
+                    >
+                        Erase
                     </button>
                 </div>
             {/if}
