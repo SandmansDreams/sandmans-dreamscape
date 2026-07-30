@@ -11,7 +11,7 @@ App · SVELTE
     import { Grid, type BlockShape } from "./grid";
     import { GridEditor } from "./grid-editor";
     import { LightSource, computeGridLight, type GridLightInfo } from "./lighting";
-    import { Particle } from "./particle";
+    import { Particle, spawnExplosion } from "./particle";
     import { Spike, Thruster, Turret } from "./placements";
     import { spawnScouter } from "./entities/enemy";
 
@@ -594,12 +594,19 @@ App · SVELTE
             particles = particles.filter(p => !p.dead)
 
             // Remove dead enemies
-            enemies = enemies.filter(e => e.currentHealth > 0)
+            enemies = enemies.filter(e => {
+                if (e.currentHealth <= 0) {
+                    particles.push(...spawnExplosion(e.position, 30, 2.5, 4, 40))
+                    return false
+                }
+                return true
+            })
 
             // Handle dead asteroids — split them
             const newAsteroids: Asteroid[] = []
             asteroids = asteroids.filter(a => {
                 if (a.dead) {
+                    particles.push(...spawnExplosion(a.position, Math.round(a.radius / 2), 1.5, a.radius / 10, 25))
                     newAsteroids.push(...a.split())
                     return false
                 }
