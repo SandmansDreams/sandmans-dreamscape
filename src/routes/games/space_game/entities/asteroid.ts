@@ -1,9 +1,11 @@
-import { computeGridLight, type GridLightInfo, type LightSource } from "../lighting"
-import { Grid as Grid, type BlockShape } from "../grid"
+import type { SurfaceLight } from "../lighting"
+import { Grid } from "../grid"
+import type { BlockShape } from "../shapes"
 import { CircleCollider, Vector2 } from "../physics"
 import { Camera, NO_DEBUG, type DebugOptions } from "../types"
 import { PhysicsObject } from "../physics"
 import { CELL_SIZE, getRandomIntFromRange } from "../helpers"
+import { drawHealthBar } from "../hud"
 
 export interface AsteroidOptions {
     radius?: number
@@ -11,12 +13,13 @@ export interface AsteroidOptions {
     jaggedness?: number
 }
 
-const ASTEROID_COLORS = [
-    "hsl(37, 9%, 38%)", 
-    "hsl(37, 9%, 44%)", 
-    "hsl(34, 9%, 34%)", 
-    "hsl(34, 9%, 48%)", 
-    "hsl(42, 12%, 39%)"
+/** Base palette, pre-split so shape generation never parses a colour string. */
+const ASTEROID_COLORS: { h: number, s: number, l: number }[] = [
+    { h: 37, s: 9, l: 38 },
+    { h: 37, s: 9, l: 44 },
+    { h: 34, s: 9, l: 34 },
+    { h: 34, s: 9, l: 48 },
+    { h: 42, s: 12, l: 39 }
 ]
 
 export class Asteroid extends PhysicsObject {
@@ -32,10 +35,10 @@ export class Asteroid extends PhysicsObject {
         velocity: Vector2 = new Vector2(0, 0),
         options: AsteroidOptions = {}
     ) {
-        super(position, velocity, Math.random() * 30)
+        super(position, velocity, Math.random() * Math.PI * 2)
 
         this.radius = options.radius ?? getRandomIntFromRange(5, 40)
-        this.mass = this.radius * this.radius 
+        this.mass = this.radius * this.radius
 
         this.maxHealth = Math.round(this.radius * 2)
         this.health = this.maxHealth
@@ -51,6 +54,24 @@ export class Asteroid extends PhysicsObject {
         this.collider = new CircleCollider(this.radius, new Vector2(), this)
     }
 
+    /** Asteroid grids are drawn axis-aligned, so grid space is just hull space. */
+    get lightRotation(): number {
+        return this.rotation
+    }
+
+    /**
+     * Extent of the drawn shape, which overshoots `radius` because the grid is
+     * quantised to whole cells. Used for view culling so tiles don't pop.
+     */
+    get drawRadius(): number {
+        return this.grid.getBoundingRadius()
+    }
+
+    /** Radius used for projectile hit tests. */
+    get hitRadius(): number {
+        return this.radius
+    }
+
     private generateShape(jaggedness: number) {
         const cx = (this.gridDim * CELL_SIZE) / 2
         const cy = cx
@@ -62,11 +83,7 @@ export class Asteroid extends PhysicsObject {
             radii.push(this.radius * wobble)
         }
 
-        const baseColor = ASTEROID_COLORS[Math.floor(Math.random() * ASTEROID_COLORS.length)]
-        const baseMatch = baseColor.match(/hsl\((\d+),\s*(\d+)%?,\s*(\d+)%?\)/)
-        const baseH = baseMatch ? parseInt(baseMatch[1]) : 37
-        const baseS = baseMatch ? parseInt(baseMatch[2]) : 9
-        const baseL = baseMatch ? parseInt(baseMatch[3]) : 40
+        const base = ASTEROID_COLORS[Math.floor(Math.random() * ASTEROID_COLORS.length)]
         const s = CELL_SIZE
 
         const edgeRadiusAt = (px: number, py: number): number => {
@@ -99,51 +116,41 @@ export class Asteroid extends PhysicsObject {
             })
         }
 
-        const cols = this.gridDim
-        const rows = this.gridDim
-        for (let row = 0; row < rows; row++) {
-            for (let col = 0; col < cols; col++) {
+        for (let row = 0; row < this.gridDim; row++) {
+            for (let col = 0; col < this.gridDim; col++) {
                 const x = col * s
                 const y = row * s
 
+                // Marching-squares-ish: sample the silhouette at the cell's
+                // four corners and pick a tile that approximates the edge.
                 const nw = isInside(x, y)
                 const ne = isInside(x + s, y)
                 const sw = isInside(x, y + s)
                 const se = isInside(x + s, y + s)
 
-                const count = +nw + +ne + +sw + +se
+                const inside = (nw ? 1 : 0) + (ne ? 1 : 0) + (sw ? 1 : 0) + (se ? 1 : 0)
+                if (inside === 0) continue
 
-                if (count === 0) continue
-
+                // Two or more corners inside reads as solid at this cell size;
+                // a lone corner gets an arc so the silhouette stays rounded.
                 let shape: BlockShape
-
-                if (count === 4) {
-                    shape = "full"
-                } else if (count === 3) {
-                    shape = "full"
-                } else if (count === 2) {
-                    shape = "full"
-                } else {
-                    if (nw) shape = "arcNW"
-                    else if (ne) shape = "arcNE"
-                    else if (sw) shape = "arcSW"
-                    else shape = "arcSE"
-                }
+                if (inside >= 2) shape = "full"
+                else if (nw) shape = "arcNW"
+                else if (ne) shape = "arcNE"
+                else if (sw) shape = "arcSW"
+                else shape = "arcSE"
 
                 const cellCx = x + s / 2
                 const cellCy = y + s / 2
                 const inCrater = craters.some(cr => Math.hypot(cellCx - cr.cx, cellCy - cr.cy) < cr.r)
 
-                const lVariation = getRandomIntFromRange(-4, 4)
-                const sVariation = getRandomIntFromRange(-3, 3)
-                const cellL = inCrater
-                    ? Math.max(5, baseL - getRandomIntFromRange(8, 14) + lVariation)
-                    : Math.max(5, Math.min(95, baseL + lVariation))
-                const cellS = Math.max(0, Math.min(100, baseS + sVariation))
-                const cellColor = `hsl(${baseH}, ${cellS}%, ${cellL}%)`
+                const lightness = inCrater
+                    ? Math.max(5, base.l - getRandomIntFromRange(8, 14) + getRandomIntFromRange(-4, 4))
+                    : Math.max(5, Math.min(95, base.l + getRandomIntFromRange(-4, 4)))
+                const saturation = Math.max(0, Math.min(100, base.s + getRandomIntFromRange(-3, 3)))
 
                 const cell = this.grid.getCell(col, row)
-                this.grid.setCell(cell, shape, cellColor, null)
+                this.grid.setCell(cell, shape, `hsl(${base.h}, ${saturation}%, ${lightness}%)`, null)
                 if (inCrater) cell.invertLight = true
             }
         }
@@ -191,14 +198,15 @@ export class Asteroid extends PhysicsObject {
 
     update(delta: number) {
         this.rotation += this.rotationSpeed * delta
-        this.position.add(this.velocity.clone().multiply(delta))
+        this.position.x += this.velocity.x * delta
+        this.position.y += this.velocity.y * delta
     }
 
     draw(
         ctx: CanvasRenderingContext2D,
         camera: Camera,
         debug: DebugOptions = NO_DEBUG,
-        lightInfo?: GridLightInfo
+        light?: SurfaceLight
     ) {
         const { x, y } = camera.worldToScreen(this.position.x, this.position.y, ctx.canvas.clientWidth, ctx.canvas.clientHeight)
 
@@ -209,22 +217,16 @@ export class Asteroid extends PhysicsObject {
 
         const center = this.grid.getCenter()
         ctx.translate(-center.x, -center.y)
-        this.grid.draw(ctx, 1, false, lightInfo)
+        this.grid.draw(ctx, 1, false, light)
+
+        if (debug.hitboxes) {
+            ctx.translate(center.x, center.y)
+            this.collider?.drawDebug(ctx)
+        }
 
         ctx.restore()
 
-        if (debug.hitboxes) {
-            ctx.save()
-            ctx.translate(x, y)
-            ctx.rotate(this.rotation)
-            ctx.scale(camera.zoom, camera.zoom)
-            this.collider?.drawDebug(ctx)
-            ctx.restore()
-        }
-
-        if (this.health < this.maxHealth) {
-            this.drawHealthBar(ctx, x, y, camera)
-        }
+        drawHealthBar(ctx, x, y, this.radius, camera.zoom, this.health, this.maxHealth)
 
         if (debug.stats) {
             this.drawStats(ctx, x, y)
@@ -235,26 +237,7 @@ export class Asteroid extends PhysicsObject {
         }
     }
 
-    private drawHealthBar(ctx: CanvasRenderingContext2D, screenX: number, screenY: number, camera: Camera) {
-        const barWidth = this.radius * 2 * camera.zoom * 0.8
-        const barHeight = 3
-        const yOffset = -this.radius * camera.zoom - 8
-
-        const x = screenX - barWidth / 2
-        const y = screenY + yOffset
-
-        const healthPct = Math.max(0, this.health / this.maxHealth)
-
-        ctx.fillStyle = "rgba(0, 0, 0, 0.5)"
-        ctx.fillRect(x, y, barWidth, barHeight)
-
-        const r = Math.round(255 * (1 - healthPct))
-        const g = Math.round(255 * healthPct)
-        ctx.fillStyle = `rgb(${r}, ${g}, 50)`
-        ctx.fillRect(x, y, barWidth * healthPct, barHeight)
-    }
-
-    onCollision(other: PhysicsObject): void {}
+    onCollision(_other: PhysicsObject): void {}
 }
 
 export function spawnAsteroidField(

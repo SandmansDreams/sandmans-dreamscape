@@ -1,13 +1,37 @@
 import type { Cell } from "./grid"
+import { angleDelta, CELL_SIZE } from "./helpers"
 import { Particle } from "./particle"
 import { Vector2 } from "./physics"
-import type { Camera, DebugOptions } from "./types"
+import type { DebugOptions } from "./types"
+
+/** Shared empty result, so idle modules allocate nothing each frame. */
+const NO_PARTICLES: Particle[] = []
 
 export interface Targetable {
     position: Vector2
 }
 
 export type PlacementLevel = 1 | 2 | 3 | 4 | 5
+
+/**
+ * Everything a module needs to know about its host ship this frame.
+ *
+ * The host reuses a single instance and rewrites it per placement, so nothing
+ * here may be retained past the update call that received it.
+ */
+export interface PlacementContext {
+    /** World position of the cell this module is mounted in. */
+    worldPos: Vector2
+    /** The host's world rotation. */
+    shipRotation: number
+    /** The host's world velocity, so effects can be emitted in its frame. */
+    velocityX: number
+    velocityY: number
+    /** -1 full reverse, 0 coasting, +1 full forward. */
+    throttle: number
+    /** Candidates that weapons may engage. */
+    targets: Targetable[]
+}
 
 export abstract class Placement {
     level: PlacementLevel = 1
@@ -19,12 +43,7 @@ export abstract class Placement {
     abstract get description(): string
     abstract get weight(): number
 
-    abstract update(
-        delta: number,
-        worldPos: Vector2,
-        shipRotation: number,
-        targets: Targetable[]
-    ): Particle[]
+    abstract update(delta: number, ctx: PlacementContext): Particle[]
 
     abstract draw(
         ctx: CanvasRenderingContext2D,
@@ -71,25 +90,22 @@ export class Turret extends Placement {
     get effectiveFireRate(): number { return TURRET_LEVELS[this.level - 1].fireRate }
     get isGatling(): boolean { return this.level >= 4 }
 
-    update(
-        delta: number,
-        worldPos: Vector2,
-        shipRotation: number,
-        targets: Targetable[]
-    ): Particle[] {
+    update(delta: number, ctx: PlacementContext): Particle[] {
         const spawned: Particle[] = []
+        const { worldPos, shipRotation, targets } = ctx
 
         this.cooldown = Math.max(0, this.cooldown - delta)
 
         let nearest: Targetable | null = null
-        let nearestDist = this.range
+        // Compared squared to keep the scan free of square roots.
+        let nearestDistSq = this.range * this.range
 
         for (const target of targets) {
             const dx = target.position.x - worldPos.x
             const dy = target.position.y - worldPos.y
-            const dist = Math.hypot(dx, dy)
-            if (dist < nearestDist) {
-                nearestDist = dist
+            const distSq = dx * dx + dy * dy
+            if (distSq < nearestDistSq) {
+                nearestDistSq = distSq
                 nearest = target
             }
         }
@@ -100,8 +116,7 @@ export class Turret extends Placement {
             const dy = nearest.position.y - worldPos.y
             const desiredAngle = Math.atan2(dy, dx) - shipRotation
 
-            let error = desiredAngle - this.rotation
-            error = Math.atan2(Math.sin(error), Math.cos(error))
+            const error = angleDelta(this.rotation, desiredAngle)
             this.rotation += Math.sign(error) * Math.min(Math.abs(error), this.rotationSpeed * delta)
 
             const aimError = Math.abs(error)
@@ -245,13 +260,8 @@ export class Spike extends Placement {
     get weight(): number { return 1 + this.level }
     get effectiveDamage(): number { return this.contactDamage * this.level }
 
-    update(
-        _delta: number,
-        _worldPos: Vector2,
-        _shipRotation: number,
-        _targets: Targetable[]
-    ): Particle[] {
-        return []
+    update(_delta: number, _ctx: PlacementContext): Particle[] {
+        return NO_PARTICLES
     }
 
     draw(
@@ -296,21 +306,69 @@ export class Spike extends Placement {
     ) {}
 }
 
+/** Exhaust plume tuning. */
+const EXHAUST_RATE = 0.8         // particles per frame at full throttle
+const EXHAUST_SPEED = 1.6        // world units per frame, away from the nozzle
+const EXHAUST_SPREAD = 0.35      // radians of cone half-angle
+const EXHAUST_LIFETIME = 14      // frames
+const EXHAUST_COLORS = ["#ffcc00", "#ff9944", "#ff6600", "#ffe9a8"]
+
 export class Thruster extends Placement {
     thrustPower: number = 0.05
+
+    /**
+     * Fractional particles carried between frames, so the emission rate is
+     * tied to elapsed time rather than to how often update happens to run.
+     */
+    private emissionDebt = 0
 
     get displayName(): string { return `Thruster ${["I", "II", "III", "IV", "V"][this.level - 1]}` }
     get description(): string { return `+${(this.thrustPower * this.level).toFixed(2)} thrust` }
     get weight(): number { return 3 + this.level }
     get effectiveThrust(): number { return this.thrustPower * this.level }
 
-    update(
-        _delta: number,
-        _worldPos: Vector2,
-        _shipRotation: number,
-        _targets: Targetable[]
-    ): Particle[] {
-        return []
+    update(delta: number, ctx: PlacementContext): Particle[] {
+        const throttle = ctx.throttle
+
+        if (throttle === 0) {
+            // Don't bank up a plume while coasting.
+            this.emissionDebt = 0
+            return NO_PARTICLES
+        }
+
+        const power = Math.abs(throttle)
+        this.emissionDebt += EXHAUST_RATE * power * delta
+
+        const count = Math.floor(this.emissionDebt)
+        if (count <= 0) return NO_PARTICLES
+        this.emissionDebt -= count
+
+        // Exhaust leaves opposite the thrust, so reversing flips the plume.
+        const exhaustAngle = ctx.shipRotation + (throttle > 0 ? Math.PI : 0)
+        const speed = EXHAUST_SPEED * (0.6 + 0.4 * power)
+
+        const spawned: Particle[] = []
+
+        for (let i = 0; i < count; i++) {
+            const angle = exhaustAngle + (Math.random() * 2 - 1) * EXHAUST_SPREAD
+            const magnitude = speed * (0.7 + Math.random() * 0.6)
+
+            spawned.push(new Particle(
+                ctx.worldPos.clone(),
+                // Emitted in the ship's frame, so the plume trails the hull
+                // instead of being left behind in a straight line.
+                new Vector2(
+                    ctx.velocityX + Math.cos(angle) * magnitude,
+                    ctx.velocityY + Math.sin(angle) * magnitude
+                ),
+                CELL_SIZE * (0.25 + Math.random() * 0.3),
+                EXHAUST_COLORS[Math.floor(Math.random() * EXHAUST_COLORS.length)],
+                EXHAUST_LIFETIME * (0.5 + Math.random() * 0.5),
+                0
+            ))
+        }
+
+        return spawned
     }
 
     draw(

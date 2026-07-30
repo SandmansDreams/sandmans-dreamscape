@@ -28,7 +28,8 @@ export class Particle {
     }
 
     update(delta: number) {
-        this.position.add(this.velocity.clone().multiply(delta))
+        this.position.x += this.velocity.x * delta
+        this.position.y += this.velocity.y * delta
         this.age += delta
         if (this.age >= this.lifetime) {
             this.dead = true
@@ -36,20 +37,47 @@ export class Particle {
     }
 
     draw(ctx: CanvasRenderingContext2D, camera: Camera) {
-        const { x, y } = camera.worldToScreen(
-            this.position.x, this.position.y,
-            ctx.canvas.clientWidth, ctx.canvas.clientHeight
-        )
-
-        const s = this.size * camera.zoom
-        const alpha = 1 - this.age / this.lifetime
-
         ctx.save()
-        ctx.globalAlpha = alpha
-        ctx.fillStyle = this.color
-        ctx.fillRect(x - s / 2, y - s / 2, s, s)
+        this.paint(ctx, camera, ctx.canvas.clientWidth, ctx.canvas.clientHeight)
         ctx.restore()
     }
+
+    /**
+     * Paints without touching the save stack — the caller is responsible for
+     * restoring globalAlpha. Use drawParticles for whole batches.
+     */
+    paint(ctx: CanvasRenderingContext2D, camera: Camera, width: number, height: number) {
+        const { x, y } = camera.worldToScreen(this.position.x, this.position.y, width, height)
+
+        const s = this.size * camera.zoom
+
+        ctx.globalAlpha = Math.max(0, 1 - this.age / this.lifetime)
+        ctx.fillStyle = this.color
+        ctx.fillRect(x - s / 2, y - s / 2, s, s)
+    }
+}
+
+/**
+ * Draws a whole batch inside one save/restore.
+ *
+ * Exhaust plumes push the live particle count into the thousands, and a
+ * save/restore pair per particle is a measurable share of that.
+ */
+export function drawParticles(
+    ctx: CanvasRenderingContext2D,
+    camera: Camera,
+    particles: Particle[]
+) {
+    if (particles.length === 0) return
+
+    const width = ctx.canvas.clientWidth
+    const height = ctx.canvas.clientHeight
+
+    ctx.save()
+    for (let i = 0; i < particles.length; i++) {
+        particles[i].paint(ctx, camera, width, height)
+    }
+    ctx.restore()
 }
 
 const EXPLOSION_COLORS = ["#ff4400", "#ff8800", "#ffcc00", "#ffffff", "#ff6633"]

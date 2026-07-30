@@ -7,18 +7,26 @@ export function getDistance(a: Vector2, b: Vector2) {
     return  Math.hypot(b.x - a.x, b.y - a.y)
 }
 
+/** A point drawn uniformly from the box [-xMax, xMax] x [-yMax, yMax]. */
 export function getRandomVector(xMax: number, yMax: number) {
-    const xNegative = Math.random() < 0.5
-    const yNegative = Math.random() < 0.5
-    const x = xNegative ? -Math.random() * xMax : Math.random() * xMax
-    const y = yNegative ? -Math.random() * yMax : Math.random() * yMax
-
-    return new Vector2(x, y)
+    return new Vector2(
+        (Math.random() * 2 - 1) * xMax,
+        (Math.random() * 2 - 1) * yMax
+    )
 }
 
 export function isVisible(x: number, y: number, radius: number, canvas: HTMLCanvasElement, camera: Camera): boolean {
-    const halfWidth = (canvas.clientWidth / 2) / camera.zoom;
-    const halfHeight = (canvas.clientHeight / 2) / camera.zoom;
+    let halfWidth = (canvas.clientWidth / 2) / camera.zoom;
+    let halfHeight = (canvas.clientHeight / 2) / camera.zoom;
+
+    // The renderer applies camera.rotation as a whole-canvas rotation, so the
+    // visible world region is a rotated rectangle. Testing against the
+    // circumscribed square keeps entities from popping mid-transition.
+    if (camera.rotation !== 0) {
+        const halfDiagonal = Math.hypot(halfWidth, halfHeight);
+        halfWidth = halfDiagonal;
+        halfHeight = halfDiagonal;
+    }
 
     const left = camera.position.x - halfWidth;
     const right = camera.position.x + halfWidth;
@@ -54,4 +62,15 @@ export function resizeCanvas(canvas: HTMLCanvasElement, context: CanvasRendering
 
 export function getRandomIntFromRange(min: number, max: number) {
     return Math.floor(Math.random() * (max - min + 1)) + min
+}
+
+/**
+ * Shortest signed rotation from `from` to `to`, in (-PI, PI].
+ *
+ * Every steering and turret-aiming routine needs this; they each used to
+ * inline the same atan2(sin, cos) wrap.
+ */
+export function angleDelta(from: number, to: number): number {
+    const error = to - from
+    return Math.atan2(Math.sin(error), Math.cos(error))
 }

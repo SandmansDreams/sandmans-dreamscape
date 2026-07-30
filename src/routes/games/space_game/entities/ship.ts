@@ -1,19 +1,45 @@
 import { Entity } from "./entity"
 import { PhysicsObject, Vector2 } from "../physics"
 import { Controller, FollowController } from "../controller"
-import { CircleCollider } from "../physics"
+import { BoxCollider } from "../physics"
 import { NEUTRAL_INPUT } from "../controller"
 import { Camera, NO_DEBUG, type DebugOptions } from "../types"
 import { Grid } from "../grid"
 import { CELL_SIZE } from "../helpers"
-import type { GridLightInfo } from "../lighting"
+import { drawHealthBar } from "../hud"
+import type { SurfaceLight } from "../lighting"
 import { Particle } from "../particle"
-import { Thruster, type Targetable } from "../placements"
+import { Thruster, type PlacementContext, type Targetable } from "../placements"
+
+/**
+ * Ship grids are authored nose-up, but a rotation of 0 points along +X, so the
+ * grid is drawn a quarter turn ahead of the hull's heading. Lighting has to
+ * apply the same offset to land in grid space.
+ */
+export const GRID_ROTATION_OFFSET = Math.PI / 2
 
 export class Ship extends Entity {
     rotationThrust: number
-    color: string = "grey"
     grid: Grid
+
+    private thrustRevision = -1
+    private cachedThrust = 0
+
+    /**
+     * Commanded acceleration this frame: -1 reverse, 0 coasting, +1 forward.
+     * Read by mounted modules — thrusters use it to drive their plume.
+     */
+    throttle: number = 0
+
+    /** Reused each frame; see PlacementContext on why it must not be retained. */
+    private readonly placementContext: PlacementContext = {
+        worldPos: new Vector2(),
+        shipRotation: 0,
+        velocityX: 0,
+        velocityY: 0,
+        throttle: 0,
+        targets: []
+    }
 
     constructor(
         position: Vector2,
@@ -28,27 +54,56 @@ export class Ship extends Entity {
         this.updateCollider()
     }
 
+    /**
+     * Rotation that maps world space into this ship's grid space, for lighting.
+     */
+    get lightRotation(): number {
+        return this.rotation + GRID_ROTATION_OFFSET
+    }
+
+    /** Radius used for projectile hit tests and view culling. */
+    get hitRadius(): number {
+        return this.grid.getBoundingRadius()
+    }
+
+    takeDamage(amount: number) {
+        this.currentHealth -= amount
+    }
+
+    /**
+     * Summed thrust of every mounted thruster.
+     *
+     * Read every frame from update(), so it is cached against the grid's
+     * revision rather than rescanning the hull each tick.
+     */
     get totalThrust(): number {
-        let thrust = 0
-        this.grid.forEachFilled((cell) => {
-            if (cell.placement instanceof Thruster) {
-                thrust += cell.placement.effectiveThrust
+        if (this.thrustRevision !== this.grid.revision) {
+            let thrust = 0
+            for (const cell of this.grid.placedCells) {
+                if (cell.placement instanceof Thruster) thrust += cell.placement.effectiveThrust
             }
-        })
-        return thrust
+            this.cachedThrust = thrust
+            this.thrustRevision = this.grid.revision
+        }
+        return this.cachedThrust
     }
 
-    get hasThrusters(): boolean {
-        let found = false
-        this.grid.forEachFilled((cell) => {
-            if (cell.placement instanceof Thruster) found = true
-        })
-        return found
-    }
-
+    /**
+     * Rebuilds the hitbox from the current hull.
+     *
+     * A hull-tight oriented box rather than the grid's bounding circle: the
+     * starter hull is roughly 2:1, so a circle around it left a lot of empty
+     * space colliding with things.
+     */
     updateCollider() {
-        const radius = this.grid.getBoundingRadius()
-        this.collider = new CircleCollider(radius, new Vector2(), this)
+        const { width, height } = this.grid.getFilledSize()
+
+        const collider = new BoxCollider(width, height, new Vector2(), this)
+        // The box is authored in grid space, which sits a quarter turn ahead
+        // of the hull's heading.
+        collider.angleOffset = GRID_ROTATION_OFFSET
+
+        this.collider = collider
         this.mass = this.grid.filledCount || 10
     }
 
@@ -57,7 +112,7 @@ export class Ship extends Entity {
         const localX = col * CELL_SIZE + CELL_SIZE / 2 - center.x
         const localY = row * CELL_SIZE + CELL_SIZE / 2 - center.y
 
-        const gridAngle = this.rotation + Math.PI / 2
+        const gridAngle = this.lightRotation
         const cos = Math.cos(gridAngle)
         const sin = Math.sin(gridAngle)
 
@@ -68,14 +123,35 @@ export class Ship extends Entity {
     }
 
     updatePlacements(delta: number, targets: Targetable[]): Particle[] {
+        const placed = this.grid.placedCells
+        if (placed.length === 0) return EMPTY_PARTICLES
+
+        // Hoisted out of the loop: these were recomputed per placement per
+        // frame via cellToWorld.
+        const center = this.grid.getCenter()
+        const gridAngle = this.lightRotation
+        const cos = Math.cos(gridAngle)
+        const sin = Math.sin(gridAngle)
+
+        const ctx = this.placementContext
+        ctx.shipRotation = this.rotation
+        ctx.velocityX = this.velocity.x
+        ctx.velocityY = this.velocity.y
+        ctx.throttle = this.throttle
+        ctx.targets = targets
+
         const spawned: Particle[] = []
 
-        this.grid.forEachFilled((cell) => {
-            if (!cell.placement) return
-            const worldPos = this.cellToWorld(cell.position.column, cell.position.row)
-            const particles = cell.placement.update(delta, worldPos, this.rotation, targets)
-            spawned.push(...particles)
-        })
+        for (const cell of placed) {
+            const localX = cell.position.column * CELL_SIZE + CELL_SIZE / 2 - center.x
+            const localY = cell.position.row * CELL_SIZE + CELL_SIZE / 2 - center.y
+
+            ctx.worldPos.x = this.position.x + localX * cos - localY * sin
+            ctx.worldPos.y = this.position.y + localX * sin + localY * cos
+
+            const particles = cell.placement!.update(delta, ctx)
+            for (let i = 0; i < particles.length; i++) spawned.push(particles[i])
+        }
 
         return spawned
     }
@@ -105,39 +181,29 @@ export class Ship extends Entity {
         this.rotationSpeed *= this.rotationDrag;
         this.rotation += this.rotationSpeed * delta;
 
+        // Forward and backward cancel when both are held.
         const thrust = this.totalThrust
-        if (thrust > 0) {
-            if (input.forward) {
-                this.velocity.add(
-                    Vector2
-                        .fromAngle(this.rotation)
-                        .multiply((thrust / (this.mass / 10)) * delta)
-                );
-            }
+        this.throttle = thrust > 0
+            ? (input.forward ? 1 : 0) - (input.backward ? 1 : 0)
+            : 0
 
-            if (input.backward) {
-                this.velocity.add(
-                    Vector2
-                        .fromAngle(this.rotation + Math.PI)
-                        .multiply((thrust / (this.mass / 10)) * delta)
-                );
-            }
+        if (this.throttle !== 0) {
+            const acceleration = (thrust / (this.mass / 10)) * delta * this.throttle
+            this.velocity.x += Math.cos(this.rotation) * acceleration
+            this.velocity.y += Math.sin(this.rotation) * acceleration
         }
 
         this.velocity.multiply(this.drag);
 
-        this.position.add(
-            this.velocity
-                .clone()
-                .multiply(delta)
-        );
+        this.position.x += this.velocity.x * delta
+        this.position.y += this.velocity.y * delta
     }
 
     draw(
         ctx: CanvasRenderingContext2D,
         camera: Camera,
         debug: DebugOptions = NO_DEBUG,
-        lightInfo?: GridLightInfo
+        light?: SurfaceLight
     ) {
         const {x, y} = camera.worldToScreen(this.position.x, this.position.y, ctx.canvas.clientWidth, ctx.canvas.clientHeight)
 
@@ -156,41 +222,22 @@ export class Ship extends Entity {
         }
 
         ctx.save()
-        ctx.rotate(Math.PI / 2)
+        ctx.rotate(GRID_ROTATION_OFFSET)
         const center = this.grid.getCenter()
         ctx.translate(-center.x, -center.y)
-        this.grid.draw(ctx, 1, false, lightInfo)
+        this.grid.draw(ctx, 1, false, light)
 
-        this.grid.forEachFilled((cell) => {
-            if (!cell.placement) return
+        for (const cell of this.grid.placedCells) {
             const px = cell.position.column * CELL_SIZE
             const py = cell.position.row * CELL_SIZE
-            cell.placement.draw(ctx, px, py, CELL_SIZE)
-            cell.placement.drawDebug(ctx, px, py, CELL_SIZE, debug)
-        })
-
-        ctx.restore()
-
-        ctx.restore()
-
-        if (this.currentHealth < this.maxHealth) {
-            const radius = this.grid.getBoundingRadius()
-            const barWidth = radius * 2 * camera.zoom * 0.8
-            const barHeight = 3
-            const yOffset = -radius * camera.zoom - 8
-
-            const bx = x - barWidth / 2
-            const by = y + yOffset
-            const healthPct = Math.max(0, this.currentHealth / this.maxHealth)
-
-            ctx.fillStyle = "rgba(0, 0, 0, 0.5)"
-            ctx.fillRect(bx, by, barWidth, barHeight)
-
-            const r = Math.round(255 * (1 - healthPct))
-            const g = Math.round(255 * healthPct)
-            ctx.fillStyle = `rgb(${r}, ${g}, 50)`
-            ctx.fillRect(bx, by, barWidth * healthPct, barHeight)
+            cell.placement!.draw(ctx, px, py, CELL_SIZE)
+            cell.placement!.drawDebug(ctx, px, py, CELL_SIZE, debug)
         }
+
+        ctx.restore()
+        ctx.restore()
+
+        drawHealthBar(ctx, x, y, this.grid.getBoundingRadius(), camera.zoom, this.currentHealth, this.maxHealth)
 
         if (debug.stats) {
             this.drawStats(ctx, x, y)
@@ -200,16 +247,15 @@ export class Ship extends Entity {
             this.drawVelocityVector(ctx, x, y)
 
             if (this.controller instanceof FollowController) {
-                this.controller?.paintTarget(this, ctx, camera)
+                this.controller.paintTarget(this, ctx, camera)
             }
         }
     }
 
-    setColor(string: string) {
-        this.color = string
-    }
-
-    onCollision(other: PhysicsObject): void {
+    onCollision(_other: PhysicsObject): void {
 
     }
 }
+
+/** Shared empty result so the common "no placements" path allocates nothing. */
+const EMPTY_PARTICLES: Particle[] = []

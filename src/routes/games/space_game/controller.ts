@@ -1,5 +1,6 @@
 import type { Entity } from "./entities/entity"
-import { getDistance } from "./helpers"
+import type { Flock } from "./flock"
+import { angleDelta, getDistance } from "./helpers"
 import type { Vector2 } from "./physics"
 import type { Camera } from "./types"
 
@@ -59,17 +60,16 @@ export class FollowController extends Controller {
         this.target = target
     }
 
+    /** The target actually being steered toward: temporary overrides standing. */
+    private currentTarget(): Vector2 | null {
+        if (this.temporaryTarget) return this.temporaryTarget()
+        return this.target ? this.target() : null
+    }
+
     update(ship: Entity) {
         this.clearInput();
 
-        let targetPos: Vector2 | null = null
-
-        if (this.temporaryTarget) {
-            targetPos = this.temporaryTarget()
-        } else {
-            if (this.target) targetPos = this.target()
-        }
-
+        const targetPos = this.currentTarget()
         if (!targetPos) return
 
         const desiredDistance = 250
@@ -113,13 +113,7 @@ export class FollowController extends Controller {
                 steering.x
             );
 
-        let error =
-            desiredAngle - ship.rotation;
-
-        error = Math.atan2(
-            Math.sin(error),
-            Math.cos(error)
-        );
+        const error = angleDelta(ship.rotation, desiredAngle);
 
         const maxRotationSpeed = 0.1;
 
@@ -154,17 +148,11 @@ export class FollowController extends Controller {
             this.input.space = true;
         }
 
-        if (this.temporaryTarget) {
-            if (distance < desiredDistance) {
-                this.target = this.priorTarget
-                
-                this.priorTarget = null
-                this.temporaryTarget = null
-            }
-        }
-
-        if (distance < desiredDistance) {
-            return;
+        // Arriving at a temporary waypoint hands control back to the standing target.
+        if (this.temporaryTarget && distance < desiredDistance) {
+            this.target = this.priorTarget
+            this.priorTarget = null
+            this.temporaryTarget = null
         }
     }
 
@@ -173,25 +161,20 @@ export class FollowController extends Controller {
         ctx: CanvasRenderingContext2D,
         camera: Camera,
     ) {
-        let targetPos: Vector2 | null = null
-
-        if (this.temporaryTarget) {
-            targetPos = this.temporaryTarget()
-        } else {
-            if (this.target) targetPos = this.target()
-        }
-
+        const targetPos = this.currentTarget()
         if (!targetPos) return
 
-        const relativeTarget = camera.worldToScreen(
-            targetPos.x, targetPos.y,
-            ctx.canvas.clientWidth, ctx.canvas.clientHeight
-        )
+        const width = ctx.canvas.clientWidth
+        const height = ctx.canvas.clientHeight
 
-        const relativeShip = camera.worldToScreen(
-            ship.position.x, ship.position.y,
-            ctx.canvas.clientWidth, ctx.canvas.clientHeight
-        )
+        // worldToScreen returns a shared vector, so copy out before the next call.
+        const projected = camera.worldToScreen(targetPos.x, targetPos.y, width, height)
+        const targetX = projected.x
+        const targetY = projected.y
+
+        const shipScreen = camera.worldToScreen(ship.position.x, ship.position.y, width, height)
+        const shipX = shipScreen.x
+        const shipY = shipScreen.y
 
         const size = 10;
 
@@ -202,15 +185,15 @@ export class FollowController extends Controller {
 
         // Crosshair
         ctx.beginPath();
-        ctx.moveTo(relativeTarget.x - size, relativeTarget.y);
-        ctx.lineTo(relativeTarget.x + size, relativeTarget.y);
-        ctx.moveTo(relativeTarget.x, relativeTarget.y - size);
-        ctx.lineTo(relativeTarget.x, relativeTarget.y + size);
+        ctx.moveTo(targetX - size, targetY);
+        ctx.lineTo(targetX + size, targetY);
+        ctx.moveTo(targetX, targetY - size);
+        ctx.lineTo(targetX, targetY + size);
         ctx.stroke();
 
         // Circle
         ctx.beginPath();
-        ctx.arc(relativeTarget.x, relativeTarget.y, size * 0.6, 0, Math.PI * 2);
+        ctx.arc(targetX, targetY, size * 0.6, 0, Math.PI * 2);
         ctx.stroke();
 
         // Path
@@ -218,8 +201,8 @@ export class FollowController extends Controller {
         ctx.strokeStyle = "rgba(255, 64, 64, 0.2)";
 
         ctx.beginPath();
-        ctx.moveTo(relativeShip.x, relativeShip.y);
-        ctx.lineTo(relativeTarget.x, relativeTarget.y);
+        ctx.moveTo(shipX, shipY);
+        ctx.lineTo(targetX, targetY);
         ctx.stroke();
 
         ctx.restore();
@@ -235,53 +218,87 @@ export class FollowController extends Controller {
     }
 }
 
+export interface BoidsWeights {
+    separationRadius: number
+    alignmentRadius: number
+    cohesionRadius: number
+    separationWeight: number
+    alignmentWeight: number
+    cohesionWeight: number
+    attackWeight: number
+    attackRange: number
+    orbitRange: number
+}
+
+export const DEFAULT_BOIDS: BoidsWeights = {
+    separationRadius: 80,
+    alignmentRadius: 200,
+    cohesionRadius: 250,
+    separationWeight: 1.5,
+    alignmentWeight: 0.8,
+    cohesionWeight: 0.6,
+    attackWeight: 1.0,
+    attackRange: 250,
+    orbitRange: 120
+}
+
 export class BoidsController extends Controller {
     private orbitDirection: number = Math.random() < 0.5 ? 1 : -1
     private strafeTimer: number = 0
+    private strafeInterval: number = nextStrafeInterval()
+
+    readonly weights: BoidsWeights
 
     constructor(
         public target: Entity,
-        public flock: Entity[],
-        private separationRadius: number = 80,
-        private alignmentRadius: number = 200,
-        private cohesionRadius: number = 250,
-        private separationWeight: number = 1.5,
-        private alignmentWeight: number = 0.8,
-        private cohesionWeight: number = 0.6,
-        private attackWeight: number = 1.0
+        public flock: Flock,
+        weights: Partial<BoidsWeights> = {}
     ) {
         super()
+        this.weights = { ...DEFAULT_BOIDS, ...weights }
     }
 
     update(body: Entity, delta: number) {
         this.clearInput()
         this.strafeTimer += delta
 
-        const sepX = { v: 0 }, sepY = { v: 0 }
-        const alignVx = { v: 0 }, alignVy = { v: 0 }
-        const cohX = { v: 0 }, cohY = { v: 0 }
+        const w = this.weights
+
+        let sepX = 0, sepY = 0
+        let alignX = 0, alignY = 0
+        let cohX = 0, cohY = 0
         let sepCount = 0, alignCount = 0, cohCount = 0
 
-        for (const other of this.flock) {
-            if (other === body || (other as any).currentHealth <= 0) continue
+        // Only entities within the widest steering radius can matter, so this
+        // asks the flock's spatial hash instead of walking every member.
+        const neighbors = this.flock.neighbors(
+            body.position.x,
+            body.position.y,
+            Math.max(w.separationRadius, w.alignmentRadius, w.cohesionRadius)
+        )
+
+        for (let i = 0; i < neighbors.length; i++) {
+            const other = neighbors[i]
+            if (other === body || other.currentHealth <= 0) continue
+
             const dx = other.position.x - body.position.x
             const dy = other.position.y - body.position.y
             const dist = Math.hypot(dx, dy)
             if (dist === 0) continue
 
-            if (dist < this.separationRadius) {
-                sepX.v -= dx / dist
-                sepY.v -= dy / dist
+            if (dist < w.separationRadius) {
+                sepX -= dx / dist
+                sepY -= dy / dist
                 sepCount++
             }
-            if (dist < this.alignmentRadius) {
-                alignVx.v += other.velocity.x
-                alignVy.v += other.velocity.y
+            if (dist < w.alignmentRadius) {
+                alignX += other.velocity.x
+                alignY += other.velocity.y
                 alignCount++
             }
-            if (dist < this.cohesionRadius) {
-                cohX.v += other.position.x
-                cohY.v += other.position.y
+            if (dist < w.cohesionRadius) {
+                cohX += other.position.x
+                cohY += other.position.y
                 cohCount++
             }
         }
@@ -289,121 +306,57 @@ export class BoidsController extends Controller {
         let steerX = 0, steerY = 0
 
         if (sepCount > 0) {
-            steerX += (sepX.v / sepCount) * this.separationWeight
-            steerY += (sepY.v / sepCount) * this.separationWeight
+            steerX += (sepX / sepCount) * w.separationWeight
+            steerY += (sepY / sepCount) * w.separationWeight
         }
         if (alignCount > 0) {
-            const avgVx = alignVx.v / alignCount
-            const avgVy = alignVy.v / alignCount
-            steerX += (avgVx - body.velocity.x) * this.alignmentWeight * 0.01
-            steerY += (avgVy - body.velocity.y) * this.alignmentWeight * 0.01
+            steerX += (alignX / alignCount - body.velocity.x) * w.alignmentWeight * 0.01
+            steerY += (alignY / alignCount - body.velocity.y) * w.alignmentWeight * 0.01
         }
         if (cohCount > 0) {
-            const centerX = cohX.v / cohCount
-            const centerY = cohY.v / cohCount
-            steerX += (centerX - body.position.x) * this.cohesionWeight * 0.001
-            steerY += (centerY - body.position.y) * this.cohesionWeight * 0.001
+            steerX += (cohX / cohCount - body.position.x) * w.cohesionWeight * 0.001
+            steerY += (cohY / cohCount - body.position.y) * w.cohesionWeight * 0.001
         }
 
-        const toTarget = this.target.position.clone().subtract(body.position)
-        const distance = toTarget.getSpeed()
-        const targetAngle = Math.atan2(toTarget.y, toTarget.x)
+        const toX = this.target.position.x - body.position.x
+        const toY = this.target.position.y - body.position.y
+        const distance = Math.hypot(toX, toY)
 
-        const attackRange = 250
-        const orbitRange = 120
+        if (distance > 0) {
+            if (distance > w.attackRange) {
+                steerX += (toX / distance) * w.attackWeight
+                steerY += (toY / distance) * w.attackWeight
+            } else {
+                const orbitAngle = Math.atan2(toY, toX) + (Math.PI / 2) * this.orbitDirection
+                steerX += Math.cos(orbitAngle) * w.attackWeight * 0.5
+                steerY += Math.sin(orbitAngle) * w.attackWeight * 0.5
 
-        if (distance > attackRange) {
-            steerX += (toTarget.x / distance) * this.attackWeight
-            steerY += (toTarget.y / distance) * this.attackWeight
-        } else {
-            const orbitAngle = targetAngle + (Math.PI / 2) * this.orbitDirection
-            steerX += Math.cos(orbitAngle) * this.attackWeight * 0.5
-            steerY += Math.sin(orbitAngle) * this.attackWeight * 0.5
-
-            if (distance < orbitRange) {
-                steerX -= (toTarget.x / distance) * 0.3
-                steerY -= (toTarget.y / distance) * 0.3
+                // Too close: back off along the approach vector.
+                if (distance < w.orbitRange) {
+                    steerX -= (toX / distance) * 0.3
+                    steerY -= (toY / distance) * 0.3
+                }
             }
         }
 
-        const desiredAngle = Math.atan2(steerY, steerX)
-        let angleError = desiredAngle - body.rotation
-        angleError = Math.atan2(Math.sin(angleError), Math.cos(angleError))
+        const angleError = angleDelta(body.rotation, Math.atan2(steerY, steerX))
 
         if (angleError > 0.05) this.input.right = true
         else if (angleError < -0.05) this.input.left = true
 
         if (Math.abs(angleError) < 0.5) this.input.forward = true
 
-        if (this.strafeTimer > 200 + Math.random() * 150) {
+        // The threshold is drawn once and held, so the interval is actually
+        // random per swap rather than re-rolled (and effectively shortened)
+        // every single frame.
+        if (this.strafeTimer > this.strafeInterval) {
             this.orbitDirection *= -1
             this.strafeTimer = 0
+            this.strafeInterval = nextStrafeInterval()
         }
     }
 }
 
-export class AttackController extends Controller {
-    private orbitDirection: number = Math.random() < 0.5 ? 1 : -1
-    private strafeTimer: number = 0
-
-    constructor(
-        public target: Entity
-    ) {
-        super();
-    }
-
-    update(
-        body: Entity,
-        delta: number
-    ) {
-        this.clearInput();
-
-        this.strafeTimer += delta
-
-        const toTarget =
-            this.target.position
-                .clone()
-                .subtract(body.position);
-
-        const distance = toTarget.getSpeed();
-        const targetAngle = Math.atan2(toTarget.y, toTarget.x);
-
-        const attackRange = 200;
-        const orbitRange = 150;
-
-        if (distance > attackRange) {
-            let angleError = targetAngle - body.rotation;
-            angleError = Math.atan2(Math.sin(angleError), Math.cos(angleError));
-
-            if (angleError > 0.05) this.input.right = true;
-            else if (angleError < -0.05) this.input.left = true;
-
-            if (Math.abs(angleError) < 0.3) this.input.forward = true;
-        } else {
-            const orbitAngle = targetAngle + (Math.PI / 2) * this.orbitDirection;
-
-            let angleError = orbitAngle - body.rotation;
-            angleError = Math.atan2(Math.sin(angleError), Math.cos(angleError));
-
-            if (angleError > 0.05) this.input.right = true;
-            else if (angleError < -0.05) this.input.left = true;
-
-            this.input.forward = true;
-
-            if (distance < orbitRange) {
-                const awayAngle = targetAngle + Math.PI;
-                let awayError = awayAngle - body.rotation;
-                awayError = Math.atan2(Math.sin(awayError), Math.cos(awayError));
-
-                if (Math.abs(awayError) < 0.4) {
-                    this.input.forward = true;
-                }
-            }
-        }
-
-        if (this.strafeTimer > 180 + Math.random() * 120) {
-            this.orbitDirection *= -1
-            this.strafeTimer = 0
-        }
-    }
+function nextStrafeInterval(): number {
+    return 200 + Math.random() * 150
 }
