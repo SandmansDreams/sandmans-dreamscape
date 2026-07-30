@@ -2,7 +2,7 @@ import { CELL_SIZE } from "./helpers";
 import { adjustColorForLight, type GridLightInfo } from "./lighting";
 import type { Placement } from "./placements";
 
-export type BlockShape = "empty" | "full" | "triSE" | "triSW" | "triNE" | "triNW" | "arcNW" | "arcNE" | "arcSE" | "arcSW"
+export type BlockShape = "empty" | "full" | "halfN" | "halfS" | "halfE" | "halfW" | "triSE" | "triSW" | "triNE" | "triNW" | "arcNW" | "arcNE" | "arcSE" | "arcSW"
 
 export interface CellPosition {
     row: number,
@@ -54,6 +54,17 @@ export class Grid {
             color: this.defaultColor,
             placement: null
         }
+    }
+
+    isFilled(col: number, row: number): boolean {
+        return this.cellMap.has(this.key(col, row))
+    }
+
+    hasFilledNeighbor(col: number, row: number): boolean {
+        return this.isFilled(col - 1, row) ||
+            this.isFilled(col + 1, row) ||
+            this.isFilled(col, row - 1) ||
+            this.isFilled(col, row + 1)
     }
 
     getCellFromPoint(x: number, y: number): Cell {
@@ -183,6 +194,8 @@ export class Grid {
         ctx.fillStyle = color
         if (shape === "full") {
             ctx.fillRect(x, y, CELL_SIZE, CELL_SIZE)
+        } else if (shape.startsWith("half")) {
+            this.drawHalf(ctx, shape as "halfN" | "halfS" | "halfE" | "halfW", x, y, CELL_SIZE)
         } else if (shape.startsWith("arc")) {
             this.drawArc(ctx, shape as "arcNW" | "arcNE" | "arcSE" | "arcSW", x, y, CELL_SIZE)
         } else {
@@ -192,48 +205,27 @@ export class Grid {
     }
 
     private drawGridLines(ctx: CanvasRenderingContext2D) {
-        const transform = ctx.getTransform()
-        const inv = transform.inverse()
+        const bounds = this.getFilledBounds()
+        if (!bounds) return
 
-        const cw = ctx.canvas.width
-        const ch = ctx.canvas.height
-
-        const tl = inv.transformPoint({ x: 0, y: 0 })
-        const tr = inv.transformPoint({ x: cw, y: 0 })
-        const bl = inv.transformPoint({ x: 0, y: ch })
-        const br = inv.transformPoint({ x: cw, y: ch })
-
-        const minX = Math.min(tl.x, tr.x, bl.x, br.x)
-        const maxX = Math.max(tl.x, tr.x, bl.x, br.x)
-        const minY = Math.min(tl.y, tr.y, bl.y, br.y)
-        const maxY = Math.max(tl.y, tr.y, bl.y, br.y)
-
-        const startCol = Math.floor(minX / CELL_SIZE) - 1
-        const endCol = Math.ceil(maxX / CELL_SIZE) + 1
-        const startRow = Math.floor(minY / CELL_SIZE) - 1
-        const endRow = Math.ceil(maxY / CELL_SIZE) + 1
+        const pad = 2
+        const startCol = bounds.minCol - pad
+        const endCol = bounds.maxCol + pad
+        const startRow = bounds.minRow - pad
+        const endRow = bounds.maxRow + pad
 
         ctx.strokeStyle = "rgba(105, 208, 255, 0.1)"
         ctx.lineWidth = 0.5
-        ctx.beginPath()
 
-        const y0 = startRow * CELL_SIZE
-        const y1 = endRow * CELL_SIZE
-        for (let col = startCol; col <= endCol; col++) {
-            const x = col * CELL_SIZE
-            ctx.moveTo(x, y0)
-            ctx.lineTo(x, y1)
-        }
-
-        const x0 = startCol * CELL_SIZE
-        const x1 = endCol * CELL_SIZE
         for (let row = startRow; row <= endRow; row++) {
-            const y = row * CELL_SIZE
-            ctx.moveTo(x0, y)
-            ctx.lineTo(x1, y)
+            for (let col = startCol; col <= endCol; col++) {
+                if (this.isFilled(col, row) || this.hasFilledNeighbor(col, row)) {
+                    const x = col * CELL_SIZE
+                    const y = row * CELL_SIZE
+                    ctx.strokeRect(x, y, CELL_SIZE, CELL_SIZE)
+                }
+            }
         }
-
-        ctx.stroke()
     }
 
     private drawCenterCross(ctx: CanvasRenderingContext2D) {
@@ -276,6 +268,11 @@ export class Grid {
 
         if (cell.shape === "full") {
             ctx.fillRect(x, y, CELL_SIZE, CELL_SIZE);
+            return;
+        }
+
+        if (cell.shape.startsWith("half")) {
+            this.drawHalf(ctx, cell.shape as "halfN" | "halfS" | "halfE" | "halfW", x, y, CELL_SIZE);
             return;
         }
 
@@ -350,6 +347,22 @@ export class Grid {
         ctx.arc(cx, cy, size, startAngle, endAngle)
         ctx.closePath()
         ctx.fill()
+    }
+
+    private drawHalf(
+        ctx: CanvasRenderingContext2D,
+        shape: "halfN" | "halfS" | "halfE" | "halfW",
+        x: number,
+        y: number,
+        size: number
+    ) {
+        const half = size / 2
+        switch (shape) {
+            case "halfN": ctx.fillRect(x, y, size, half); break
+            case "halfS": ctx.fillRect(x, y + half, size, half); break
+            case "halfW": ctx.fillRect(x, y, half, size); break
+            case "halfE": ctx.fillRect(x + half, y, half, size); break
+        }
     }
 
     // --- Testing / scaffolding ---------------------------------------------

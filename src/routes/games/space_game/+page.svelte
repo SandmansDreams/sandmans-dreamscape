@@ -12,7 +12,7 @@ App · SVELTE
     import { GridEditor } from "./grid-editor";
     import { LightSource, computeGridLight, type GridLightInfo } from "./lighting";
     import { Particle } from "./particle";
-    import { Turret } from "./placements";
+    import { Spike, Thruster, Turret } from "./placements";
     import { spawnScouter } from "./entities/enemy";
 
     let canvas = $state<HTMLCanvasElement | null>(null)
@@ -148,6 +148,16 @@ App · SVELTE
             }
         }
 
+        if (shape.startsWith("half")) {
+            const half = sz / 2
+            switch (shape) {
+                case "halfN": ctx.fillRect(m, m, sz, half); break
+                case "halfS": ctx.fillRect(m, m + half, sz, half); break
+                case "halfW": ctx.fillRect(m, m, half, sz); break
+                case "halfE": ctx.fillRect(m + half, m, half, sz); break
+            }
+        }
+
         ctx.strokeStyle = "rgba(105, 208, 255, 0.3)"
         ctx.strokeRect(m, m, sz, sz)
     }
@@ -170,6 +180,74 @@ App · SVELTE
         const barrelW = s * 0.1
         const barrelH = s * 0.35
         ctx.fillRect(cx - barrelW / 2, cy - radius - barrelH + radius * 0.3, barrelW, barrelH)
+
+        ctx.fillStyle = "#4a9eff"
+        const blockW = s * 0.16
+        const blockH = s * 0.1
+        ctx.fillRect(cx - blockW / 2, cy - radius - barrelH * 0.3, blockW, blockH)
+    }
+
+    function drawThrusterPreview(canvas: HTMLCanvasElement) {
+        const ctx = canvas.getContext("2d")
+        if (!ctx) return
+        const s = canvas.width
+        ctx.clearRect(0, 0, s, s)
+        const cx = s / 2
+        const cy = s / 2
+        const r = s * 0.3
+
+        ctx.fillStyle = "#555"
+        ctx.fillRect(cx - r, cy - r * 0.6, r * 2, r * 1.2)
+
+        ctx.fillStyle = "#ff6600"
+        ctx.beginPath()
+        ctx.moveTo(cx - r * 0.6, cy + r * 0.6)
+        ctx.lineTo(cx, cy + r * 1.2)
+        ctx.lineTo(cx + r * 0.6, cy + r * 0.6)
+        ctx.closePath()
+        ctx.fill()
+
+        ctx.fillStyle = "#ffcc00"
+        ctx.beginPath()
+        ctx.moveTo(cx - r * 0.3, cy + r * 0.6)
+        ctx.lineTo(cx, cy + r * 1.0)
+        ctx.lineTo(cx + r * 0.3, cy + r * 0.6)
+        ctx.closePath()
+        ctx.fill()
+    }
+
+    function drawSpikePreview(canvas: HTMLCanvasElement) {
+        const ctx = canvas.getContext("2d")
+        if (!ctx) return
+        const s = canvas.width
+        ctx.clearRect(0, 0, s, s)
+        const cx = s / 2
+        const cy = s / 2
+        const r = s * 0.35
+
+        ctx.fillStyle = "#888"
+        ctx.beginPath()
+        ctx.moveTo(cx, cy - r * 1.3)
+        ctx.lineTo(cx - r * 0.5, cy + r * 0.4)
+        ctx.lineTo(cx + r * 0.5, cy + r * 0.4)
+        ctx.closePath()
+        ctx.fill()
+
+        ctx.fillStyle = "#ccc"
+        ctx.beginPath()
+        ctx.moveTo(cx, cy - r * 1.3)
+        ctx.lineTo(cx - r * 0.15, cy - r * 0.3)
+        ctx.lineTo(cx + r * 0.15, cy - r * 0.3)
+        ctx.closePath()
+        ctx.fill()
+    }
+
+    function drawPlacementDetailPreview(canvas: HTMLCanvasElement, placement: import("./placements").Placement) {
+        const ctx = canvas.getContext("2d")
+        if (!ctx) return
+        const s = canvas.width
+        ctx.clearRect(0, 0, s, s)
+        placement.draw(ctx, 0, 0, s)
     }
  
     const input: InputState = { ...NEUTRAL_INPUT }
@@ -371,7 +449,7 @@ App · SVELTE
                     const hx = col * CELL_SIZE
                     const hy = row * CELL_SIZE
                     context.save()
-                    if (gridEditor.selectedPlacementType) {
+                    if (gridEditor.selectedPlacementType === "turret") {
                         context.globalAlpha = 0.35
                         const cx = hx + CELL_SIZE / 2
                         const cy = hy + CELL_SIZE / 2
@@ -381,6 +459,32 @@ App · SVELTE
                         context.fill()
                         context.fillStyle = "#888"
                         context.fillRect(cx - CELL_SIZE * 0.06, cy - CELL_SIZE * 0.5, CELL_SIZE * 0.12, CELL_SIZE * 0.4)
+                    } else if (gridEditor.selectedPlacementType === "thruster") {
+                        context.globalAlpha = 0.35
+                        const r = CELL_SIZE * 0.35
+                        const cx = hx + CELL_SIZE / 2
+                        const cy = hy + CELL_SIZE / 2
+                        context.fillStyle = "#555"
+                        context.fillRect(cx - r, cy - r * 0.6, r * 2, r * 1.2)
+                        context.fillStyle = "#ff6600"
+                        context.beginPath()
+                        context.moveTo(cx - r * 0.6, cy + r * 0.6)
+                        context.lineTo(cx, cy + r * 1.2)
+                        context.lineTo(cx + r * 0.6, cy + r * 0.6)
+                        context.closePath()
+                        context.fill()
+                    } else if (gridEditor.selectedPlacementType === "spike") {
+                        context.globalAlpha = 0.35
+                        const r = CELL_SIZE * 0.4
+                        const cx = hx + CELL_SIZE / 2
+                        const cy = hy + CELL_SIZE / 2
+                        context.fillStyle = "#888"
+                        context.beginPath()
+                        context.moveTo(cx, cy - r * 1.3)
+                        context.lineTo(cx - r * 0.5, cy + r * 0.4)
+                        context.lineTo(cx + r * 0.5, cy + r * 0.4)
+                        context.closePath()
+                        context.fill()
                     } else if (gridEditor.hoveredCell.placement) {
                         context.globalAlpha = 0.4
                         context.fillStyle = "#ff4444"
@@ -545,16 +649,20 @@ App · SVELTE
             const grid = new Grid()
             grid.paintTestShape()
 
-            // Add turrets to the wing tips
-            const turretCells = [
-                grid.getCell(2, 5),
-                grid.getCell(7, 5),
-            ]
-            for (const cell of turretCells) {
-                const turret = new Turret()
-                cell.placement = turret
-                grid.setCell(cell, cell.shape, cell.color, turret)
-            }
+            const turretCell = grid.getCell(4, 0)
+            const turret = new Turret()
+            turret.cell = turretCell
+            grid.setCell(turretCell, turretCell.shape, turretCell.color, turret)
+
+            const thrusterCell = grid.getCell(4, 12)
+            const thruster = new Thruster()
+            thruster.cell = thrusterCell
+            grid.setCell(thrusterCell, thrusterCell.shape, thrusterCell.color, thruster)
+
+            const thrusterCell2 = grid.getCell(5, 12)
+            const thruster2 = new Thruster()
+            thruster2.cell = thrusterCell2
+            grid.setCell(thrusterCell2, thrusterCell2.shape, thrusterCell2.color, thruster2)
 
             const ship = new Ship(
                 getRandomVector(1000, 1000),
@@ -572,7 +680,8 @@ App · SVELTE
         for (let s = 0; s < scouterCount; s++) {
             const scouter = spawnScouter(
                 getRandomVector(1000, 1000),
-                player.currentShip
+                player.currentShip,
+                enemies
             )
             enemies.push(scouter)
         }
@@ -591,6 +700,7 @@ App · SVELTE
         if (mode === "building") {
             const [gridX, gridY] = screenToGrid(event.clientX, event.clientY)
             gridEditor.handleClick(gridX, gridY)
+            gridEditor = gridEditor
         } else {
             const position = getPositionFromEvent(event, canvas!, camera)
             ships.forEach((ship) => {
@@ -711,6 +821,25 @@ App · SVELTE
         onmouseleave={handleSpacerMouseLeave}
     >
         {#if mode === "building"}
+            {#if gridEditor?.selectedPlacement}
+                <div id="placement-details">
+                    <h3>{gridEditor.selectedPlacement.displayName}</h3>
+                    <p class="detail-desc">{gridEditor.selectedPlacement.description}</p>
+                    <p class="detail-stat">Level: {gridEditor.selectedPlacement.level}/5</p>
+                    <p class="detail-stat">Weight: {gridEditor.selectedPlacement.weight}</p>
+                    <canvas
+                        width="64" height="64"
+                        class="detail-preview"
+                        use:drawPlacementDetailPreview={gridEditor.selectedPlacement}
+                    ></canvas>
+                    {#if gridEditor.selectedPlacement.level < 5}
+                        <button onclick={() => { gridEditor.upgradeSelectedPlacement(); gridEditor = gridEditor }}>Upgrade</button>
+                    {:else}
+                        <button disabled>Max Level</button>
+                    {/if}
+                    <button class="remove-btn" onclick={() => { gridEditor.removeSelectedPlacement(); gridEditor = gridEditor }}>Remove</button>
+                </div>
+            {/if}
             <div id="build-sidebar">
                 <h3>Layouts</h3>
                 <div class="sidebar-field">
@@ -764,13 +893,14 @@ App · SVELTE
                     </div>
                     {#each [
                         { base: "full", label: "Full", preview: "full" as BlockShape },
+                        { base: "half", label: "Half", preview: (gridEditor?.baseShape === "half" ? gridEditor.resolvedShape : "halfN") as BlockShape },
                         { base: "wedge", label: "Wedge", preview: (gridEditor?.baseShape === "wedge" ? gridEditor.resolvedShape : "triNW") as BlockShape },
                         { base: "arc", label: "Arc", preview: (gridEditor?.baseShape === "arc" ? gridEditor.resolvedShape : "arcNW") as BlockShape },
                         { base: "empty", label: "Erase", preview: null }
                     ] as option}
                         <button
                             class={gridEditor?.baseShape === option.base ? "active" : ""}
-                            onclick={() => gridEditor?.selectBaseShape(option.base as "full" | "wedge" | "arc" | "empty")}
+                            onclick={() => gridEditor?.selectBaseShape(option.base as "full" | "half" | "wedge" | "arc" | "empty")}
                         >
                             {#if option.preview}
                                 <canvas
@@ -780,7 +910,7 @@ App · SVELTE
                                 ></canvas>
                             {/if}
                             {option.label}
-                            {#if (option.base === "wedge" || option.base === "arc") && gridEditor?.baseShape === option.base}
+                            {#if (option.base === "wedge" || option.base === "arc" || option.base === "half") && gridEditor?.baseShape === option.base}
                                 <span class="rotate-hint">[R]</span>
                             {/if}
                         </button>
@@ -799,6 +929,28 @@ App · SVELTE
                             use:drawTurretPreview
                         ></canvas>
                         Turret
+                    </button>
+                    <button
+                        class={gridEditor?.selectedPlacementType === "thruster" ? "active" : ""}
+                        onclick={() => { if (gridEditor) gridEditor.selectedPlacementType = gridEditor.selectedPlacementType === "thruster" ? null : "thruster" }}
+                    >
+                        <canvas
+                            width="32" height="32"
+                            class="block-preview"
+                            use:drawThrusterPreview
+                        ></canvas>
+                        Thruster
+                    </button>
+                    <button
+                        class={gridEditor?.selectedPlacementType === "spike" ? "active" : ""}
+                        onclick={() => { if (gridEditor) gridEditor.selectedPlacementType = gridEditor.selectedPlacementType === "spike" ? null : "spike" }}
+                    >
+                        <canvas
+                            width="32" height="32"
+                            class="block-preview"
+                            use:drawSpikePreview
+                        ></canvas>
+                        Spike
                     </button>
                 </div>
             {/if}
@@ -939,6 +1091,52 @@ App · SVELTE
         position: relative;
     }
 
+    #placement-details {
+        position: absolute;
+        top: 50%;
+        left: 2%;
+        width: 200px;
+        background-color: rgba(0, 10, 20, 0.85);
+        border: 2px solid var(--ui-background);
+        padding: .75rem;
+        display: flex;
+        flex-direction: column;
+        gap: .5rem;
+        z-index: 3;
+        pointer-events: auto;
+        transform: translateY(-50%);
+    }
+    #placement-details h3 {
+        margin-bottom: .25rem;
+    }
+    #placement-details button {
+        width: 100%;
+        font-size: 14px;
+        padding: .4rem .5rem;
+    }
+    #placement-details .remove-btn {
+        background-color: rgba(255, 60, 60, 0.3);
+        border-color: rgba(255, 60, 60, 0.5);
+        color: rgba(255, 100, 100, 0.9);
+    }
+    #placement-details .remove-btn:hover {
+        background-color: rgba(255, 60, 60, 0.2);
+    }
+    .detail-desc {
+        font-size: 12px;
+        opacity: 0.8;
+        margin: 0;
+    }
+    .detail-stat {
+        font-size: 13px;
+        margin: 0;
+    }
+    .detail-preview {
+        display: block;
+        margin: .25rem auto;
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 6px;
+    }
     #build-sidebar {
         position: absolute;
         top: 50%;

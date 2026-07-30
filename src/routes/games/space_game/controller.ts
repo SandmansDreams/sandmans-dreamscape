@@ -235,6 +235,113 @@ export class FollowController extends Controller {
     }
 }
 
+export class BoidsController extends Controller {
+    private orbitDirection: number = Math.random() < 0.5 ? 1 : -1
+    private strafeTimer: number = 0
+
+    constructor(
+        public target: Entity,
+        public flock: Entity[],
+        private separationRadius: number = 80,
+        private alignmentRadius: number = 200,
+        private cohesionRadius: number = 250,
+        private separationWeight: number = 1.5,
+        private alignmentWeight: number = 0.8,
+        private cohesionWeight: number = 0.6,
+        private attackWeight: number = 1.0
+    ) {
+        super()
+    }
+
+    update(body: Entity, delta: number) {
+        this.clearInput()
+        this.strafeTimer += delta
+
+        const sepX = { v: 0 }, sepY = { v: 0 }
+        const alignVx = { v: 0 }, alignVy = { v: 0 }
+        const cohX = { v: 0 }, cohY = { v: 0 }
+        let sepCount = 0, alignCount = 0, cohCount = 0
+
+        for (const other of this.flock) {
+            if (other === body || (other as any).currentHealth <= 0) continue
+            const dx = other.position.x - body.position.x
+            const dy = other.position.y - body.position.y
+            const dist = Math.hypot(dx, dy)
+            if (dist === 0) continue
+
+            if (dist < this.separationRadius) {
+                sepX.v -= dx / dist
+                sepY.v -= dy / dist
+                sepCount++
+            }
+            if (dist < this.alignmentRadius) {
+                alignVx.v += other.velocity.x
+                alignVy.v += other.velocity.y
+                alignCount++
+            }
+            if (dist < this.cohesionRadius) {
+                cohX.v += other.position.x
+                cohY.v += other.position.y
+                cohCount++
+            }
+        }
+
+        let steerX = 0, steerY = 0
+
+        if (sepCount > 0) {
+            steerX += (sepX.v / sepCount) * this.separationWeight
+            steerY += (sepY.v / sepCount) * this.separationWeight
+        }
+        if (alignCount > 0) {
+            const avgVx = alignVx.v / alignCount
+            const avgVy = alignVy.v / alignCount
+            steerX += (avgVx - body.velocity.x) * this.alignmentWeight * 0.01
+            steerY += (avgVy - body.velocity.y) * this.alignmentWeight * 0.01
+        }
+        if (cohCount > 0) {
+            const centerX = cohX.v / cohCount
+            const centerY = cohY.v / cohCount
+            steerX += (centerX - body.position.x) * this.cohesionWeight * 0.001
+            steerY += (centerY - body.position.y) * this.cohesionWeight * 0.001
+        }
+
+        const toTarget = this.target.position.clone().subtract(body.position)
+        const distance = toTarget.getSpeed()
+        const targetAngle = Math.atan2(toTarget.y, toTarget.x)
+
+        const attackRange = 250
+        const orbitRange = 120
+
+        if (distance > attackRange) {
+            steerX += (toTarget.x / distance) * this.attackWeight
+            steerY += (toTarget.y / distance) * this.attackWeight
+        } else {
+            const orbitAngle = targetAngle + (Math.PI / 2) * this.orbitDirection
+            steerX += Math.cos(orbitAngle) * this.attackWeight * 0.5
+            steerY += Math.sin(orbitAngle) * this.attackWeight * 0.5
+
+            if (distance < orbitRange) {
+                steerX -= (toTarget.x / distance) * 0.3
+                steerY -= (toTarget.y / distance) * 0.3
+            }
+        }
+
+        const desiredAngle = Math.atan2(steerY, steerX)
+        let angleError = desiredAngle - body.rotation
+        angleError = Math.atan2(Math.sin(angleError), Math.cos(angleError))
+
+        if (angleError > 0.05) this.input.right = true
+        else if (angleError < -0.05) this.input.left = true
+
+        if (Math.abs(angleError) < 0.5) this.input.forward = true
+
+        if (this.strafeTimer > 200 + Math.random() * 150) {
+            this.orbitDirection *= -1
+            this.strafeTimer = 0
+        }
+    }
+}
+
 export class AttackController extends Controller {
     private orbitDirection: number = Math.random() < 0.5 ? 1 : -1
     private strafeTimer: number = 0

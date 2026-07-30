@@ -8,10 +8,9 @@ import { Grid } from "../grid"
 import { CELL_SIZE } from "../helpers"
 import type { GridLightInfo } from "../lighting"
 import { Particle } from "../particle"
-import type { Targetable } from "../placements"
+import { Thruster, type Targetable } from "../placements"
 
 export class Ship extends Entity {
-    thrust: number
     rotationThrust: number
     color: string = "grey"
     grid: Grid
@@ -25,10 +24,26 @@ export class Ship extends Entity {
     ) {
         super(position, velocity, rotation, controller)
         this.grid = grid
-        this.thrust = 0.1
         this.rotationThrust = 0.001
-        this.mass = this.grid.filledCount || 10
         this.updateCollider()
+    }
+
+    get totalThrust(): number {
+        let thrust = 0
+        this.grid.forEachFilled((cell) => {
+            if (cell.placement instanceof Thruster) {
+                thrust += cell.placement.effectiveThrust
+            }
+        })
+        return thrust
+    }
+
+    get hasThrusters(): boolean {
+        let found = false
+        this.grid.forEachFilled((cell) => {
+            if (cell.placement instanceof Thruster) found = true
+        })
+        return found
     }
 
     updateCollider() {
@@ -90,20 +105,23 @@ export class Ship extends Entity {
         this.rotationSpeed *= this.rotationDrag;
         this.rotation += this.rotationSpeed * delta;
 
-        if (input.forward) {
-            this.velocity.add(
-                Vector2
-                    .fromAngle(this.rotation)
-                    .multiply((this.thrust / (this.mass / 10)) * delta)
-            );
-        }
+        const thrust = this.totalThrust
+        if (thrust > 0) {
+            if (input.forward) {
+                this.velocity.add(
+                    Vector2
+                        .fromAngle(this.rotation)
+                        .multiply((thrust / (this.mass / 10)) * delta)
+                );
+            }
 
-        if (input.backward) {
-            this.velocity.add(
-                Vector2
-                    .fromAngle(this.rotation + Math.PI)
-                    .multiply((this.thrust / (this.mass / 10)) * delta)
-            );
+            if (input.backward) {
+                this.velocity.add(
+                    Vector2
+                        .fromAngle(this.rotation + Math.PI)
+                        .multiply((thrust / (this.mass / 10)) * delta)
+                );
+            }
         }
 
         this.velocity.multiply(this.drag);

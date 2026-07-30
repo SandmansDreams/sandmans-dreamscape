@@ -167,18 +167,27 @@ export function adjustColorForLight(
     const len = Math.hypot(relX, relY)
     if (len === 0) return color
 
-    // Dot product: how much does this cell face the light?
-    // +1 = fully lit side, -1 = fully shadowed side
-    const dot = (relX * lightInfo.dirX + relY * lightInfo.dirY) / len
+    const nX = relX / len
+    const nY = relY / len
+
+    // Dot product gives directional facing (-1 shadow, +1 lit)
+    const dot = nX * lightInfo.dirX + nY * lightInfo.dirY
+
+    // Radial falloff: cells farther from center get more contrast
+    const maxRadius = 60
+    const radialFactor = Math.min(len / maxRadius, 1)
 
     const [h, s, l] = hexToHSL(color)
 
-    // Shift lightness: lit side gets brighter, shadow side gets darker
-    const shift = dot * lightInfo.strength * 25
+    // Blend directional and radial: lit side brightens, shadow side darkens,
+    // but the effect is smooth and gradient-like rather than hard-edged
+    const directionalShift = dot * lightInfo.strength * 18 * radialFactor
+    const ambientDarken = (1 - (dot + 1) / 2) * lightInfo.strength * 8 * radialFactor
+    const shift = directionalShift - ambientDarken
     const newL = Math.max(5, Math.min(95, l + shift))
 
-    // Slight warm tint on lit side
-    const newS = Math.max(0, Math.min(100, s + (dot > 0 ? dot * lightInfo.strength * 15 : 0)))
+    const warmth = Math.max(0, dot) * lightInfo.strength * 10 * radialFactor
+    const newS = Math.max(0, Math.min(100, s + warmth))
 
     return hslToString(h, newS, newL)
 }

@@ -37,7 +37,7 @@ export class Asteroid extends PhysicsObject {
         this.radius = options.radius ?? getRandomIntFromRange(5, 40)
         this.mass = this.radius * this.radius 
 
-        this.maxHealth = Math.round(this.radius)
+        this.maxHealth = Math.round(this.radius * 2)
         this.health = this.maxHealth
 
         this.drag = 1
