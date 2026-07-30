@@ -175,6 +175,22 @@ export class Grid {
         ctx.restore();
     }
 
+    drawGhostBlock(ctx: CanvasRenderingContext2D, col: number, row: number, shape: BlockShape, color: string) {
+        const x = col * CELL_SIZE
+        const y = row * CELL_SIZE
+        ctx.save()
+        ctx.globalAlpha = 0.35
+        ctx.fillStyle = color
+        if (shape === "full") {
+            ctx.fillRect(x, y, CELL_SIZE, CELL_SIZE)
+        } else if (shape.startsWith("arc")) {
+            this.drawArc(ctx, shape as "arcNW" | "arcNE" | "arcSE" | "arcSW", x, y, CELL_SIZE)
+        } else {
+            this.drawTriangle(ctx, shape as "triNW" | "triNE" | "triSW" | "triSE", x, y, CELL_SIZE, CELL_SIZE)
+        }
+        ctx.restore()
+    }
+
     private drawGridLines(ctx: CanvasRenderingContext2D) {
         const transform = ctx.getTransform()
         const inv = transform.inverse()

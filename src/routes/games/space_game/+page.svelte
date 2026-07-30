@@ -8,7 +8,7 @@ App · SVELTE
     import { EmptyController, FollowController, NEUTRAL_INPUT, PlayerController, type InputState } from "./controller";
     import { CollisionManager, Vector2 } from "./physics";
     import { Ship } from "./entities/ship";
-    import { BLOCK_MENU, Grid, type BlockShape } from "./grid";
+    import { Grid, type BlockShape } from "./grid";
     import { GridEditor } from "./grid-editor";
     import { LightSource, computeGridLight, type GridLightInfo } from "./lighting";
     import { Particle } from "./particle";
@@ -32,14 +32,18 @@ App · SVELTE
         debugOptions[key] = !debugOptions[key]
     }
 
-    let activePanel = $state<"blocks" | "ships" | "other">("ships")
+    let activePanel = $state<"blocks" | "ships" | "placements">("ships")
 
     function selectPanel(panel: typeof activePanel) {
         activePanel = panel
+        if (gridEditor) {
+            gridEditor.editorMode = panel === "placements" ? "placements" : "blocks"
+        }
     }
 
-    let selectedBlockShape = $state<BlockShape | null>("full")
-    let selectedColor = $state("#808080")
+    let hslH = $state(0)
+    let hslS = $state(0)
+    let hslL = $state(50)
     let buildZoom = $state(6)
     let savedCameraState: { position: Vector2, zoom: number } | null = null
 
@@ -54,13 +58,12 @@ App · SVELTE
     let cameraTransition: CameraTransition | null = null
     const transitionSpeed = 0.04
 
-    function chooseShape(shape: BlockShape | null) {
-        selectedBlockShape = shape
-        gridEditor?.selectShape(shape)
+    function hslColor(): string {
+        return `hsl(${hslH}, ${hslS}%, ${hslL}%)`
     }
 
-    function handleColorInput() {
-        gridEditor?.selectColor(selectedColor)
+    function syncEditorColor() {
+        gridEditor?.selectColor(hslColor())
     }
 
     let savedLayouts = $state<{ name: string, data: object }[]>([])
@@ -103,12 +106,13 @@ App · SVELTE
         input.value = ""
     }
 
-    function drawBlockPreview(canvas: HTMLCanvasElement, shape: string) {
+    function drawShapePreview(canvas: HTMLCanvasElement, shape: BlockShape) {
         const ctx = canvas.getContext("2d")
         if (!ctx) return
         const s = canvas.width
         const m = 2
         const sz = s - m * 2
+        ctx.clearRect(0, 0, s, s)
         ctx.fillStyle = "rgba(105, 208, 255, 0.6)"
 
         if (shape === "full") {
@@ -126,7 +130,7 @@ App · SVELTE
             ctx.arc(cx, cy, sz, start, end)
             ctx.closePath()
             ctx.fill()
-        } else {
+        } else if (shape.startsWith("tri")) {
             const corners: Record<string, [number, number][]> = {
                 triNW: [[m, m], [s - m, m], [m, s - m]],
                 triNE: [[s - m, m], [m, m], [s - m, s - m]],
@@ -146,6 +150,26 @@ App · SVELTE
 
         ctx.strokeStyle = "rgba(105, 208, 255, 0.3)"
         ctx.strokeRect(m, m, sz, sz)
+    }
+
+    function drawTurretPreview(canvas: HTMLCanvasElement) {
+        const ctx = canvas.getContext("2d")
+        if (!ctx) return
+        const s = canvas.width
+        ctx.clearRect(0, 0, s, s)
+        const cx = s / 2
+        const cy = s / 2
+        const radius = s * 0.3
+
+        ctx.fillStyle = "#555"
+        ctx.beginPath()
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2)
+        ctx.fill()
+
+        ctx.fillStyle = "#888"
+        const barrelW = s * 0.1
+        const barrelH = s * 0.35
+        ctx.fillRect(cx - barrelW / 2, cy - radius - barrelH + radius * 0.3, barrelW, barrelH)
     }
  
     const input: InputState = { ...NEUTRAL_INPUT }
@@ -201,6 +225,12 @@ App · SVELTE
 
             case " ":
                 input.space = true
+                break
+
+            case "r":
+                if (mode === "building" && gridEditor?.canRotate) {
+                    gridEditor.rotate()
+                }
                 break
         }
     }
@@ -312,12 +342,53 @@ App · SVELTE
 
         grid.draw(context, 1, true)
 
-        // Hover highlight
+        grid.forEachFilled((cell) => {
+            if (!cell.placement) return
+            const px = cell.position.column * CELL_SIZE
+            const py = cell.position.row * CELL_SIZE
+            cell.placement.draw(context!, px, py, CELL_SIZE)
+        })
+
         if (gridEditor?.hoveredCell) {
-            const hx = gridEditor.hoveredCell.position.column * CELL_SIZE
-            const hy = gridEditor.hoveredCell.position.row * CELL_SIZE
-            context.fillStyle = "rgba(105, 208, 255, 0.25)"
-            context.fillRect(hx, hy, CELL_SIZE, CELL_SIZE)
+            const col = gridEditor.hoveredCell.position.column
+            const row = gridEditor.hoveredCell.position.row
+
+            if (gridEditor.editorMode === "blocks") {
+                const shape = gridEditor.resolvedShape
+                if (shape) {
+                    grid.drawGhostBlock(context, col, row, shape, gridEditor.selectedColor)
+                } else {
+                    const hx = col * CELL_SIZE
+                    const hy = row * CELL_SIZE
+                    context.save()
+                    context.globalAlpha = 0.3
+                    context.fillStyle = "#ff4444"
+                    context.fillRect(hx, hy, CELL_SIZE, CELL_SIZE)
+                    context.restore()
+                }
+            } else if (gridEditor.editorMode === "placements") {
+                if (gridEditor.hoveredCell.shape !== "empty") {
+                    const hx = col * CELL_SIZE
+                    const hy = row * CELL_SIZE
+                    context.save()
+                    if (gridEditor.selectedPlacementType) {
+                        context.globalAlpha = 0.35
+                        const cx = hx + CELL_SIZE / 2
+                        const cy = hy + CELL_SIZE / 2
+                        context.fillStyle = "#555"
+                        context.beginPath()
+                        context.arc(cx, cy, CELL_SIZE * 0.4, 0, Math.PI * 2)
+                        context.fill()
+                        context.fillStyle = "#888"
+                        context.fillRect(cx - CELL_SIZE * 0.06, cy - CELL_SIZE * 0.5, CELL_SIZE * 0.12, CELL_SIZE * 0.4)
+                    } else if (gridEditor.hoveredCell.placement) {
+                        context.globalAlpha = 0.4
+                        context.fillStyle = "#ff4444"
+                        context.fillRect(hx, hy, CELL_SIZE, CELL_SIZE)
+                    }
+                    context.restore()
+                }
+            }
         }
 
         context.restore()
@@ -352,8 +423,7 @@ App · SVELTE
         updateCameraTransition(delta)
 
         if (mode === "flying") {
-            const allTargets = [...asteroids, ...enemies]
-            const newParticles = player.update(delta, allTargets)
+            const newParticles = player.update(delta, enemies)
             particles.push(...newParticles)
 
             for (const enemy of enemies) {
@@ -433,25 +503,16 @@ App · SVELTE
                 position: camera.position.clone(),
                 zoom: camera.zoom
             }
-            const targetPos = player.currentShip.position.clone()
-            cameraTransition = {
-                fromPos: camera.position.clone(),
-                toPos: targetPos,
-                fromZoom: camera.zoom,
-                toZoom: camera.zoom,
-                progress: 0,
-                onComplete: () => {
-                    mode = "building"
-                    gridEditor = new GridEditor(player.currentShip.grid)
-                    gridEditor.selectShape(selectedBlockShape)
-                    gridEditor.selectColor(selectedColor)
-                }
-            }
+            mode = "building"
+            activePanel = "blocks"
+            gridEditor = new GridEditor(player.currentShip.grid)
+            gridEditor.selectColor(hslColor())
         } else {
             const restorePos = savedCameraState?.position ?? camera.position.clone()
             const restoreZoom = savedCameraState?.zoom ?? camera.zoom
             player.currentShip.updateCollider()
             mode = "flying"
+            activePanel = "ships"
             cameraTransition = {
                 fromPos: player.currentShip.position.clone(),
                 toPos: restorePos,
@@ -599,7 +660,7 @@ App · SVELTE
         )
         
         gridEditor = new GridEditor(player.currentShip.grid)
-        gridEditor.selectColor(selectedColor)
+        gridEditor.selectColor(hslColor())
         
         spawnScouters()
         asteroids = spawnAsteroidField(asteroidCount, 4000, 4000)
@@ -676,7 +737,7 @@ App · SVELTE
     <div id="bottom-bar" class="ui">
         <div id="bottom-bar-left">
             {#if activePanel === "ships"}
-                <h3 id="bottom-bar-title-bar">Ship Picker</h3>
+                <h3 id="bottom-bar-title-bar">Fleet</h3>
                 <div id="bottom-bar-options">
                     {#each ships as ship, index}
                         <!-- svelte-ignore a11y_consider_explicit_label -->
@@ -693,34 +754,51 @@ App · SVELTE
                     {/each}
                 </div>
             {:else if activePanel === "blocks"}
-                <h3 id="bottom-bar-title-bar">
-                    Block Picker
-                    <input
-                        type="color"
-                        class="color-picker"
-                        bind:value={selectedColor}
-                        oninput={handleColorInput}
-                    />
-                </h3>
+                <h3 id="bottom-bar-title-bar">Hull Editor</h3>
                 <div id="bottom-bar-options">
-                    {#each BLOCK_MENU as option}
+                    <div class="hsl-picker">
+                        <label>H <input type="range" min="0" max="360" bind:value={hslH} oninput={syncEditorColor} /><span>{hslH}</span></label>
+                        <label>S <input type="range" min="0" max="100" bind:value={hslS} oninput={syncEditorColor} /><span>{hslS}%</span></label>
+                        <label>L <input type="range" min="0" max="100" bind:value={hslL} oninput={syncEditorColor} /><span>{hslL}%</span></label>
+                        <div class="hsl-swatch" style="background: {hslColor()}"></div>
+                    </div>
+                    {#each [
+                        { base: "full", label: "Full", preview: "full" as BlockShape },
+                        { base: "wedge", label: "Wedge", preview: (gridEditor?.baseShape === "wedge" ? gridEditor.resolvedShape : "triNW") as BlockShape },
+                        { base: "arc", label: "Arc", preview: (gridEditor?.baseShape === "arc" ? gridEditor.resolvedShape : "arcNW") as BlockShape },
+                        { base: "empty", label: "Erase", preview: null }
+                    ] as option}
                         <button
-                            class={selectedBlockShape === option.shape ? "active" : ""}
-                            onclick={() => chooseShape(option.shape)}
+                            class={gridEditor?.baseShape === option.base ? "active" : ""}
+                            onclick={() => gridEditor?.selectBaseShape(option.base as "full" | "wedge" | "arc" | "empty")}
                         >
-                            <canvas
-                                width="24" height="24"
-                                class="block-preview"
-                                use:drawBlockPreview={option.shape}
-                            ></canvas>
+                            {#if option.preview}
+                                <canvas
+                                    width="24" height="24"
+                                    class="block-preview"
+                                    use:drawShapePreview={option.preview}
+                                ></canvas>
+                            {/if}
                             {option.label}
+                            {#if (option.base === "wedge" || option.base === "arc") && gridEditor?.baseShape === option.base}
+                                <span class="rotate-hint">[R]</span>
+                            {/if}
                         </button>
                     {/each}
+                </div>
+            {:else if activePanel === "placements"}
+                <h3 id="bottom-bar-title-bar">Modules</h3>
+                <div id="bottom-bar-options">
                     <button
-                        class={selectedBlockShape === null ? "active" : ""}
-                        onclick={() => chooseShape(null)}
+                        class={gridEditor?.selectedPlacementType === "turret" ? "active" : ""}
+                        onclick={() => { if (gridEditor) gridEditor.selectedPlacementType = gridEditor.selectedPlacementType === "turret" ? null : "turret" }}
                     >
-                        Erase
+                        <canvas
+                            width="32" height="32"
+                            class="block-preview"
+                            use:drawTurretPreview
+                        ></canvas>
+                        Turret
                     </button>
                 </div>
             {/if}
@@ -728,15 +806,21 @@ App · SVELTE
 
         <div id="bottom-bar-right">
             <div id="bottom-bar-selector">
-                <button
-                    class={activePanel === "blocks" ? "active" : ""}
-                    onclick={() => selectPanel("blocks")}
-                >Blocks</button>
-                <button
-                    class={activePanel === "ships" ? "active" : ""}
-                    onclick={() => selectPanel("ships")}
-                >Ships</button>
-                <button disabled>Other</button>
+                {#if mode === "building"}
+                    <button
+                        class={activePanel === "blocks" ? "active" : ""}
+                        onclick={() => selectPanel("blocks")}
+                    >Blocks</button>
+                    <button
+                        class={activePanel === "placements" ? "active" : ""}
+                        onclick={() => selectPanel("placements")}
+                    >Placements</button>
+                {:else}
+                    <button
+                        class={activePanel === "ships" ? "active" : ""}
+                        onclick={() => selectPanel("ships")}
+                    >Ships</button>
+                {/if}
             </div>
         </div>
     </div>
@@ -939,14 +1023,41 @@ App · SVELTE
         align-items: center;
         gap: .75rem;
     }
-    .color-picker {
-        width: 32px;
-        height: 24px;
-        padding: 0;
-        border: 2px solid var(--ui-background);
+    .hsl-picker {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 160px;
+        padding: 4px 0;
+    }
+    .hsl-picker label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        white-space: nowrap;
+    }
+    .hsl-picker input[type="range"] {
+        flex: 1;
+        accent-color: var(--text-color);
+        height: 4px;
+    }
+    .hsl-picker span {
+        min-width: 36px;
+        text-align: right;
+        font-size: 11px;
+        opacity: 0.7;
+    }
+    .hsl-swatch {
+        width: 100%;
+        height: 16px;
         border-radius: 4px;
-        background: none;
-        cursor: pointer;
+        border: 1px solid var(--ui-background);
+        margin-top: 2px;
+    }
+    .rotate-hint {
+        font-size: 10px;
+        opacity: 0.6;
     }
     .block-preview {
         display: block;
