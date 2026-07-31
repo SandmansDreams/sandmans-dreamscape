@@ -13,6 +13,16 @@ export interface Targetable {
 
 export type PlacementLevel = 1 | 2 | 3 | 4 | 5
 
+export type PlacementType = "turret" | "thruster" | "spike"
+
+/** Serialised form of a module, stored alongside the cell it sits on. */
+export interface PlacementData {
+    type: PlacementType
+    level: PlacementLevel
+    rotation: number
+    color: string
+}
+
 /**
  * Everything a module needs to know about its host ship this frame.
  *
@@ -39,9 +49,21 @@ export abstract class Placement {
     cell: Cell | null = null
     color: string = "#555"
 
+    /** Discriminator used to rebuild this module from a saved layout. */
+    abstract get type(): PlacementType
+
     abstract get displayName(): string
     abstract get description(): string
     abstract get weight(): number
+
+    serialize(): PlacementData {
+        return {
+            type: this.type,
+            level: this.level,
+            rotation: this.rotation,
+            color: this.color
+        }
+    }
 
     abstract update(delta: number, ctx: PlacementContext): Particle[]
 
@@ -61,6 +83,39 @@ export abstract class Placement {
     ): void
 }
 
+/**
+ * The one place that maps a module type to its class.
+ *
+ * Used both by the editor's palette and by layout loading, so a new module
+ * type only has to be registered here.
+ */
+export const PLACEMENT_FACTORIES: Record<PlacementType, () => Placement> = {
+    turret: () => new Turret(),
+    thruster: () => new Thruster(),
+    spike: () => new Spike()
+}
+
+/**
+ * Rebuilds a module from saved data, or null if the payload is unrecognised —
+ * an older or hand-edited file shouldn't take the whole layout down with it.
+ */
+export function createPlacement(data: PlacementData | null | undefined): Placement | null {
+    if (!data) return null
+
+    const factory = PLACEMENT_FACTORIES[data.type]
+    if (!factory) return null
+
+    const placement = factory()
+
+    const level = Math.round(data.level)
+    if (level >= 1 && level <= 5) placement.level = level as PlacementLevel
+
+    if (Number.isFinite(data.rotation)) placement.rotation = data.rotation
+    if (typeof data.color === "string") placement.color = data.color
+
+    return placement
+}
+
 const TURRET_LEVELS = [
     { barrels: 1, fireRate: 30, label: "Turret I" },
     { barrels: 2, fireRate: 30, label: "Turret II" },
@@ -70,6 +125,8 @@ const TURRET_LEVELS = [
 ]
 
 export class Turret extends Placement {
+    get type(): PlacementType { return "turret" }
+
     range: number = 400
     cooldown: number = 0
     targetAngle: number = 0
@@ -252,15 +309,38 @@ export class Turret extends Placement {
     }
 }
 
+/** Frames a spike must wait between hits, so a sustained scrape isn't a shred. */
+const SPIKE_COOLDOWN = 30
+
 export class Spike extends Placement {
+    get type(): PlacementType { return "spike" }
+
     contactDamage: number = 10
+
+    private cooldown = 0
 
     get displayName(): string { return `Spike ${["I", "II", "III", "IV", "V"][this.level - 1]}` }
     get description(): string { return `${this.contactDamage * this.level} contact damage` }
     get weight(): number { return 1 + this.level }
     get effectiveDamage(): number { return this.contactDamage * this.level }
 
-    update(_delta: number, _ctx: PlacementContext): Particle[] {
+    get isReady(): boolean { return this.cooldown <= 0 }
+
+    /**
+     * Consumes the spike's readiness and reports the damage dealt.
+     *
+     * Contacts persist for as long as two bodies overlap, which is many
+     * frames — without the cooldown a single collision would apply damage
+     * every frame it lasted.
+     */
+    strike(): number {
+        if (this.cooldown > 0) return 0
+        this.cooldown = SPIKE_COOLDOWN
+        return this.effectiveDamage
+    }
+
+    update(delta: number, _ctx: PlacementContext): Particle[] {
+        if (this.cooldown > 0) this.cooldown = Math.max(0, this.cooldown - delta)
         return NO_PARTICLES
     }
 
@@ -270,27 +350,31 @@ export class Spike extends Placement {
         y: number,
         size: number
     ) {
-        const cx = x + size / 2
-        const cy = y + size / 2
-        const r = size * 0.4
+        const half = size / 2
+
+        // The base spans the full width of the block and sits flush on its
+        // trailing edge, so the spike reads as mounted rather than floating.
+        // The tip keeps its original overhang past the leading edge.
+        const tipY = -size * 0.52
 
         ctx.save()
-        ctx.translate(cx, cy)
+        ctx.translate(x + half, y + half)
         ctx.rotate(this.rotation)
 
         ctx.fillStyle = this.color
         ctx.beginPath()
-        ctx.moveTo(0, -r * 1.3)
-        ctx.lineTo(-r * 0.5, r * 0.4)
-        ctx.lineTo(r * 0.5, r * 0.4)
+        ctx.moveTo(0, tipY)
+        ctx.lineTo(-half, half)
+        ctx.lineTo(half, half)
         ctx.closePath()
         ctx.fill()
 
+        // Highlight down the leading edge, kept well inside the silhouette.
         ctx.fillStyle = "#ccc"
         ctx.beginPath()
-        ctx.moveTo(0, -r * 1.3)
-        ctx.lineTo(-r * 0.15, -r * 0.3)
-        ctx.lineTo(r * 0.15, -r * 0.3)
+        ctx.moveTo(0, tipY)
+        ctx.lineTo(-size * 0.075, 0)
+        ctx.lineTo(size * 0.075, 0)
         ctx.closePath()
         ctx.fill()
 
@@ -314,6 +398,8 @@ const EXHAUST_LIFETIME = 14      // frames
 const EXHAUST_COLORS = ["#ffcc00", "#ff9944", "#ff6600", "#ffe9a8"]
 
 export class Thruster extends Placement {
+    get type(): PlacementType { return "thruster" }
+
     thrustPower: number = 0.05
 
     /**

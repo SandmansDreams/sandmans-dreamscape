@@ -1,7 +1,7 @@
 import { Entity } from "./entity"
 import { PhysicsObject, Vector2 } from "../physics"
 import { Controller, FollowController } from "../controller"
-import { BoxCollider } from "../physics"
+import { BoxCollider, isDamageable } from "../physics"
 import { NEUTRAL_INPUT } from "../controller"
 import { Camera, NO_DEBUG, type DebugOptions } from "../types"
 import { Grid } from "../grid"
@@ -9,7 +9,13 @@ import { CELL_SIZE } from "../helpers"
 import { drawHealthBar } from "../hud"
 import type { SurfaceLight } from "../lighting"
 import { Particle } from "../particle"
-import { Thruster, type PlacementContext, type Targetable } from "../placements"
+import { Spike, Thruster, type PlacementContext, type Targetable } from "../placements"
+
+/**
+ * How closely a spike must face the contact direction to connect: cos(60deg),
+ * so roughly the third of the hull nearest the impact.
+ */
+const SPIKE_CONTACT_ALIGNMENT = 0.5
 
 /**
  * Ship grids are authored nose-up, but a rotation of 0 points along +X, so the
@@ -96,9 +102,11 @@ export class Ship extends Entity {
      * space colliding with things.
      */
     updateCollider() {
-        const { width, height } = this.grid.getFilledSize()
+        // Hull plus attachments: spikes stick out past the hull and have to be
+        // inside the hitbox to hit anything.
+        const { width, height, offsetX, offsetY } = this.grid.getOccupiedBox()
 
-        const collider = new BoxCollider(width, height, new Vector2(), this)
+        const collider = new BoxCollider(width, height, new Vector2(offsetX, offsetY), this)
         // The box is authored in grid space, which sits a quarter turn ahead
         // of the hull's heading.
         collider.angleOffset = GRID_ROTATION_OFFSET
@@ -252,8 +260,46 @@ export class Ship extends Entity {
         }
     }
 
-    onCollision(_other: PhysicsObject): void {
+    /**
+     * Applies contact damage from any spikes on the side that was hit.
+     *
+     * The collider is a single box, so there is no true contact point — the
+     * manifold normal is all we have. A spike counts as connecting when it
+     * sits on that side of the hull, which is a good enough approximation and
+     * means ramming with the spiked face is what does the damage.
+     */
+    onCollision(other: PhysicsObject, normalX: number, normalY: number): void {
+        if (!isDamageable(other)) return
 
+        const spikes = this.grid.placedCells
+        if (spikes.length === 0) return
+
+        const center = this.grid.getCenter()
+        const gridAngle = this.lightRotation
+        const cos = Math.cos(gridAngle)
+        const sin = Math.sin(gridAngle)
+
+        let damage = 0
+
+        for (const cell of spikes) {
+            const placement = cell.placement
+            if (!(placement instanceof Spike) || !placement.isReady) continue
+
+            const localX = cell.position.column * CELL_SIZE + CELL_SIZE / 2 - center.x
+            const localY = cell.position.row * CELL_SIZE + CELL_SIZE / 2 - center.y
+
+            // Which way this spike faces, in world space.
+            const worldX = localX * cos - localY * sin
+            const worldY = localX * sin + localY * cos
+
+            const length = Math.hypot(worldX, worldY)
+            if (length === 0) continue
+
+            const facing = (worldX * normalX + worldY * normalY) / length
+            if (facing >= SPIKE_CONTACT_ALIGNMENT) damage += placement.strike()
+        }
+
+        if (damage > 0) other.takeDamage(damage)
     }
 }
 

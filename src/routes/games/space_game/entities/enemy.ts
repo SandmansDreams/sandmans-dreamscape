@@ -36,13 +36,20 @@ export function spawnScouter(position: Vector2, target: Entity, flock: Flock<Shi
 }
 
 /**
- * Bolts a thruster onto the hull's rear-centre cell.
+ * Ensures the scouter has a thruster running at scouter power.
  *
- * Walks outward from the middle of the last row to find a filled cell:
- * `setCell` deletes any cell whose shape is "empty", so mounting onto a gap
- * would silently drop the thruster and leave the scouter with no thrust at all.
+ * Layouts can now ship their own modules, so if the model already carries
+ * thrusters we just tune them rather than bolting on a redundant one.
  */
 function mountRearThruster(grid: Grid) {
+    const existing = grid.placedCells.filter(cell => cell.placement instanceof Thruster)
+    if (existing.length > 0) {
+        for (const cell of existing) {
+            (cell.placement as Thruster).thrustPower = SCOUTER_THRUST
+        }
+        return
+    }
+
     const bounds = grid.getFilledBounds()
     if (!bounds) return
 

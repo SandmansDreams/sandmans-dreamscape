@@ -76,7 +76,14 @@ export abstract class PhysicsObject {
         debug?: DebugOptions
     ): void
 
-    abstract onCollision(other: PhysicsObject): void // If something should happen on collision aside from bouncing off
+    /**
+     * Called for both participants after a contact is resolved.
+     *
+     * @param normalX,normalY unit vector pointing from this object toward
+     *        `other`, i.e. the direction the contact came from. Spike damage
+     *        uses it to work out which spikes actually connected.
+     */
+    abstract onCollision(other: PhysicsObject, normalX: number, normalY: number): void
 
     drawStats(ctx: CanvasRenderingContext2D, screenX: number, screenY: number) {
         const speed = this.velocity.getSpeed()
@@ -248,17 +255,20 @@ export class CollisionManager {
         const manifold = computeManifold(a.collider!, b.collider!);
         if (!manifold) return;
 
+        // Read before resolving: the manifold is a shared scratch object and
+        // the callbacks below are free to run their own collision queries.
+        const nx = manifold.normal.x;
+        const ny = manifold.normal.y;
+
         // Triggers report the overlap (onCollision below) but don't
         // push entities apart or exchange momentum.
         if (!a.collider!.isTrigger && !b.collider!.isTrigger) {
-            const nx = manifold.normal.x;
-            const ny = manifold.normal.y;
             this.separate(a, b, nx, ny, manifold.penetration);
             this.applyImpulse(a, b, nx, ny);
         }
 
-        a.onCollision(b);
-        b.onCollision(a);
+        a.onCollision(b, nx, ny);
+        b.onCollision(a, -nx, -ny);
     };
 
     private separate(
@@ -380,6 +390,15 @@ export abstract class Collider { // For collision with other entities
 export type Manifold = {
     normal: Vector2
     penetration: number
+}
+
+/** Anything that can be hurt by projectiles or contact damage. */
+export interface Damageable {
+    takeDamage(amount: number): void
+}
+
+export function isDamageable(value: unknown): value is Damageable {
+    return typeof (value as Damageable | null)?.takeDamage === "function"
 }
 
 /**

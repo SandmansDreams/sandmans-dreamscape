@@ -41,10 +41,18 @@
 
     let activePanel = $state<"blocks" | "ships" | "placements">("ships")
 
-    // gridEditor must be reactive: the template reads baseShape / resolvedShape
-    // to highlight the active tool, and the instance is replaced on every
-    // switch into build mode.
-    let gridEditor = $state<GridEditor | null>(null)
+    let gridEditor: GridEditor | null = null
+
+    /**
+     * Editor state mirrored into the component.
+     *
+     * $state does not deep-proxy class instances, so mutating a field on
+     * GridEditor never re-renders — only reassigning the variable would. The
+     * template reads these copies instead, and every path that touches the
+     * editor calls syncFromEditor().
+     */
+    let activeBaseShape = $state<BaseShape>("full")
+    let activeShape = $state<BlockShape | null>("full")
 
     function selectPanel(panel: typeof activePanel) {
         activePanel = panel
@@ -53,9 +61,8 @@
         }
     }
 
-    let hslH = $state(0)
-    let hslS = $state(0)
-    let hslL = $state(50)
+    /** Colour applied to new hull cells and new modules. */
+    let buildColor = $state("#808080")
     let buildZoom = $state(6)
 
     let fleet = $state<Ship[]>([])
@@ -83,23 +90,27 @@
 
     let savedCameraState: { position: { x: number, y: number }, zoom: number } | null = null
 
+    type CameraTarget = { x: number, y: number, rotation: number }
+
     type CameraTransition = {
         fromX: number, fromY: number
         toX: number, toY: number
         fromZoom: number, toZoom: number
         fromRotation: number, toRotation: number
         progress: number
+        /**
+         * Re-read every frame to chase a moving destination. The ship keeps
+         * flying and turning while the camera closes on it, so a destination
+         * snapshotted at click time would land where the ship used to be.
+         */
+        track: (() => CameraTarget) | null
         onComplete: () => void
     }
     let cameraTransition: CameraTransition | null = null
     const transitionSpeed = 0.04
 
-    function hslColor(): string {
-        return `hsl(${hslH}, ${hslS}%, ${hslL}%)`
-    }
-
     function syncEditorColor() {
-        gridEditor?.selectColor(hslColor())
+        gridEditor?.selectColor(buildColor)
     }
 
     // --- Layout save / load -------------------------------------------------
@@ -147,28 +158,48 @@
 
     // --- Canvas previews ----------------------------------------------------
 
+    // Both previews return an update handler: without one the canvas is painted
+    // once at mount and never again, so rotating a wedge or picking a new
+    // colour left the button showing a stale image.
+
     function drawShapePreview(canvas: HTMLCanvasElement, shape: BlockShape) {
-        const ctx = canvas.getContext("2d")
-        if (!ctx) return
+        const paint = (current: BlockShape) => {
+            const ctx = canvas.getContext("2d")
+            if (!ctx) return
 
-        const size = canvas.width
-        const margin = 2
-        const inner = size - margin * 2
+            const size = canvas.width
+            const margin = 2
+            const inner = size - margin * 2
 
-        ctx.clearRect(0, 0, size, size)
-        ctx.fillStyle = "rgba(105, 208, 255, 0.6)"
-        fillBlockShape(ctx, shape, margin, margin, inner)
+            ctx.clearRect(0, 0, size, size)
+            ctx.fillStyle = "rgba(105, 208, 255, 0.6)"
+            fillBlockShape(ctx, current, margin, margin, inner)
 
-        ctx.strokeStyle = "rgba(105, 208, 255, 0.3)"
-        ctx.strokeRect(margin, margin, inner, inner)
+            ctx.strokeStyle = "rgba(105, 208, 255, 0.3)"
+            ctx.strokeRect(margin, margin, inner, inner)
+        }
+
+        paint(shape)
+        return { update: paint }
     }
 
-    function drawPlacementPreview(canvas: HTMLCanvasElement, placement: Placement) {
-        const ctx = canvas.getContext("2d")
-        if (!ctx) return
+    type PlacementPreview = { placement: Placement, color?: string }
 
-        ctx.clearRect(0, 0, canvas.width, canvas.height)
-        placement.draw(ctx, 0, 0, canvas.width)
+    function drawPlacementPreview(canvas: HTMLCanvasElement, preview: PlacementPreview) {
+        const paint = (current: PlacementPreview) => {
+            const ctx = canvas.getContext("2d")
+            if (!ctx) return
+
+            // The module palette previews the colour you're about to build with;
+            // the details panel shows the module's own colour instead.
+            if (current.color) current.placement.color = current.color
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height)
+            current.placement.draw(ctx, 0, 0, canvas.width)
+        }
+
+        paint(preview)
+        return { update: paint }
     }
 
     // --- Input --------------------------------------------------------------
@@ -191,7 +222,7 @@
         }
 
         if (key === "r" && mode === "building" && gridEditor?.canRotate) {
-            gridEditor.rotate()
+            rotateTool()
         }
     }
 
@@ -289,14 +320,22 @@
             return
         }
 
-        // Modules can only sit on hull.
-        if (hovered.shape === "empty") return
+        // Spikes mount into empty cells beside the hull; everything else needs
+        // hull under it.
+        if (!editor.canApplyToolAt(hovered)) return
 
         ctx.save()
 
         const ghost = editor.ghostPlacement
         if (ghost) {
             ctx.globalAlpha = 0.35
+            // Outline the cell for a free-standing mount, so it reads as
+            // occupying that square rather than floating.
+            if (hovered.shape === "empty") {
+                ctx.strokeStyle = editor.selectedColor
+                ctx.lineWidth = 0.3
+                ctx.strokeRect(x + 0.15, y + 0.15, CELL_SIZE - 0.3, CELL_SIZE - 0.3)
+            }
             ghost.draw(ctx, x, y, CELL_SIZE)
         } else if (editor.selectedPlacementType === "erase") {
             if (hovered.placement) {
@@ -397,12 +436,19 @@
                 fromZoom: camera.zoom, toZoom: buildZoom,
                 fromRotation: 0, toRotation: shipRotation,
                 progress: 0,
+                // The ship is still under way, so follow it in.
+                track: () => ({
+                    x: ship.position.x,
+                    y: ship.position.y,
+                    rotation: ship.rotation + Math.PI / 2
+                }),
                 onComplete: () => {
                     camera.rotation = 0
                     mode = "building"
                     activePanel = "blocks"
                     gridEditor = new GridEditor(ship.grid)
-                    gridEditor.selectColor(hslColor())
+                    gridEditor.selectColor(buildColor)
+                    syncFromEditor()
                 }
             }
             return
@@ -412,6 +458,7 @@
         mode = "flying"
         activePanel = "ships"
         gridEditor = null
+        syncFromEditor()
 
         cameraTransition = {
             fromX: ship.position.x, fromY: ship.position.y,
@@ -420,6 +467,9 @@
             fromZoom: buildZoom, toZoom: savedCameraState?.zoom ?? camera.zoom,
             fromRotation: shipRotation, toRotation: 0,
             progress: 0,
+            // On the way out the destination is a fixed viewpoint, and
+            // camera.follow takes over the moment the transition ends.
+            track: null,
             onComplete: () => {
                 camera.rotation = 0
                 savedCameraState = null
@@ -432,6 +482,15 @@
 
         const camera = world.camera
         const transition = cameraTransition
+
+        // Refresh the destination before easing toward it, so the last frame
+        // lands exactly on wherever the ship has ended up.
+        if (transition.track) {
+            const target = transition.track()
+            transition.toX = target.x
+            transition.toY = target.y
+            transition.toRotation = target.rotation
+        }
 
         transition.progress = Math.min(transition.progress + transitionSpeed * delta, 1)
         const t = easeInOut(transition.progress)
@@ -467,10 +526,24 @@
         ]
     }
 
+    /** Pulls every piece of editor state the template renders. */
     function syncFromEditor() {
         if (!gridEditor) return
+
         selectedPlacement = gridEditor.selectedPlacement
         selectedPlacementType = gridEditor.selectedPlacementType
+        activeBaseShape = gridEditor.baseShape
+        activeShape = gridEditor.resolvedShape
+    }
+
+    function selectBlockShape(base: BaseShape) {
+        gridEditor?.selectBaseShape(base)
+        syncFromEditor()
+    }
+
+    function rotateTool() {
+        gridEditor?.rotate()
+        syncFromEditor()
     }
 
     function setPlacementType(type: PlacementTool | null) {
@@ -574,19 +647,39 @@
     const BLOCK_TOOLS: { base: BaseShape, label: string, fallback: BlockShape | null }[] = [
         { base: "full", label: "Full", fallback: "full" },
         { base: "half", label: "Half", fallback: "halfN" },
+        { base: "quarter", label: "Quarter", fallback: "quarterNW" },
         { base: "wedge", label: "Wedge", fallback: "triNW" },
+        { base: "ramp", label: "Ramp", fallback: "rampSE" },
         { base: "arc", label: "Arc", fallback: "arcNW" },
         { base: "empty", label: "Erase", fallback: null }
     ]
 
     /** Preview shape for a block button: its live rotation when selected. */
     function previewShape(tool: typeof BLOCK_TOOLS[number]): BlockShape | null {
-        if (gridEditor?.baseShape === tool.base) return gridEditor.resolvedShape
-        return tool.fallback
+        return activeBaseShape === tool.base ? activeShape : tool.fallback
+    }
+
+    /** Whether a block tool has variants to cycle with [R]. */
+    function isRotatable(tool: typeof BLOCK_TOOLS[number]): boolean {
+        return tool.base !== "full" && tool.base !== "empty"
     }
 </script>
 
 <svelte:window onkeydown={handleKeyDown} onkeyup={handleKeyUp} onresize={handleResize}></svelte:window>
+
+<!-- Shared by the hull and module panels: both paint with the same colour. -->
+{#snippet colorPicker()}
+    <div class="color-picker">
+        <label for="build-color">Colour</label>
+        <input
+            id="build-color"
+            type="color"
+            bind:value={buildColor}
+            oninput={syncEditorColor}
+        />
+        <span class="color-value">{buildColor}</span>
+    </div>
+{/snippet}
 
 <div id="overlay" class="crt"></div>
 
@@ -632,7 +725,7 @@
                     <canvas
                         width="64" height="64"
                         class="detail-preview"
-                        use:drawPlacementPreview={selectedPlacement}
+                        use:drawPlacementPreview={{ placement: selectedPlacement }}
                     ></canvas>
                     {#if selectedPlacement.level < 5}
                         <button onclick={() => { gridEditor?.upgradeSelectedPlacement(); syncFromEditor() }}>Upgrade</button>
@@ -690,17 +783,12 @@
             {:else if activePanel === "blocks"}
                 <h3 id="bottom-bar-title-bar">Hull Editor</h3>
                 <div id="bottom-bar-options">
-                    <div class="hsl-picker">
-                        <label>H <input type="range" min="0" max="360" bind:value={hslH} oninput={syncEditorColor} /><span>{hslH}</span></label>
-                        <label>S <input type="range" min="0" max="100" bind:value={hslS} oninput={syncEditorColor} /><span>{hslS}%</span></label>
-                        <label>L <input type="range" min="0" max="100" bind:value={hslL} oninput={syncEditorColor} /><span>{hslL}%</span></label>
-                        <div class="hsl-swatch" style="background: {hslColor()}"></div>
-                    </div>
+                    {@render colorPicker()}
                     {#each BLOCK_TOOLS as tool}
                         {@const preview = previewShape(tool)}
                         <button
-                            class={gridEditor?.baseShape === tool.base ? "active" : ""}
-                            onclick={() => gridEditor?.selectBaseShape(tool.base)}
+                            class={activeBaseShape === tool.base ? "active" : ""}
+                            onclick={() => selectBlockShape(tool.base)}
                         >
                             {#if preview}
                                 <canvas
@@ -710,7 +798,7 @@
                                 ></canvas>
                             {/if}
                             {tool.label}
-                            {#if tool.fallback && tool.base !== "full" && gridEditor?.baseShape === tool.base}
+                            {#if isRotatable(tool) && activeBaseShape === tool.base}
                                 <span class="rotate-hint">[R]</span>
                             {/if}
                         </button>
@@ -719,6 +807,7 @@
             {:else if activePanel === "placements"}
                 <h3 id="bottom-bar-title-bar">Modules</h3>
                 <div id="bottom-bar-options">
+                    {@render colorPicker()}
                     <button
                         class={selectedPlacementType === "turret" ? "active" : ""}
                         onclick={() => setPlacementType(selectedPlacementType === "turret" ? null : "turret")}
@@ -726,7 +815,7 @@
                         <canvas
                             width="32" height="32"
                             class="block-preview"
-                            use:drawPlacementPreview={PREVIEW_MODULES.turret}
+                            use:drawPlacementPreview={{ placement: PREVIEW_MODULES.turret, color: buildColor }}
                         ></canvas>
                         Turret
                     </button>
@@ -737,7 +826,7 @@
                         <canvas
                             width="32" height="32"
                             class="block-preview"
-                            use:drawPlacementPreview={PREVIEW_MODULES.thruster}
+                            use:drawPlacementPreview={{ placement: PREVIEW_MODULES.thruster, color: buildColor }}
                         ></canvas>
                         Thruster
                     </button>
@@ -748,7 +837,7 @@
                         <canvas
                             width="32" height="32"
                             class="block-preview"
-                            use:drawPlacementPreview={PREVIEW_MODULES.spike}
+                            use:drawPlacementPreview={{ placement: PREVIEW_MODULES.spike, color: buildColor }}
                         ></canvas>
                         Spike
                         {#if selectedPlacementType === "spike"}
@@ -1030,37 +1119,44 @@
         align-items: center;
         gap: .75rem;
     }
-    .hsl-picker {
+    .color-picker {
         display: flex;
         flex-direction: column;
-        gap: 4px;
-        min-width: 160px;
-        padding: 4px 0;
-    }
-    .hsl-picker label {
-        display: flex;
         align-items: center;
+        justify-content: center;
         gap: 6px;
+        min-width: 90px;
+        flex-shrink: 0;
+        padding: 4px 8px;
+        border-right: 1px solid var(--ui-background);
+        margin-right: .25rem;
+    }
+    .color-picker label {
         font-size: 12px;
+        opacity: 0.8;
         white-space: nowrap;
     }
-    .hsl-picker input[type="range"] {
-        flex: 1;
-        accent-color: var(--text-color);
-        height: 4px;
+    .color-picker input[type="color"] {
+        width: 56px;
+        height: 32px;
+        padding: 0;
+        border: 2px solid var(--ui-background);
+        border-radius: 6px;
+        background: none;
+        cursor: pointer;
     }
-    .hsl-picker span {
-        min-width: 36px;
-        text-align: right;
-        font-size: 11px;
-        opacity: 0.7;
+    /* Strip the native chrome so the swatch fills the control. */
+    .color-picker input[type="color"]::-webkit-color-swatch-wrapper {
+        padding: 2px;
     }
-    .hsl-swatch {
-        width: 100%;
-        height: 16px;
-        border-radius: 4px;
-        border: 1px solid var(--ui-background);
-        margin-top: 2px;
+    .color-picker input[type="color"]::-webkit-color-swatch {
+        border: none;
+        border-radius: 3px;
+    }
+    .color-value {
+        font-size: 10px;
+        opacity: 0.6;
+        text-transform: uppercase;
     }
     .rotate-hint {
         font-size: 10px;

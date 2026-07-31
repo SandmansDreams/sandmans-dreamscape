@@ -1,30 +1,40 @@
 import { type Cell, type Grid } from "./grid"
 import type { BlockShape } from "./shapes"
-import { Placement, Spike, Thruster, Turret, type PlacementLevel } from "./placements"
+import { PLACEMENT_FACTORIES, Placement, Spike, type PlacementLevel } from "./placements"
 
 export type EditorMode = "blocks" | "placements"
 
-export type BaseShape = "full" | "half" | "wedge" | "arc" | "empty"
+export type BaseShape = "full" | "half" | "quarter" | "wedge" | "ramp" | "arc" | "empty"
 
 export type PlacementTool = "turret" | "thruster" | "spike" | "erase"
 
 const WEDGE_ROTATIONS: BlockShape[] = ["triNW", "triNE", "triSE", "triSW"]
 const ARC_ROTATIONS: BlockShape[] = ["arcNW", "arcNE", "arcSE", "arcSW"]
 const HALF_ROTATIONS: BlockShape[] = ["halfN", "halfE", "halfS", "halfW"]
+const QUARTER_ROTATIONS: BlockShape[] = ["quarterNW", "quarterNE", "quarterSE", "quarterSW"]
 
-/** Shapes that have four rotational variants, and the variants themselves. */
+/**
+ * Ramps cycle through a full turn and then the mirrored hand of the same
+ * slope, because rotation alone can never produce a mirror image and a
+ * symmetric hull needs both.
+ */
+const RAMP_ROTATIONS: BlockShape[] = [
+    "rampSE", "rampWS", "rampNW", "rampEN",
+    "rampSW", "rampWN", "rampNE", "rampES"
+]
+
+/** Shapes with rotational variants. The list length sets the [R] cycle. */
 const ROTATABLE: Partial<Record<BaseShape, BlockShape[]>> = {
+    half: HALF_ROTATIONS,
+    quarter: QUARTER_ROTATIONS,
     wedge: WEDGE_ROTATIONS,
-    arc: ARC_ROTATIONS,
-    half: HALF_ROTATIONS
+    ramp: RAMP_ROTATIONS,
+    arc: ARC_ROTATIONS
 }
 
-/** Placement tools that construct something, keyed by tool name. */
-const PLACEMENT_FACTORIES: Record<Exclude<PlacementTool, "erase">, () => Placement> = {
-    turret: () => new Turret(),
-    thruster: () => new Thruster(),
-    spike: () => new Spike()
-}
+/** Spikes are free to point at any of eight headings, not just the axes. */
+const SPIKE_ROTATION_STEPS = 8
+
 
 export class GridEditor {
     grid: Grid
@@ -33,7 +43,8 @@ export class GridEditor {
     editorMode: EditorMode = "blocks"
     baseShape: BaseShape = "full"
     rotationIndex: number = 0
-    selectedColor: string = "hsl(0, 0%, 50%)"
+    /** Applied to newly painted hull cells and newly placed modules alike. */
+    selectedColor: string = "#808080"
 
     selectedPlacementType: PlacementTool | null = null
     selectedPlacement: Placement | null = null
@@ -63,16 +74,19 @@ export class GridEditor {
 
     rotate() {
         if (this.rotatingPlacement) {
-            this.placementRotationIndex = (this.placementRotationIndex + 1) % 4
+            this.placementRotationIndex = (this.placementRotationIndex + 1) % SPIKE_ROTATION_STEPS
             return
         }
-        if (this.canRotate) {
-            this.rotationIndex = (this.rotationIndex + 1) % 4
+
+        const variants = ROTATABLE[this.baseShape]
+        if (variants) {
+            this.rotationIndex = (this.rotationIndex + 1) % variants.length
         }
     }
 
+    /** Spike heading, in 45-degree increments. */
     get spikeRotation(): number {
-        return this.placementRotationIndex * (Math.PI / 2)
+        return this.placementRotationIndex * ((Math.PI * 2) / SPIKE_ROTATION_STEPS)
     }
 
     /**
@@ -91,6 +105,7 @@ export class GridEditor {
         }
 
         this.ghost.rotation = this.ghost instanceof Spike ? this.spikeRotation : 0
+        this.ghost.color = this.selectedColor
         return this.ghost
     }
 
@@ -129,12 +144,30 @@ export class GridEditor {
     }
 
     /**
-     * Applies the active module tool to a cell. Modules can only sit on hull,
-     * so empty cells are ignored; with no tool selected a click just selects
-     * whatever is already there.
+     * Whether the active tool can be applied at a cell.
+     *
+     * Spikes are the exception to "modules sit on hull": they mount like
+     * blocks into empty cells touching the hull, which is what makes a spiked
+     * ram possible. They still don't extend where hull can be built.
+     */
+    canApplyToolAt(cell: Cell): boolean {
+        const { column, row } = cell.position
+
+        if (this.selectedPlacementType === "spike") {
+            return this.grid.canMountAt(column, row)
+        }
+
+        // Everything else needs hull, or an attachment already there to select
+        // or erase.
+        return cell.shape !== "empty" || this.grid.isAttachment(column, row)
+    }
+
+    /**
+     * Applies the active module tool to a cell. With no tool selected a click
+     * just selects whatever module is already there.
      */
     private applyPlacementTool(cell: Cell) {
-        if (cell.shape === "empty") return
+        if (!this.canApplyToolAt(cell)) return
 
         const tool = this.selectedPlacementType
 
@@ -144,17 +177,18 @@ export class GridEditor {
         }
 
         if (tool === "erase") {
-            if (cell.placement) this.grid.setCell(cell, cell.shape, cell.color, null)
+            if (cell.placement) this.grid.setAttachment(cell, null)
             this.selectedPlacement = null
             return
         }
 
         const placement = PLACEMENT_FACTORIES[tool]()
         placement.cell = cell
-        placement.color = cell.color
+        placement.color = this.selectedColor
         if (placement instanceof Spike) placement.rotation = this.spikeRotation
 
-        this.grid.setCell(cell, cell.shape, cell.color, placement)
+        // setAttachment routes to hull-backed placement when there is hull here.
+        this.grid.setAttachment(cell, placement)
         this.selectedPlacement = placement
     }
 
@@ -166,8 +200,8 @@ export class GridEditor {
 
     removeSelectedPlacement() {
         if (!this.selectedPlacement?.cell) return
-        const cell = this.selectedPlacement.cell
-        this.grid.setCell(cell, cell.shape, cell.color, null)
+        // setAttachment handles both hull-mounted modules and free-standing ones.
+        this.grid.setAttachment(this.selectedPlacement.cell, null)
         this.selectedPlacement = null
     }
 }
