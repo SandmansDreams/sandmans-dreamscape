@@ -3,20 +3,27 @@
 
     let canvas = $state<HTMLCanvasElement | null>(null)
     let gl2 = $state<WebGL2RenderingContext | null>(null)
-    let buffer = $state<WebGLBuffer | null>(null)
 
-    let vertexData = [
-        0, 1, 0,
-        1, -1, 0,
-        -1, -1, 0
+    const vertexData = [
+        0, 1, 0,   // V1.position
+        1, -1, 0,  // V2.position
+        -1, -1, 0  // V3.position
     ]
 
-    function createWebGL2Buffer() { // Create an array buffer to hold array information
+    const colorData = [
+        1, 0, 0,   // V1.color (red)
+        0, 1, 0,   // V2.position (green)
+        0, 0, 1,   // V3.position (blue)
+    ]
+
+    function createWebGL2Buffer(data: number[]) { // Create an array buffer to hold array information
         if (!gl2) throw new Error('gl2 not defined at initializeWebGL2Buffer()')
 
-        buffer = gl2.createBuffer()
+        const buffer = gl2.createBuffer()
         gl2.bindBuffer(gl2.ARRAY_BUFFER, buffer)
-        gl2.bufferData(gl2.ARRAY_BUFFER, new Float32Array(vertexData), gl2.DYNAMIC_DRAW)
+        gl2.bufferData(gl2.ARRAY_BUFFER, new Float32Array(data), gl2.DYNAMIC_DRAW)
+
+        return buffer
     }
 
     function createVertexShader() { // Create a basic vertex shader
@@ -25,8 +32,14 @@
         const vertexShader = gl2.createShader(gl2.VERTEX_SHADER)
         if (!vertexShader) throw new Error('vertexShader not defined at createVertexShader()')
         gl2.shaderSource(vertexShader, `
+            precision mediump float;
+
             attribute vec3 position;
+            attribute vec3 color;
+            varying vec3 vColor;
+
             void main() {
+                vColor = color;
                 gl_Position = vec4(position, 1);
             }
         `)
@@ -41,8 +54,12 @@
         const fragmentShader = gl2.createShader(gl2.FRAGMENT_SHADER)
         if (!fragmentShader) throw new Error('fragmentShader not defined at createFragmentShader()')
         gl2.shaderSource(fragmentShader, `
+            precision mediump float;
+
+            varying vec3 vColor;
+
             void main() {
-                gl_FragColor = vec4(1, 0, 0, 1);
+                gl_FragColor = vec4(vColor, 1);
             }
         `)
         gl2.compileShader(fragmentShader)
@@ -61,12 +78,21 @@
         return program
     }
 
-    function drawWebGL2(program: WebGLProgram) {
+    function createWebGL2Pointer(program: WebGLProgram, name: string, buffer: WebGLBuffer) { // Create a pointer to the array buffer data on the GPU?
+        if (!gl2) throw new Error('gl2 not defined at createWebGL2Pointer()')
+
+        const location = gl2.getAttribLocation(program, name)
+        gl2.enableVertexAttribArray(location)
+        gl2.bindBuffer(gl2.ARRAY_BUFFER, buffer)
+        gl2.vertexAttribPointer(location, 3, gl2.FLOAT, true, 0, 0)
+    }
+
+    function drawWebGL2(program: WebGLProgram, positionBuffer: WebGLBuffer, colorBuffer: WebGLBuffer) {
         if (!gl2) throw new Error('gl2 not defined at drawWebGL2()')
 
-        const positionLocation = gl2.getAttribLocation(program, `position`)
-        gl2.enableVertexAttribArray(positionLocation)
-        gl2.vertexAttribPointer(positionLocation, 3, gl2.FLOAT, true, 0, 0)
+        // Create pointers to the vertex position data
+        const positionLocation = createWebGL2Pointer(program, 'position', positionBuffer)
+        const colorLocation = createWebGL2Pointer(program, 'color', colorBuffer)
 
         gl2.useProgram(program)
         gl2.drawArrays(gl2.TRIANGLES, 0, 3)
@@ -80,7 +106,9 @@
             throw new Error('WebGL2 not supported')
         }
 
-        createWebGL2Buffer()
+        const positionBuffer = createWebGL2Buffer(vertexData)
+        const colorBuffer = createWebGL2Buffer(colorData)
+        
         const vertexShader = createVertexShader()
         const fragmentShader = createFragmentShader()
         
@@ -88,7 +116,7 @@
         
         const program = createWebGL2Program(vertexShader, fragmentShader)
 
-        drawWebGL2(program)
+        drawWebGL2(program, positionBuffer, colorBuffer)
     })
 </script>
 
