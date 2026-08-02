@@ -21,7 +21,7 @@ export interface WorldOptions {
 }
 
 const DEFAULTS: Required<WorldOptions> = {
-    shipCount: 1,
+    shipCount: 2,
     scouterCount: 10,
     asteroidCount: 200,
     fieldSize: 4000
