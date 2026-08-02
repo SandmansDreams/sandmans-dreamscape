@@ -79,7 +79,8 @@ export class World {
             radius: 120,
             // Comfortably larger than the playfield, so the sun reads as a
             // distant source: direction varies, brightness barely does.
-            range: 20000
+            range: 20000,
+            global: true
         }))
 
         this.ships = []
@@ -126,8 +127,34 @@ export class World {
         for (const asteroid of this.asteroids) this.bodies.push(asteroid)
         this.collisions.update(this.bodies)
 
+        // After movement, so mounted lights are registered where they ended up.
+        this.collectLights()
+
         if (followCamera) {
             this.camera.follow(this.player.currentShip)
+        }
+    }
+
+    /**
+     * Rebuilds the frame's entity-mounted lights.
+     *
+     * Modules position their own light and set its intensity during update;
+     * this only has to gather the ones actually emitting.
+     */
+    private collectLights() {
+        this.lighting.beginFrame()
+
+        for (const ship of this.ships) this.collectShipLights(ship)
+        for (const enemy of this.enemies.members) this.collectShipLights(enemy)
+
+        this.lighting.endFrame()
+    }
+
+    private collectShipLights(ship: Ship) {
+        for (const cell of ship.grid.placedCells) {
+            const light = cell.placement?.light
+            // The ship is passed as owner so it skips its own glow when shaded.
+            if (light && light.intensity > 0) this.lighting.addDynamic(light, ship)
         }
     }
 
@@ -228,7 +255,8 @@ export class World {
     }
 
     draw(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, debug: DebugOptions = NO_DEBUG) {
-        this.lighting.drawLights(ctx, this.camera)
+        // Suns sit behind the world, so anything in front of them occludes them.
+        this.lighting.drawGlobalLights(ctx, this.camera)
 
         for (const asteroid of this.asteroids) {
             if (!isVisible(asteroid.position.x, asteroid.position.y, asteroid.drawRadius, canvas, this.camera)) {
@@ -255,6 +283,9 @@ export class World {
         }
 
         drawParticles(ctx, this.camera, this.particles)
+
+        // Engine glows bloom over the hulls that carry them, so they go last.
+        this.lighting.drawLocalLights(ctx, this.camera)
     }
 
     private sampleFor(entity: Asteroid | Ship): SurfaceLight | undefined {
@@ -262,7 +293,8 @@ export class World {
             entity.position.x,
             entity.position.y,
             entity.lightRotation,
-            entity.grid.getBoundingRadius()
+            entity.grid.getBoundingRadius(),
+            entity
         )
     }
 }

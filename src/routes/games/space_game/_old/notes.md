@@ -1,0 +1,29 @@
+TO DO:
+- Rewrite in WebGL?
+- Make ship json more sucinct
+- Improve builder
+    - Implement more placements
+    - Improve placement models
+    - Better placement rendering
+    - Lighting on (toggleable)
+    - Color pallete selector
+    - Fix upgrade display
+    - Fix spikes placement
+    - Implement lights on ships
+    - Fix thrusters able to replace spikes placement (or just disable replacement alltogether, might be better)
+    - Implement an additional "visuals" layer with no cost and no adjustment to weight
+- Fix canvas display fleet buttons
+- Fix scroll on bottom bar buttons
+- Implement directional thrust and movement based on thrusters per direction
+- Implement light brightness (if not implemented) and increase effects
+- Improve enemy AI (and add more types)
+- Create more enemy (and friendly?) ships
+- Implement additional weapons
+- Increase spike damage by speed
+- Implement contact damage based on speed
+- Fix thruster particle offset based on speed
+- Fix fullscreen starfield (maybe just make them bigger)
+- Fix camera not following if ship too fast
+- Implement local save state for user stuff
+- Add more space assets (dust clouds, planets, suns, bases?)
+- Story?

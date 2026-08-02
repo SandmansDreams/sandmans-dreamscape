@@ -64,6 +64,11 @@ export class SpatialHash<T> {
         }
     }
 
+    /** Visits every inserted item exactly once, regardless of bucket spread. */
+    forEach(visit: (item: T) => void) {
+        for (let i = 0; i < this.items.length; i++) visit(this.items[i])
+    }
+
     /**
      * Collects every item whose bucket overlaps the given circle into `out`.
      *

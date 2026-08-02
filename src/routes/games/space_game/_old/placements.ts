@@ -1,5 +1,6 @@
 import type { Cell } from "./grid"
 import { angleDelta, CELL_SIZE } from "./helpers"
+import { LightSource } from "./lighting"
 import { Particle } from "./particle"
 import { Vector2 } from "./physics"
 import type { DebugOptions } from "./types"
@@ -48,6 +49,15 @@ export abstract class Placement {
     rotation: number = 0
     cell: Cell | null = null
     color: string = "#555"
+
+    /**
+     * Light this module emits, if any.
+     *
+     * The module keeps it positioned and sets its intensity during update; the
+     * world gathers non-zero ones into the lighting environment each frame. An
+     * intensity of 0 means "not emitting" and costs nothing.
+     */
+    readonly light: LightSource | null = null
 
     /** Discriminator used to rebuild this module from a saved layout. */
     abstract get type(): PlacementType
@@ -397,10 +407,24 @@ const EXHAUST_SPREAD = 0.35      // radians of cone half-angle
 const EXHAUST_LIFETIME = 14      // frames
 const EXHAUST_COLORS = ["#ffcc00", "#ff9944", "#ff6600", "#ffe9a8"]
 
+/** Engine glow tuning. */
+const GLOW_COLOR = "#ff8a2b"
+const GLOW_RADIUS = CELL_SIZE * 1.2   // sprite size
+const GLOW_RANGE = CELL_SIZE * 5      // illumination reach
+const GLOW_INTENSITY = 0.9            // at full throttle
+
 export class Thruster extends Placement {
     get type(): PlacementType { return "thruster" }
 
     thrustPower: number = 0.05
+
+    readonly light = new LightSource({
+        position: new Vector2(),
+        color: GLOW_COLOR,
+        intensity: 0,
+        radius: GLOW_RADIUS,
+        range: GLOW_RANGE
+    })
 
     /**
      * Fractional particles carried between frames, so the emission rate is
@@ -419,18 +443,26 @@ export class Thruster extends Placement {
         if (throttle === 0) {
             // Don't bank up a plume while coasting.
             this.emissionDebt = 0
+            this.light.intensity = 0
             return NO_PARTICLES
         }
 
         const power = Math.abs(throttle)
+
+        // Exhaust leaves opposite the thrust, so reversing flips the plume.
+        const exhaustAngle = ctx.shipRotation + (throttle > 0 ? Math.PI : 0)
+
+        // Glow sits just off the nozzle, in the plume rather than in the hull.
+        this.light.position.x = ctx.worldPos.x + Math.cos(exhaustAngle) * CELL_SIZE * 0.5
+        this.light.position.y = ctx.worldPos.y + Math.sin(exhaustAngle) * CELL_SIZE * 0.5
+        this.light.intensity = GLOW_INTENSITY * power
+
         this.emissionDebt += EXHAUST_RATE * power * delta
 
         const count = Math.floor(this.emissionDebt)
         if (count <= 0) return NO_PARTICLES
         this.emissionDebt -= count
 
-        // Exhaust leaves opposite the thrust, so reversing flips the plume.
-        const exhaustAngle = ctx.shipRotation + (throttle > 0 ? Math.PI : 0)
         const speed = EXHAUST_SPEED * (0.6 + 0.4 * power)
 
         const spawned: Particle[] = []
