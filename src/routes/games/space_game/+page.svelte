@@ -6,9 +6,18 @@
     import { Program } from "./engine/program";
     import { InstancedBatch, UNIT_QUAD } from "./engine/batch";
     import { buildShapeChart } from "./engine/shapeChart";
+    import { buildDemoShip } from "./engine/demoShip";
+    import { GridMeshCache } from "./engine/gridMesh";
 
-    /** "chart" proves the tessellator; "squares" is the instancing baseline. */
-    const MODE: "chart" | "squares" = "chart"
+    /**
+     * "ship" draws a real grid; "chart" proves the tessellator;
+     * "squares" is the instancing baseline.
+     */
+    const MODE: "ship" | "chart" | "squares" = "ship"
+
+    const SHIP_CELL = 24
+    const shipGrid = buildDemoShip()
+    const shipMesh = new GridMeshCache(shipGrid, SHIP_CELL)
 
     class FrameStats {
         fps = 0
@@ -114,16 +123,34 @@
         ) * 0.85
     }
 
+    /** Centres the camera on the origin at a fixed zoom, for the ship demo. */
+    function frameShip() {
+        if (!game) return
+
+        game.camera.x = 0
+        game.camera.y = 0
+        game.camera.zoom = 1
+    }
+
     function render(alpha: number) {
         if (!game || !program || !batch) return
 
         if (MODE === "chart") frameChart()
+        if (MODE === "ship") frameShip()
 
         game.update()   // resize, camera, clear
 
         batch.begin()
 
-        if (MODE === "chart") {
+        if (MODE === "ship") {
+            // Four copies, to show the mesh is instanced rather than baked at
+            // one position — and that rotation happens per instance.
+            const spin = performance.now() / 2000
+            batch.addTransform(-160, -110, 0, 1)
+            batch.addTransform(160, -110, spin, 1)
+            batch.addTransform(-160, 110, Math.PI, 1)
+            batch.addTransform(160, 110, -spin, 0.6)
+        } else if (MODE === "chart") {
             // A single instance at the origin; the mesh carries its own colours.
             batch.addTransform(0, 0, 0, 1)
         } else {
@@ -192,18 +219,21 @@
 
         game = new Game(canvas, 1)
 
-        if (MODE === "chart") {
+        if (MODE === "ship" || MODE === "chart") {
+            // Both draw a coloured mesh instanced by transform alone.
+            const vertices = MODE === "ship" ? shipMesh.vertices : chart.vertices
+
             program = new Program(game.gl2, MESH_VERTEX_SHADER, BASIC_FRAGMENT_SHADER)
 
             batch = new InstancedBatch(
                 game.gl2,
-                chart.vertices,
+                vertices,
                 [{ location: 0, size: 2 }, { location: 1, size: 3 }],  // per vertex: pos, colour
                 [{ location: 2, size: 4 }],                            // per instance: transform
-                1
+                4
             )
 
-            chartTriangles = chart.vertices.length / 5 / 3
+            chartTriangles = vertices.length / 5 / 3
         } else {
             program = new Program(game.gl2, BASIC_VERTEX_SHADER, BASIC_FRAGMENT_SHADER)
 
@@ -229,7 +259,10 @@
 
 <div id="container">
     <div id="stats">
-        {#if MODE === "chart"}
+        {#if MODE === "ship"}
+            {fps.toFixed(0)} fps · {workMs.toFixed(2)} ms · {chartTriangles} triangles · 1 draw call
+            <br />{shipGrid.count} cells · {shipGrid.extent.width}×{shipGrid.extent.height} · 4 instances
+        {:else if MODE === "chart"}
             {fps.toFixed(0)} fps · {workMs.toFixed(2)} ms · {chartTriangles} triangles · 1 draw call
             <br />rows: {chart.shapes.join(" / ")}
             <br />columns: 0° 90° 180° 270° &nbsp;|&nbsp; mirrored 0° 90° 180° 270°
