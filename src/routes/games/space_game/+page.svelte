@@ -1,6 +1,8 @@
 <script lang="ts">
     import { onMount } from "svelte";
     import { Mat4, mat4 } from "ts-gl-matrix";
+    
+    import { randomMatrixColor, resizeWebGL2Context, createWebGL2Buffer, createShader, createWebGL2Pointer, createWebGL2Program} from "./gl2"
 
     let canvas = $state<HTMLCanvasElement | null>(null)
     let gl2 = $state<WebGL2RenderingContext | null>(null)
@@ -59,94 +61,41 @@
 
     let colorData: number[] = []
 
-    function createWebGL2Buffer(data: number[]) { // Create an array buffer to hold array information
-        if (!gl2) throw new Error('gl2 not defined at initializeWebGL2Buffer()')
-
-        const buffer = gl2.createBuffer()
-        gl2.bindBuffer(gl2.ARRAY_BUFFER, buffer)
-        gl2.bufferData(gl2.ARRAY_BUFFER, new Float32Array(data), gl2.DYNAMIC_DRAW)
-
-        return buffer
-    }
-
-    function createShader(type: GLenum, GLSL: string) {
-        if (!gl2) throw new Error('gl2 not defined at createShader()')
-
-        const shader = gl2.createShader(type)
-        if (!shader) throw new Error('vertexShader not defined at createShader()')
-
-        gl2.shaderSource(shader, GLSL)
-        gl2.compileShader(shader)
-
-        if (!gl2.getShaderParameter(shader, gl2.COMPILE_STATUS))
-            throw new Error(gl2.getShaderInfoLog(shader) ?? 'shader compile failed')
-
-        return shader
-    }
-
-    function createWebGL2Program(vertexShader: WebGLShader, fragmentShader: WebGLShader) { // Creates a program to run on the GPU
-        if (!gl2) throw new Error('gl2 not defined at createWebGL2Program()')
-
-        const program = gl2.createProgram()
-        gl2.attachShader(program, vertexShader)
-        gl2.attachShader(program, fragmentShader)
-        gl2.linkProgram(program)
-
-        return program
-    }
-
-    function createWebGL2Pointer(program: WebGLProgram, name: string, buffer: WebGLBuffer) { // Create a pointer to the array buffer data on the GPU?
-        if (!gl2) throw new Error('gl2 not defined at createWebGL2Pointer()')
-
-        const location = gl2.getAttribLocation(program, name)
-        gl2.enableVertexAttribArray(location)
-        gl2.bindBuffer(gl2.ARRAY_BUFFER, buffer)
-        gl2.vertexAttribPointer(location, 3, gl2.FLOAT, false, 0, 0)
-    }
-
     function assignWebGL2Pointers(program: WebGLProgram, positionBuffer: WebGLBuffer, colorBuffer: WebGLBuffer) {
         if (!gl2) throw new Error('gl2 not defined at drawWebGL2()')
 
         // Create pointers to the vertex position data
-        createWebGL2Pointer(program, 'position', positionBuffer)
-        createWebGL2Pointer(program, 'color', colorBuffer)
+        createWebGL2Pointer(gl2, program, 'position', positionBuffer)
+        createWebGL2Pointer(gl2, program, 'color', colorBuffer)
     }
 
-    function resizeWebGL2Context(renderScale = 1): Boolean {
-        if (!canvas || !gl2) throw new Error('canvas or gl2 not defined at resizeCanvas()')
+    function renderFrame(program: WebGLProgram, modelMatrix: Mat4, viewMatrix: Mat4) {
+        if (!gl2 || !canvas) throw new Error('gl2 or canvas not defined at renderFrame()')
 
-        const rect = canvas.getBoundingClientRect()
-        const dpr = window.devicePixelRatio || 1
-
-        const width = Math.max(1, Math.round(rect.width * dpr * renderScale))
-        const height = Math.max(1, Math.round(rect.height * dpr * renderScale))
-
-        // Don't change unless different
-        if (canvas.width === width && canvas.height === height) return false
-
-        canvas.width = width
-        canvas.height = height
-        gl2.viewport(0, 0, width, height)
-        return true
-    }
-
-    function renderFrame(program: WebGLProgram, matrix: Mat4) {
-        if (!gl2) throw new Error('gl2 not defined at animate()')
-
+        const mvMatrix = mat4.create()
+        const projectionMatrix = mat4.create()
+        const mvpMatrix = mat4.create()
         const uniformLocations = {
             matrix: gl2.getUniformLocation(program, 'matrix')
         }
 
+        mat4.perspectiveNO(
+            projectionMatrix,
+            75 * Math.PI / 180, // Vertical field of view
+            canvas.width / canvas.height, // Aspect ration w/h
+            1e-4, // Near cull distance
+            1e4 // Far cull distance
+        )
+
         //mat4.rotate(matrix, matrix, Math.PI/2 / 70, [0, 0, 1])
-        mat4.rotateZ(matrix, matrix, Math.PI/2 / 70)
-        mat4.rotateX(matrix, matrix, Math.PI/2 / 70)
+        mat4.rotateZ(modelMatrix, modelMatrix, Math.PI/2 / 50)
+        //mat4.rotateX(matrix, matrix, Math.PI/2 / 50)
 
-        gl2.uniformMatrix4fv(uniformLocations.matrix, false, matrix)
+        mat4.multiply(mvMatrix, viewMatrix, modelMatrix)
+        mat4.multiply(mvpMatrix, projectionMatrix, mvMatrix)
+
+        gl2.uniformMatrix4fv(uniformLocations.matrix, false, mvpMatrix)
         gl2.drawArrays(gl2.TRIANGLES, 0, boxVertexData.length / 3)
-    }
-
-    function randomMatrixColor() {
-        return [Math.random(), Math.random(), Math.random()]
     }
 
     function randomCubeColor() {
@@ -166,13 +115,15 @@
             throw new Error('WebGL2 not supported')
         }
 
-        resizeWebGL2Context(.15)
+        resizeWebGL2Context(canvas, gl2, .15)
         randomCubeColor()
 
-        const positionBuffer = createWebGL2Buffer(boxVertexData)
-        const colorBuffer = createWebGL2Buffer(colorData)
+        const positionBuffer = createWebGL2Buffer(gl2, boxVertexData)
+        const colorBuffer = createWebGL2Buffer(gl2, colorData)
         
-        const vertexShader = createShader(gl2.VERTEX_SHADER, 
+        const vertexShader = createShader(
+            gl2, 
+            gl2.VERTEX_SHADER, 
             `precision mediump float;
 
             attribute vec3 position;
@@ -187,7 +138,9 @@
             }
         `)
         
-        const fragmentShader = createShader(gl2.FRAGMENT_SHADER, 
+        const fragmentShader = createShader(
+            gl2, 
+            gl2.FRAGMENT_SHADER, 
             `precision mediump float;
 
             varying vec3 vColor;
@@ -197,19 +150,26 @@
             }
         `)
         
-        const program = createWebGL2Program(vertexShader, fragmentShader)
+        const program = createWebGL2Program(gl2, vertexShader, fragmentShader)
 
         gl2.useProgram(program)
         gl2.enable(gl2.DEPTH_TEST)
 
         assignWebGL2Pointers(program, positionBuffer, colorBuffer)
 
-        const matrix = mat4.create()
-        mat4.translate(matrix, matrix, [.2, .5, 0])
-        mat4.scale(matrix, matrix, [0.25, 0.25, 0.25])
+        const modelMatrix = mat4.create()
+        const viewMatrix = mat4.create()
+
+        mat4.translate(modelMatrix, modelMatrix, [-1.5, 0, -2])
+        //mat4.scale(matrix, matrix, [0.25, 0.25, 0.25])
+
+        mat4.translate(viewMatrix, viewMatrix, [-3, 0, 1])
+        mat4.invert(viewMatrix, viewMatrix)
+
+
 
         const loop = (time: number) => {
-            renderFrame(program, matrix)
+            renderFrame(program, modelMatrix, viewMatrix)
             frameId = requestAnimationFrame(loop)
         }
 
