@@ -7,17 +7,57 @@
 
     let frameId = 0
 
-    const vertexData = [
-        0, 1, 0,   // V1.position
-        1, -1, 0,  // V2.position
-        -1, -1, 0  // V3.position
-    ]
+    const boxVertexData = [
+        // Front
+        0.5, 0.5, 0.5,
+        0.5, -.5, 0.5,
+        -.5, 0.5, 0.5,
+        -.5, 0.5, 0.5,
+        0.5, -.5, 0.5,
+        -.5, -.5, 0.5,
 
-    const colorData = [
-        1, 0, 0,   // V1.color (red)
-        0, 1, 0,   // V2.position (green)
-        0, 0, 1,   // V3.position (blue)
-    ]
+        // Left
+        -.5, 0.5, 0.5,
+        -.5, -.5, 0.5,
+        -.5, 0.5, -.5,
+        -.5, 0.5, -.5,
+        -.5, -.5, 0.5,
+        -.5, -.5, -.5,
+
+        // Back
+        -.5, 0.5, -.5,
+        -.5, -.5, -.5,
+        0.5, 0.5, -.5,
+        0.5, 0.5, -.5,
+        -.5, -.5, -.5,
+        0.5, -.5, -.5,
+
+        // Right
+        0.5, 0.5, -.5,
+        0.5, -.5, -.5,
+        0.5, 0.5, 0.5,
+        0.5, 0.5, 0.5,
+        0.5, -.5, 0.5,
+        0.5, -.5, -.5,
+
+        // Top
+        0.5, 0.5, 0.5,
+        0.5, 0.5, -.5,
+        -.5, 0.5, 0.5,
+        -.5, 0.5, 0.5,
+        0.5, 0.5, -.5,
+        -.5, 0.5, -.5,
+
+        // Bottom
+        0.5, -.5, 0.5,
+        0.5, -.5, -.5,
+        -.5, -.5, 0.5,
+        -.5, -.5, 0.5,
+        0.5, -.5, -.5,
+        -.5, -.5, -.5,
+    ];
+
+    let colorData: number[] = []
 
     function createWebGL2Buffer(data: number[]) { // Create an array buffer to hold array information
         if (!gl2) throw new Error('gl2 not defined at initializeWebGL2Buffer()')
@@ -97,10 +137,25 @@
             matrix: gl2.getUniformLocation(program, 'matrix')
         }
 
-        mat4.rotate(matrix, matrix, Math.PI/2 / 70, [0, 0, 1])
+        //mat4.rotate(matrix, matrix, Math.PI/2 / 70, [0, 0, 1])
+        mat4.rotateZ(matrix, matrix, Math.PI/2 / 70)
+        mat4.rotateX(matrix, matrix, Math.PI/2 / 70)
 
         gl2.uniformMatrix4fv(uniformLocations.matrix, false, matrix)
-        gl2.drawArrays(gl2.TRIANGLES, 0, 3)
+        gl2.drawArrays(gl2.TRIANGLES, 0, boxVertexData.length / 3)
+    }
+
+    function randomMatrixColor() {
+        return [Math.random(), Math.random(), Math.random()]
+    }
+
+    function randomCubeColor() {
+        for (let face = 0; face < 6; face++) {
+            let faceColor = randomMatrixColor()
+            for (let vertex = 0; vertex < 6; vertex++) {
+                colorData.push(...faceColor)
+            }
+        }
     }
 
     onMount (() => {
@@ -111,9 +166,10 @@
             throw new Error('WebGL2 not supported')
         }
 
-        resizeWebGL2Context(.05)
+        resizeWebGL2Context(.15)
+        randomCubeColor()
 
-        const positionBuffer = createWebGL2Buffer(vertexData)
+        const positionBuffer = createWebGL2Buffer(boxVertexData)
         const colorBuffer = createWebGL2Buffer(colorData)
         
         const vertexShader = createShader(gl2.VERTEX_SHADER, 
@@ -144,6 +200,7 @@
         const program = createWebGL2Program(vertexShader, fragmentShader)
 
         gl2.useProgram(program)
+        gl2.enable(gl2.DEPTH_TEST)
 
         assignWebGL2Pointers(program, positionBuffer, colorBuffer)
 
