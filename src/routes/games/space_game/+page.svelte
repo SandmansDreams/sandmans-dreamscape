@@ -2,10 +2,13 @@
     import { onMount } from "svelte";
 
     import { Game } from "./engine/game"
-    import { BASIC_VERTEX_SHADER, BASIC_FRAGMENT_SHADER } from "./engine/shaders"
+    import { BASIC_VERTEX_SHADER, BASIC_FRAGMENT_SHADER, MESH_VERTEX_SHADER } from "./engine/shaders"
     import { Program } from "./engine/program";
-    import { Mesh } from "./engine/mesh";
     import { InstancedBatch, UNIT_QUAD } from "./engine/batch";
+    import { buildShapeChart } from "./engine/shapeChart";
+
+    /** "chart" proves the tessellator; "squares" is the instancing baseline. */
+    const MODE: "chart" | "squares" = "chart"
 
     class FrameStats {
         fps = 0
@@ -54,17 +57,14 @@
     //let gl2 = $state<WebGL2RenderingContext | null>(null)
     let game = $state<Game | null>(null)
     let program = $state<Program | null>(null)
-    let mesh = $state<Mesh | null>(null)
     let batch: InstancedBatch | null = null
 
     let frameId = 0
 
-    const TRIANGLE = new Float32Array([
-    //    x      y       r    g    b
-        0.0,   100,    1,   0,   0,
-        -100,  -100,    0,   1,   0,
-        100,  -100,    0,   0,   1,
-    ])
+    // Chart mode: one static mesh holding every shape, drawn as a single
+    // instance sitting at the world origin.
+    const chart = buildShapeChart()
+    let chartTriangles = $state(0)
 
     const COUNT = 10000
     const BOUND = 2000
@@ -96,21 +96,46 @@
         }
     }
 
+    /**
+     * Frames the chart in the viewport.
+     *
+     * Recomputed every frame rather than once at mount: the canvas has no
+     * layout yet when onMount runs, so measuring there yields 0 and a zoom of
+     * 0. Doing it here also keeps the chart fitted through window resizes.
+     */
+    function frameChart() {
+        if (!game) return
+
+        game.camera.x = chart.width / 2
+        game.camera.y = chart.height / 2
+        game.camera.zoom = Math.min(
+            Math.max(1, game.cssWidth) / chart.width,
+            Math.max(1, game.cssHeight) / chart.height
+        ) * 0.85
+    }
+
     function render(alpha: number) {
         if (!game || !program || !batch) return
+
+        if (MODE === "chart") frameChart()
 
         game.update()   // resize, camera, clear
 
         batch.begin()
 
-        for (let i = 0; i < COUNT; i++) {
-            batch.add(
-                prevX[i] + (posX[i] - prevX[i]) * alpha,
-                prevY[i] + (posY[i] - prevY[i]) * alpha,
-                prevRot[i] + (rot[i] - prevRot[i]) * alpha,
-                SIZE,
-                color[i * 3], color[i * 3 + 1], color[i * 3 + 2]
-            )
+        if (MODE === "chart") {
+            // A single instance at the origin; the mesh carries its own colours.
+            batch.addTransform(0, 0, 0, 1)
+        } else {
+            for (let i = 0; i < COUNT; i++) {
+                batch.add(
+                    prevX[i] + (posX[i] - prevX[i]) * alpha,
+                    prevY[i] + (posY[i] - prevY[i]) * alpha,
+                    prevRot[i] + (rot[i] - prevRot[i]) * alpha,
+                    SIZE,
+                    color[i * 3], color[i * 3 + 1], color[i * 3 + 2]
+                )
+            }
         }
 
         program.use()
@@ -128,7 +153,7 @@
         previousTime = now
 
         while (accumulator >= STEP_MS) {
-            simulate()
+            if (MODE === "squares") simulate()
             accumulator -= STEP_MS
         }
 
@@ -165,23 +190,33 @@
     onMount (() => {
         if (!canvas) throw new Error("'canvas' not defined at onMount()")
 
-        game = new Game(canvas, 1)
-        program = new Program(game.gl2, BASIC_VERTEX_SHADER, BASIC_FRAGMENT_SHADER)
+        game = new Game(canvas, .1)
 
-        mesh = new Mesh(game.gl2, TRIANGLE, [
-            { location: 0, size: 2 },   // aPosition
-            { location: 1, size: 3 },   // aColor
-        ])
+        if (MODE === "chart") {
+            program = new Program(game.gl2, MESH_VERTEX_SHADER, BASIC_FRAGMENT_SHADER)
 
-        batch = new InstancedBatch(
-            game.gl2, 
-            UNIT_QUAD,
-            [{ location: 0, size: 2 }],                           // per vertex
-            [{ location: 1, size: 4 }, { location: 2, size: 3 }], // per instance
-            COUNT
-        )
+            batch = new InstancedBatch(
+                game.gl2,
+                chart.vertices,
+                [{ location: 0, size: 2 }, { location: 1, size: 3 }],  // per vertex: pos, colour
+                [{ location: 2, size: 4 }],                            // per instance: transform
+                1
+            )
 
-        seedSquares()
+            chartTriangles = chart.vertices.length / 5 / 3
+        } else {
+            program = new Program(game.gl2, BASIC_VERTEX_SHADER, BASIC_FRAGMENT_SHADER)
+
+            batch = new InstancedBatch(
+                game.gl2,
+                UNIT_QUAD,
+                [{ location: 0, size: 2 }],                            // per vertex
+                [{ location: 1, size: 4 }, { location: 2, size: 3 }],  // per instance
+                COUNT
+            )
+
+            seedSquares()
+        }
 
         frameId = requestAnimationFrame(tick)
 
@@ -194,7 +229,12 @@
 
 <div id="container">
     <div id="stats">
-        {fps.toFixed(0)} fps · {workMs.toFixed(2)} ms · {COUNT} instances · 1 draw call
+        {#if MODE === "chart"}
+            {fps.toFixed(0)} fps · {workMs.toFixed(2)} ms · {chartTriangles} triangles · 1 draw call
+            <br />rows: full / wedge / arc &nbsp;·&nbsp; columns: 0° 90° 180° 270°
+        {:else}
+            {fps.toFixed(0)} fps · {workMs.toFixed(2)} ms · {COUNT} instances · 1 draw call
+        {/if}
     </div>
     
     <canvas bind:this={canvas}></canvas>

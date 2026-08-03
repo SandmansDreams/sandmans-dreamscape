@@ -110,6 +110,27 @@ readonly capacity: number
         this.count++
     }
 
+    /**
+     * Adds an instance carrying only a transform, for meshes that hold their
+     * own per-vertex colours.
+     *
+     * Four floats instead of seven — the difference is per entity per frame,
+     * so it is the bulk of the instance buffer once grids replace quads.
+     */
+    addTransform(x: number, y: number, rotation: number, scale: number) {
+        if (this.count >= this.capacity) return
+
+        const i = this.count * this.floatsPerInstance
+        const data = this.instanceData
+
+        data[i + 0] = x
+        data[i + 1] = y
+        data[i + 2] = Math.cos(rotation) * scale
+        data[i + 3] = Math.sin(rotation) * scale
+
+        this.count++
+    }
+
     draw() {
         if (this.count === 0) return
 

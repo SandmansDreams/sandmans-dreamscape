@@ -8,8 +8,13 @@ export class Camera {
     readonly projection: Mat4 = mat4.create()
 
     update(viewportWidth: number, viewportHeight: number) {
-        const halfWidth = viewportWidth / this.zoom / 2
-        const halfHeight = viewportHeight / this.zoom / 2
+        // A zero or negative zoom divides to Infinity, and ortho() then turns
+        // that into a matrix of zeros and NaNs — every vertex collapses and
+        // nothing draws, with no GL error to explain it. Clamp instead.
+        const zoom = this.zoom > 0 ? this.zoom : 1
+
+        const halfWidth = viewportWidth / zoom / 2
+        const halfHeight = viewportHeight / zoom / 2
 
         mat4.orthoNO(
             this.projection,
