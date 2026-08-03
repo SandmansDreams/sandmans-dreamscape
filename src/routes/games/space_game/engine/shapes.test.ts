@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { appendShape, type BlockShape } from "./shapes"
+import { appendShape, DRAWN_SHAPES, MIRRORABLE_SHAPES, type BlockShape } from "./shapes"
 
 /**
  * Specification for the block tessellator.
@@ -21,8 +21,44 @@ const B = 0.75
 const FLOATS_PER_VERTEX = 5
 const TURNS = [0, 1, 2, 3]
 
-/** Every shape that should produce geometry. */
-const SOLID_SHAPES: BlockShape[] = ["full", "wedge", "arc"]
+const CELL_CENTRE = { x: X + SIZE / 2, y: Y + SIZE / 2 }
+
+/**
+ * Derived, not listed — a shape added to BLOCK_SHAPES inherits every generic
+ * assertion below without touching this file.
+ */
+const SOLID_SHAPES = DRAWN_SHAPES as BlockShape[]
+
+/** Straight-edged shapes, whose area is exact. */
+const STRAIGHT_AREA: Partial<Record<BlockShape, number>> = {
+    full: SIZE * SIZE,
+    half: (SIZE * SIZE) / 2,
+    quarter: (SIZE * SIZE) / 4,
+    wedge: (SIZE * SIZE) / 2,
+    halfWedge: (SIZE * SIZE) / 4,
+    band: (SIZE * SIZE) / 2,
+    centerLine: (SIZE * SIZE) / 8,
+    edgeLine: (SIZE * SIZE) / 8,
+    diamond: (SIZE * SIZE) / 2,
+}
+
+/**
+ * Curved shapes, approximated by flat segments — the polygon always lands just
+ * under the true area, never over.
+ */
+const CURVED_AREA: Partial<Record<BlockShape, number>> = {
+    arc: (Math.PI * SIZE * SIZE) / 4,        // quarter disc, radius = size
+    halfArc: (Math.PI * SIZE * SIZE) / 8,    // quarter ellipse, squashed to half height
+    circle: (Math.PI * SIZE * SIZE) / 4,     // inscribed, radius = size / 2
+}
+
+/** Shapes whose mass sits off-centre, so a quarter-turn relocates them. */
+const OFF_CENTRE: BlockShape[] = [
+    "half", "quarter", "wedge", "halfWedge", "arc", "halfArc", "edgeLine"
+]
+
+/** Shapes centred in the cell — rotation cannot move them. */
+const CENTRED: BlockShape[] = ["full", "band", "centerLine", "diamond", "circle"]
 
 interface Vertex {
     x: number
@@ -32,9 +68,9 @@ interface Vertex {
     b: number
 }
 
-function build(shape: BlockShape, turns: number): Vertex[] {
+function build(shape: BlockShape, turns: number, mirrored = false): Vertex[] {
     const out: number[] = []
-    appendShape(out, shape, turns, X, Y, SIZE, R, G, B)
+    appendShape(out, shape, turns, mirrored, X, Y, SIZE, R, G, B)
 
     expect(out.length % FLOATS_PER_VERTEX).toBe(0)
 
@@ -45,18 +81,42 @@ function build(shape: BlockShape, turns: number): Vertex[] {
     return vertices
 }
 
-/** Summed shoelace area over consecutive vertex triples. */
+function triangleArea(a: Vertex, b: Vertex, c: Vertex): number {
+    return Math.abs(a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y)) / 2
+}
+
 function area(vertices: Vertex[]): number {
     let total = 0
+    for (let i = 0; i + 2 < vertices.length; i += 3) {
+        total += triangleArea(vertices[i], vertices[i + 1], vertices[i + 2])
+    }
+    return total
+}
+
+/**
+ * Area-weighted centroid.
+ *
+ * Used instead of comparing vertex lists, which measures triangulation order
+ * rather than where the shape actually sits — a rotated square emits different
+ * vertices while looking identical.
+ */
+function centroid(vertices: Vertex[]): { x: number, y: number } {
+    let total = 0
+    let cx = 0
+    let cy = 0
+
     for (let i = 0; i + 2 < vertices.length; i += 3) {
         const a = vertices[i]
         const b = vertices[i + 1]
         const c = vertices[i + 2]
-        total += Math.abs(
-            a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y)
-        ) / 2
+
+        const weight = triangleArea(a, b, c)
+        total += weight
+        cx += ((a.x + b.x + c.x) / 3) * weight
+        cy += ((a.y + b.y + c.y) / 3) * weight
     }
-    return total
+
+    return { x: cx / total, y: cy / total }
 }
 
 describe("appendShape", () => {
@@ -88,7 +148,7 @@ describe("appendShape", () => {
         }
     })
 
-    // Grid.cells can be reordered freely (by colour, for draw batching) only
+    // Grid meshes can be reordered freely (by colour, for draw batching) only
     // because no cell overlaps another. This is that guarantee.
     it.each(SOLID_SHAPES)("keeps %s strictly inside its own cell", (shape) => {
         for (const turns of TURNS) {
@@ -102,28 +162,37 @@ describe("appendShape", () => {
     })
 
     describe("area", () => {
-        it("full covers the whole cell", () => {
-            expect(area(build("full", 0))).toBeCloseTo(SIZE * SIZE, 6)
+        // Forces a new shape to declare what it covers, rather than silently
+        // going untested.
+        it("has an expectation for every drawn shape", () => {
+            for (const shape of SOLID_SHAPES) {
+                const known = shape in STRAIGHT_AREA || shape in CURVED_AREA
+                expect(known, `no area expectation for "${shape}"`).toBe(true)
+            }
         })
 
-        it("wedge covers half the cell", () => {
-            expect(area(build("wedge", 0))).toBeCloseTo((SIZE * SIZE) / 2, 6)
+        it.each(Object.keys(STRAIGHT_AREA) as BlockShape[])("%s covers its exact area", (shape) => {
+            expect(area(build(shape, 0))).toBeCloseTo(STRAIGHT_AREA[shape]!, 6)
         })
 
-        // A quarter disc of radius `size` pinned to a corner: it fills the cell
-        // except for a rounded bite out of the opposite corner. Approximated by
-        // flat segments, so it lands slightly under the true pi/4, hence the
-        // tolerance rather than toBeCloseTo.
-        it("arc approximates a quarter disc", () => {
-            const expected = (Math.PI * SIZE * SIZE) / 4
-            const actual = area(build("arc", 0))
+        it.each(Object.keys(CURVED_AREA) as BlockShape[])("%s approximates its curve", (shape) => {
+            const expected = CURVED_AREA[shape]!
+            const actual = area(build(shape, 0))
 
+            // An inscribed polygon can only undershoot.
             expect(actual).toBeLessThanOrEqual(expected)
             expect(actual).toBeGreaterThan(expected * 0.97)
         })
     })
 
     describe("rotation", () => {
+        it("classifies every drawn shape as centred or off-centre", () => {
+            for (const shape of SOLID_SHAPES) {
+                const classified = OFF_CENTRE.includes(shape) || CENTRED.includes(shape)
+                expect(classified, `"${shape}" is in neither OFF_CENTRE nor CENTRED`).toBe(true)
+            }
+        })
+
         // Rotating a shape moves its vertices but cannot change how much of the
         // cell it covers — a cheap check that the turn maths is a rotation and
         // not an accidental scale or shear.
@@ -134,18 +203,22 @@ describe("appendShape", () => {
             }
         })
 
-        it("actually moves asymmetric shapes", () => {
-            for (const shape of ["wedge", "arc"] as BlockShape[]) {
-                const seen = new Set(
-                    TURNS.map(turns => JSON.stringify(build(shape, turns).map(v => [v.x, v.y])))
-                )
-                expect(seen.size).toBe(4)
-            }
+        it.each(OFF_CENTRE)("moves %s to a distinct place at each turn", (shape) => {
+            const seen = new Set(
+                TURNS.map(turns => {
+                    const c = centroid(build(shape, turns))
+                    return `${c.x.toFixed(6)},${c.y.toFixed(6)}`
+                })
+            )
+            expect(seen.size).toBe(4)
         })
 
-        it("leaves a full cell unchanged", () => {
-            const base = area(build("full", 0))
-            expect(area(build("full", 2))).toBeCloseTo(base, 6)
+        it.each(CENTRED)("leaves %s centred at every turn", (shape) => {
+            for (const turns of TURNS) {
+                const c = centroid(build(shape, turns))
+                expect(c.x).toBeCloseTo(CELL_CENTRE.x, 6)
+                expect(c.y).toBeCloseTo(CELL_CENTRE.y, 6)
+            }
         })
 
         it("wraps turns beyond a full revolution", () => {
@@ -160,5 +233,64 @@ describe("appendShape", () => {
                 expect(build(shape, -1)).toEqual(build(shape, 3))
             }
         })
+    })
+
+    describe("mirroring", () => {
+        /** Centroids of all four turns, as a comparable set. */
+        function centroidSet(shape: BlockShape, mirrored: boolean): Set<string> {
+            return new Set(TURNS.map(turns => {
+                const c = centroid(build(shape, turns, mirrored))
+                return `${c.x.toFixed(6)},${c.y.toFixed(6)}`
+            }))
+        }
+
+        // Reflection is area-preserving, so this catches a mirror implemented
+        // as a translation or a squash.
+        it.each(SOLID_SHAPES)("preserves the area of %s", (shape) => {
+            for (const turns of TURNS) {
+                expect(area(build(shape, turns, true)))
+                    .toBeCloseTo(area(build(shape, turns, false)), 6)
+            }
+        })
+
+        it.each(SOLID_SHAPES)("keeps mirrored %s inside its cell", (shape) => {
+            for (const turns of TURNS) {
+                for (const vertex of build(shape, turns, true)) {
+                    expect(vertex.x).toBeGreaterThanOrEqual(X - 1e-9)
+                    expect(vertex.x).toBeLessThanOrEqual(X + SIZE + 1e-9)
+                    expect(vertex.y).toBeGreaterThanOrEqual(Y - 1e-9)
+                    expect(vertex.y).toBeLessThanOrEqual(Y + SIZE + 1e-9)
+                }
+            }
+        })
+
+        // The two assertions below are what justify MIRRORABLE_SHAPES existing:
+        // for everything else the mirror is genuinely redundant, and the chart
+        // would waste a row on it.
+        it.each(MIRRORABLE_SHAPES as BlockShape[])(
+            "%s reaches four orientations rotation cannot",
+            (shape) => {
+                const plain = centroidSet(shape, false)
+                const mirrored = centroidSet(shape, true)
+
+                expect(plain.size).toBe(4)
+                expect(mirrored.size).toBe(4)
+
+                // Eight distinct placements in total.
+                for (const position of mirrored) {
+                    expect(plain.has(position), `${position} is also a rotation`).toBe(false)
+                }
+            }
+        )
+
+        it.each(SOLID_SHAPES.filter(s => !MIRRORABLE_SHAPES.includes(s)))(
+            "mirroring %s only reproduces its rotations",
+            (shape) => {
+                const plain = centroidSet(shape, false)
+                const mirrored = centroidSet(shape, true)
+
+                expect([...mirrored].sort()).toEqual([...plain].sort())
+            }
+        )
     })
 })

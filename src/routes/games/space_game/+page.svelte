@@ -190,7 +190,7 @@
     onMount (() => {
         if (!canvas) throw new Error("'canvas' not defined at onMount()")
 
-        game = new Game(canvas, .1)
+        game = new Game(canvas, 1)
 
         if (MODE === "chart") {
             program = new Program(game.gl2, MESH_VERTEX_SHADER, BASIC_FRAGMENT_SHADER)
@@ -231,7 +231,8 @@
     <div id="stats">
         {#if MODE === "chart"}
             {fps.toFixed(0)} fps · {workMs.toFixed(2)} ms · {chartTriangles} triangles · 1 draw call
-            <br />rows: full / wedge / arc &nbsp;·&nbsp; columns: 0° 90° 180° 270°
+            <br />rows: {chart.shapes.join(" / ")}
+            <br />columns: 0° 90° 180° 270° &nbsp;|&nbsp; mirrored 0° 90° 180° 270°
         {:else}
             {fps.toFixed(0)} fps · {workMs.toFixed(2)} ms · {COUNT} instances · 1 draw call
         {/if}
