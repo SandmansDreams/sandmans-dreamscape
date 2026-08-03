@@ -1,8 +1,11 @@
 <script lang="ts">
     import { onMount } from "svelte";
+    import { Mat4, mat4 } from "ts-gl-matrix";
 
     let canvas = $state<HTMLCanvasElement | null>(null)
     let gl2 = $state<WebGL2RenderingContext | null>(null)
+
+    let frameId = 0
 
     const vertexData = [
         0, 1, 0,   // V1.position
@@ -26,45 +29,19 @@
         return buffer
     }
 
-    function createVertexShader() { // Create a basic vertex shader
-        if (!gl2) throw new Error('gl2 not defined at createVertexShader()')
+    function createShader(type: GLenum, GLSL: string) {
+        if (!gl2) throw new Error('gl2 not defined at createShader()')
 
-        const vertexShader = gl2.createShader(gl2.VERTEX_SHADER)
-        if (!vertexShader) throw new Error('vertexShader not defined at createVertexShader()')
-        gl2.shaderSource(vertexShader, `
-            precision mediump float;
+        const shader = gl2.createShader(type)
+        if (!shader) throw new Error('vertexShader not defined at createShader()')
 
-            attribute vec3 position;
-            attribute vec3 color;
-            varying vec3 vColor;
+        gl2.shaderSource(shader, GLSL)
+        gl2.compileShader(shader)
 
-            void main() {
-                vColor = color;
-                gl_Position = vec4(position, 1);
-            }
-        `)
-        gl2.compileShader(vertexShader)
+        if (!gl2.getShaderParameter(shader, gl2.COMPILE_STATUS))
+            throw new Error(gl2.getShaderInfoLog(shader) ?? 'shader compile failed')
 
-        return vertexShader
-    }
-
-    function createFragmentShader() { // Create a basic fragment shader
-        if (!gl2) throw new Error('gl2 not defined at createFragmentShader()')
-
-        const fragmentShader = gl2.createShader(gl2.FRAGMENT_SHADER)
-        if (!fragmentShader) throw new Error('fragmentShader not defined at createFragmentShader()')
-        gl2.shaderSource(fragmentShader, `
-            precision mediump float;
-
-            varying vec3 vColor;
-
-            void main() {
-                gl_FragColor = vec4(vColor, 1);
-            }
-        `)
-        gl2.compileShader(fragmentShader)
-
-        return fragmentShader
+        return shader
     }
 
     function createWebGL2Program(vertexShader: WebGLShader, fragmentShader: WebGLShader) { // Creates a program to run on the GPU
@@ -84,17 +61,45 @@
         const location = gl2.getAttribLocation(program, name)
         gl2.enableVertexAttribArray(location)
         gl2.bindBuffer(gl2.ARRAY_BUFFER, buffer)
-        gl2.vertexAttribPointer(location, 3, gl2.FLOAT, true, 0, 0)
+        gl2.vertexAttribPointer(location, 3, gl2.FLOAT, false, 0, 0)
     }
 
-    function drawWebGL2(program: WebGLProgram, positionBuffer: WebGLBuffer, colorBuffer: WebGLBuffer) {
+    function assignWebGL2Pointers(program: WebGLProgram, positionBuffer: WebGLBuffer, colorBuffer: WebGLBuffer) {
         if (!gl2) throw new Error('gl2 not defined at drawWebGL2()')
 
         // Create pointers to the vertex position data
-        const positionLocation = createWebGL2Pointer(program, 'position', positionBuffer)
-        const colorLocation = createWebGL2Pointer(program, 'color', colorBuffer)
+        createWebGL2Pointer(program, 'position', positionBuffer)
+        createWebGL2Pointer(program, 'color', colorBuffer)
+    }
 
-        gl2.useProgram(program)
+    function resizeWebGL2Context(renderScale = 1): Boolean {
+        if (!canvas || !gl2) throw new Error('canvas or gl2 not defined at resizeCanvas()')
+
+        const rect = canvas.getBoundingClientRect()
+        const dpr = window.devicePixelRatio || 1
+
+        const width = Math.max(1, Math.round(rect.width * dpr * renderScale))
+        const height = Math.max(1, Math.round(rect.height * dpr * renderScale))
+
+        // Don't change unless different
+        if (canvas.width === width && canvas.height === height) return false
+
+        canvas.width = width
+        canvas.height = height
+        gl2.viewport(0, 0, width, height)
+        return true
+    }
+
+    function renderFrame(program: WebGLProgram, matrix: Mat4) {
+        if (!gl2) throw new Error('gl2 not defined at animate()')
+
+        const uniformLocations = {
+            matrix: gl2.getUniformLocation(program, 'matrix')
+        }
+
+        mat4.rotate(matrix, matrix, Math.PI/2 / 70, [0, 0, 1])
+
+        gl2.uniformMatrix4fv(uniformLocations.matrix, false, matrix)
         gl2.drawArrays(gl2.TRIANGLES, 0, 3)
     }
 
@@ -106,17 +111,54 @@
             throw new Error('WebGL2 not supported')
         }
 
+        resizeWebGL2Context(.05)
+
         const positionBuffer = createWebGL2Buffer(vertexData)
         const colorBuffer = createWebGL2Buffer(colorData)
         
-        const vertexShader = createVertexShader()
-        const fragmentShader = createFragmentShader()
+        const vertexShader = createShader(gl2.VERTEX_SHADER, 
+            `precision mediump float;
+
+            attribute vec3 position;
+            attribute vec3 color;
+            varying vec3 vColor;
+
+            uniform mat4 matrix;
+
+            void main() {
+                vColor = color;
+                gl_Position = matrix * vec4(position, 1);
+            }
+        `)
         
-        if (!vertexShader || !fragmentShader) throw new Error('Fragment or vertex shader are undefined')
+        const fragmentShader = createShader(gl2.FRAGMENT_SHADER, 
+            `precision mediump float;
+
+            varying vec3 vColor;
+
+            void main() {
+                gl_FragColor = vec4(vColor, 1);
+            }
+        `)
         
         const program = createWebGL2Program(vertexShader, fragmentShader)
 
-        drawWebGL2(program, positionBuffer, colorBuffer)
+        gl2.useProgram(program)
+
+        assignWebGL2Pointers(program, positionBuffer, colorBuffer)
+
+        const matrix = mat4.create()
+        mat4.translate(matrix, matrix, [.2, .5, 0])
+        mat4.scale(matrix, matrix, [0.25, 0.25, 0.25])
+
+        const loop = (time: number) => {
+            renderFrame(program, matrix)
+            frameId = requestAnimationFrame(loop)
+        }
+
+        frameId = requestAnimationFrame(loop)
+
+        return () => cancelAnimationFrame(frameId)
     })
 </script>
 
@@ -124,10 +166,17 @@
 
 <style>
     canvas {
-        width: 100vw;
-        height: 100vh;
+        background-color: black;
         position: absolute;
-        left: 0;
         top: 0;
+        left: 0;
+        height: 100vh;
+        width: 100vw;
+        margin-inline: auto;
+        padding: 0;
+        z-index: 0;
+        pointer-events: none;
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
     }
 </style>
