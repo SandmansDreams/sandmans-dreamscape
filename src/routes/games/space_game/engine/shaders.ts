@@ -1,16 +1,22 @@
 export const BASIC_VERTEX_SHADER = `#version 300 es
 
 // Vec2 since it's a 2d game
-layout(location = 0) in vec2 aPosition;
-layout(location = 1) in vec3 aColor;
+layout(location = 0) in vec2 aPosition;    // per vertex
+layout(location = 1) in vec4 aTransform;   // per instance: x, y, cos*scale, sin*scale
+layout(location = 2) in vec3 aColor;       // per instance
 
 uniform mat4 uProjection;
 
 flat out vec3 vColor;
 
 void main() {
+    vec2 rotated = vec2(
+        aPosition.x * aTransform.z - aPosition.y * aTransform.w,
+        aPosition.x * aTransform.w + aPosition.y * aTransform.z
+    );
+
     vColor = aColor;
-    gl_Position = uProjection * vec4(aPosition, 0.0, 1.0);
+    gl_Position = uProjection * vec4(rotated + aTransform.xy, 0.0, 1.0);
 }
 `
 

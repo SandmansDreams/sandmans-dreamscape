@@ -3,8 +3,8 @@ const BYTES_PER_FLOAT = 4
 export interface VertexAttribute {
     location: number,
     size: number,
-    type?: GLenum,
-    normalized?: boolean
+    //type?: GLenum,
+    //normalized?: boolean
 }
 
 export class Mesh {
