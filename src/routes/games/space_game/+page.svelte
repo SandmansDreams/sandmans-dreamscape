@@ -1,78 +1,22 @@
 <script lang="ts">
     import { onMount } from "svelte";
-    import { Mat4, mat4 } from "ts-gl-matrix";
+    import { Mat4, mat4, vec3 } from "ts-gl-matrix";
     
-    import { randomMatrixColor, resizeWebGL2Context, createWebGL2Buffer, createShader, createWebGL2Pointer, createWebGL2Program} from "./gl2"
+    import { randomMat3NO, randomMat3ZO, resizeWebGL2Context, createWebGL2Buffer, createShader, createWebGL2Pointer, createWebGL2Program } from "./gl2"
 
     let canvas = $state<HTMLCanvasElement | null>(null)
     let gl2 = $state<WebGL2RenderingContext | null>(null)
 
     let frameId = 0
 
-    const boxVertexData = [
-        // Front
-        0.5, 0.5, 0.5,
-        0.5, -.5, 0.5,
-        -.5, 0.5, 0.5,
-        -.5, 0.5, 0.5,
-        0.5, -.5, 0.5,
-        -.5, -.5, 0.5,
-
-        // Left
-        -.5, 0.5, 0.5,
-        -.5, -.5, 0.5,
-        -.5, 0.5, -.5,
-        -.5, 0.5, -.5,
-        -.5, -.5, 0.5,
-        -.5, -.5, -.5,
-
-        // Back
-        -.5, 0.5, -.5,
-        -.5, -.5, -.5,
-        0.5, 0.5, -.5,
-        0.5, 0.5, -.5,
-        -.5, -.5, -.5,
-        0.5, -.5, -.5,
-
-        // Right
-        0.5, 0.5, -.5,
-        0.5, -.5, -.5,
-        0.5, 0.5, 0.5,
-        0.5, 0.5, 0.5,
-        0.5, -.5, 0.5,
-        0.5, -.5, -.5,
-
-        // Top
-        0.5, 0.5, 0.5,
-        0.5, 0.5, -.5,
-        -.5, 0.5, 0.5,
-        -.5, 0.5, 0.5,
-        0.5, 0.5, -.5,
-        -.5, 0.5, -.5,
-
-        // Bottom
-        0.5, -.5, 0.5,
-        0.5, -.5, -.5,
-        -.5, -.5, 0.5,
-        -.5, -.5, 0.5,
-        0.5, -.5, -.5,
-        -.5, -.5, -.5,
-    ];
+    const vertexData = spherePointCloud(1e5)
 
     let colorData: number[] = []
-
-    function assignWebGL2Pointers(program: WebGLProgram, positionBuffer: WebGLBuffer, colorBuffer: WebGLBuffer) {
-        if (!gl2) throw new Error('gl2 not defined at drawWebGL2()')
-
-        // Create pointers to the vertex position data
-        createWebGL2Pointer(gl2, program, 'position', positionBuffer)
-        createWebGL2Pointer(gl2, program, 'color', colorBuffer)
-    }
 
     function renderFrame(program: WebGLProgram, modelMatrix: Mat4, viewMatrix: Mat4) {
         if (!gl2 || !canvas) throw new Error('gl2 or canvas not defined at renderFrame()')
 
-        const mvMatrix = mat4.create()
+        //const mvMatrix = mat4.create()
         const projectionMatrix = mat4.create()
         const mvpMatrix = mat4.create()
         const uniformLocations = {
@@ -88,23 +32,37 @@
         )
 
         //mat4.rotate(matrix, matrix, Math.PI/2 / 70, [0, 0, 1])
-        mat4.rotateZ(modelMatrix, modelMatrix, Math.PI/2 / 50)
-        //mat4.rotateX(matrix, matrix, Math.PI/2 / 50)
+        //mat4.rotateZ(modelMatrix, modelMatrix, Math.PI/2 / 50)
+        mat4.rotateX(modelMatrix, modelMatrix, Math.PI/2 / 500)
+        mat4.rotateY(modelMatrix, modelMatrix, Math.PI/2 / 500)
 
-        mat4.multiply(mvMatrix, viewMatrix, modelMatrix)
-        mat4.multiply(mvpMatrix, projectionMatrix, mvMatrix)
+        //mat4.multiply(mvMatrix, viewMatrix, modelMatrix)
+        mat4.multiply(mvpMatrix, projectionMatrix, modelMatrix)
 
         gl2.uniformMatrix4fv(uniformLocations.matrix, false, mvpMatrix)
-        gl2.drawArrays(gl2.TRIANGLES, 0, boxVertexData.length / 3)
+        gl2.drawArrays(gl2.POINTS, 0, vertexData.length / 3)
     }
 
     function randomCubeColor() {
         for (let face = 0; face < 6; face++) {
-            let faceColor = randomMatrixColor()
+            let faceColor = randomMat3ZO()
             for (let vertex = 0; vertex < 6; vertex++) {
                 colorData.push(...faceColor)
             }
         }
+    }
+
+    function spherePointCloud(pointCount: number) {
+        let points: number[] = []
+
+        for (let index = 0; index < pointCount; index++) {
+            const point = randomMat3NO()
+            const outputPoint = vec3.normalize(vec3.create(), point)
+
+            points.push(...outputPoint)
+        }
+
+        return points
     }
 
     onMount (() => {
@@ -115,11 +73,11 @@
             throw new Error('WebGL2 not supported')
         }
 
-        resizeWebGL2Context(canvas, gl2, .15)
-        randomCubeColor()
+        resizeWebGL2Context(canvas, gl2, 1)
+        //randomCubeColor()
 
-        const positionBuffer = createWebGL2Buffer(gl2, boxVertexData)
-        const colorBuffer = createWebGL2Buffer(gl2, colorData)
+        const positionBuffer = createWebGL2Buffer(gl2, vertexData)
+        //const colorBuffer = createWebGL2Buffer(gl2, colorData)
         
         const vertexShader = createShader(
             gl2, 
@@ -133,8 +91,9 @@
             uniform mat4 matrix;
 
             void main() {
-                vColor = color;
+                vColor = vec3(position.xy, 1);
                 gl_Position = matrix * vec4(position, 1);
+                gl_PointSize = 2.0;
             }
         `)
         
@@ -155,18 +114,17 @@
         gl2.useProgram(program)
         gl2.enable(gl2.DEPTH_TEST)
 
-        assignWebGL2Pointers(program, positionBuffer, colorBuffer)
+        createWebGL2Pointer(gl2, program, 'position', positionBuffer)
+        //createWebGL2Pointer(gl2, program, 'color', colorBuffer)
 
         const modelMatrix = mat4.create()
         const viewMatrix = mat4.create()
 
-        mat4.translate(modelMatrix, modelMatrix, [-1.5, 0, -2])
+        mat4.translate(modelMatrix, modelMatrix, [0, 0, -1])
         //mat4.scale(matrix, matrix, [0.25, 0.25, 0.25])
 
-        mat4.translate(viewMatrix, viewMatrix, [-3, 0, 1])
-        mat4.invert(viewMatrix, viewMatrix)
-
-
+        //mat4.translate(viewMatrix, viewMatrix, [-3, 0, 1])
+        //mat4.invert(viewMatrix, viewMatrix)
 
         const loop = (time: number) => {
             renderFrame(program, modelMatrix, viewMatrix)

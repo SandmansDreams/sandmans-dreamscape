@@ -1,3 +1,5 @@
+import type { Vec3Like } from "ts-gl-matrix"
+
 export function resizeWebGL2Context(canvas: HTMLCanvasElement, gl2: WebGL2RenderingContext, renderScale = 1): Boolean { // Resizes canvas context to be at different scales, 1 is full size, lower than one becomes more pixelated
     const rect = canvas.getBoundingClientRect()
     const dpr = window.devicePixelRatio || 1
@@ -14,8 +16,20 @@ export function resizeWebGL2Context(canvas: HTMLCanvasElement, gl2: WebGL2Render
     return true
 }
 
-export function randomMatrixColor() { // Returns a random rgb matrix color
-    return [Math.random(), Math.random(), Math.random()]
+export function randomMat3NO(): Vec3Like { // Returns a random 3 float matrix between -1 and 1
+    return [
+        (Math.random() - 0.5) * 2, 
+        (Math.random() - 0.5) * 2, 
+        (Math.random() - 0.5) * 2
+    ]
+}
+
+export function randomMat3ZO(): Vec3Like { // Returns a random 3 float matrix between 0 and 1
+    return [
+        Math.random(), 
+        Math.random(), 
+        Math.random()
+    ]
 }
 
 export function createWebGL2Buffer(gl2: WebGL2RenderingContext, data: number[]) { // Create an array buffer to hold array information
@@ -26,7 +40,7 @@ export function createWebGL2Buffer(gl2: WebGL2RenderingContext, data: number[]) 
     return buffer
 }
 
-export function createShader(gl2: WebGL2RenderingContext, type: GLenum, GLSL: string) {
+export function createShader(gl2: WebGL2RenderingContext, type: GLenum, GLSL: string) { // Creates a generalized shader by type
     const shader = gl2.createShader(type)
     if (!shader) throw new Error('vertexShader not defined at createShader()')
 
@@ -39,6 +53,7 @@ export function createShader(gl2: WebGL2RenderingContext, type: GLenum, GLSL: st
     return shader
 }
 
+//TODO: Generalize to take an array of shaders and attach foreach
 export function createWebGL2Program(gl2: WebGL2RenderingContext, vertexShader: WebGLShader, fragmentShader: WebGLShader) { // Creates a program to run on the GPU
     const program = gl2.createProgram()
     gl2.attachShader(program, vertexShader)
