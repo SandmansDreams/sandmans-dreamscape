@@ -1,3 +1,4 @@
+import { hexToRgb } from "../color"
 import type { RGB } from "../grid"
 import { HULL_FORMAT_VERSION, type HullCell, type HullData } from "../hull"
 import {
@@ -83,31 +84,6 @@ export const LEGACY_SHAPES: Readonly<Record<string, Orientation>> = {
     rampES: { s: "halfWedge", t: RAMP_ON.E, m: true },
     rampSW: { s: "halfWedge", t: RAMP_ON.S, m: true },
     rampWN: { s: "halfWedge", t: RAMP_ON.W, m: true },
-}
-
-/**
- * `#rrggbb` or `#rgb` to a 0..1 triple, rounded to three decimals.
- *
- * No gamma conversion: the shader uses vertex colour as written, and the hand
- * -authored palettes already hold plain sRGB fractions. Rounding keeps the
- * files readable at a cost of well under one 8-bit step.
- */
-export function hexToRgb(hex: string): RGB {
-    const raw = hex.trim().replace(/^#/, "")
-
-    const expanded = raw.length === 3
-        ? raw[0] + raw[0] + raw[1] + raw[1] + raw[2] + raw[2]
-        : raw
-
-    const value = Number.parseInt(expanded, 16)
-    if (expanded.length !== 6 || Number.isNaN(value)) {
-        throw new Error(`not a hex colour: "${hex}"`)
-    }
-
-    const channel = (shift: number) =>
-        Math.round(((value >> shift) & 0xff) / 255 * 1000) / 1000
-
-    return [channel(16), channel(8), channel(0)]
 }
 
 /** Hue in degrees, plus the saturation and lightness used to name greys. */

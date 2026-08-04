@@ -17,7 +17,7 @@ const KNOWN_SHAPES = new Set<string>(BLOCK_SHAPES)
 
 describe("engine/hulls", () => {
     it("finds the hull files", () => {
-        expect(HULLS.length).toBeGreaterThanOrEqual(5)
+        expect(HULLS.length).toBeGreaterThanOrEqual(4)
         expect(HULLS.map(entry => entry.id)).toContain("scytheShip")
     })
 

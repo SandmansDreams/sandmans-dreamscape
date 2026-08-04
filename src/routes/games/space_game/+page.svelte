@@ -1,16 +1,15 @@
 <script lang="ts">
     import { onMount } from "svelte"
+    import { browser } from "$app/environment"
 
+    import SettingsPanel from "./SettingsPanel.svelte"
     import { Game } from "./engine/game"
     import { GameLoop } from "./engine/loop"
     import { createScene, type Scene, type SceneName } from "./engine/dev/scenes"
-
-    /**
-     * Which demo to show while there is no game yet.
-     * "ships" pages through the hulls, "chart" proves the tessellator,
-     * "squares" is the instancing performance baseline.
-     */
-    const SCENE: SceneName = "ships"
+    import {
+        DEFAULTS, SETTING_KEYS, STORAGE_KEY, toStorable, type Settings
+    } from "./engine/settings"
+    import { clearSettings, loadSettings } from "./engine/settings/storage"
 
     let canvas = $state<HTMLCanvasElement | null>(null)
 
@@ -20,28 +19,35 @@
     let description = $state("")
 
     /**
-     * A Scene is a class instance, which Svelte does not deep-proxy — reading
-     * `scene.views.index` in the markup would render once and never update. So
-     * the picker state is mirrored here and refreshed after every change.
+     * A plain object, so Svelte deep-proxies it: the renderer reads through
+     * this same reference every frame and the panel writes into it, with
+     * nothing in between. Contrast `scene` below — a class instance, which is
+     * *not* proxied, and so has to be mirrored into state by hand.
      */
+    let settings = $state<Settings>(loadSettings())
+
     let viewNames = $state<readonly string[]>([])
     let viewIndex = $state(0)
-    let lightColor = $state("#ffffff")
-    let hasLight = $state(false)
 
+    let game: Game | null = null
+    let loop: GameLoop | null = null
     let scene: Scene | null = null
 
-    function setLightColor(hex: string) {
-        lightColor = hex
-        scene?.light?.setColor(hex)
+    function syncFromScene() {
+        description = scene?.description ?? ""
+        viewNames = scene?.views?.names ?? []
+        viewIndex = scene?.views?.index ?? 0
     }
 
     function selectView(index: number) {
         if (!scene?.views) return
 
         scene.views.select(index)
-        viewIndex = scene.views.index
-        description = scene.description
+        syncFromScene()
+
+        // Remember which ship you were looking at.
+        const id = (scene as { selectedId?: string }).selectedId
+        if (id !== undefined) settings["scene.hullId"] = id
     }
 
     function onKeyDown(event: KeyboardEvent) {
@@ -49,26 +55,46 @@
         else if (event.key === "ArrowRight") selectView(viewIndex + 1)
     }
 
+    /**
+     * Rebuilds the scene from the current settings.
+     *
+     * The scene name, cell size and wireframe colour are all baked in at
+     * construction, so changing any of them rebuilds the lot. That is about a
+     * millisecond for the hulls we have — cheaper than the bookkeeping needed
+     * to work out which mesh actually went stale.
+     */
+    function buildScene() {
+        if (!game) return
+
+        scene?.dispose()
+        scene = createScene(settings["scene.name"] as SceneName, game.gl2, settings)
+        syncFromScene()
+    }
+
+    /**
+     * Puts every setting back to what defaults.json says.
+     *
+     * Assigns key by key rather than replacing the object: the scene captured
+     * this proxy at construction, and handing it a fresh one would leave it
+     * reading a bag nothing writes to any more. Only the settings that force a
+     * rebuild would appear to reset.
+     */
+    function resetSettings() {
+        clearSettings()
+        for (const key of SETTING_KEYS) settings[key] = DEFAULTS[key]
+    }
+
     onMount(() => {
         if (!canvas) throw new Error("canvas not bound at onMount()")
 
-        const game = new Game(canvas, 0.25)
-        const active = createScene(SCENE, game.gl2)
-        scene = active
+        game = new Game(canvas, Number(settings["render.scale"]))
 
-        description = active.description
-        viewNames = active.views?.names ?? []
-        viewIndex = active.views?.index ?? 0
-
-        hasLight = active.light !== undefined
-        lightColor = active.light?.color ?? lightColor
-
-        const loop = new GameLoop({
-            simulate: () => active.simulate(),
+        loop = new GameLoop({
+            simulate: () => scene?.simulate(),
 
             render: (alpha) => {
-                game.update()   // resize, camera, clear
-                return active.render(game.camera, alpha)
+                game?.update()   // resize, camera, clear
+                return game && scene ? scene.render(game.camera, alpha) : 0
             },
 
             onStats: (stats) => {
@@ -76,15 +102,70 @@
                 workMs = stats.workMs
                 drawCalls = stats.drawCalls
             }
-        })
+        }, { simHz: Number(settings["render.simHz"]) })
 
         loop.start()
 
         return () => {
-            loop.stop()
-            active.dispose()
+            loop?.stop()
+            scene?.dispose()
             scene = null
+            loop = null
+            game = null
         }
+    })
+
+    /*
+     * Settings that cannot simply be read during render. Everything else — all
+     * of light.* and shading.*, plus the layout gap — the scene picks up on the
+     * next frame without any help from here.
+     */
+
+    $effect(() => {
+        // Named rather than read inline so the dependencies are obvious. Each
+        // of these is baked into the scene at construction: the shader decides
+        // the vertex layout, the other two the geometry.
+        const name = settings["scene.name"]
+        const shader = settings["scene.shader"]
+        const cellSize = settings["scene.cellSize"]
+        const wireColor = settings["scene.wireColor"]
+
+        void name; void shader; void cellSize; void wireColor
+
+        buildScene()
+    })
+
+    // The blend is a uniform, so it needs no rebuild — but it is in the
+    // description, which is only re-read when the scene changes.
+    $effect(() => {
+        void settings["shading.blend"]
+        description = scene?.description ?? ""
+    })
+
+    $effect(() => {
+        game?.setRenderScale(Number(settings["render.scale"]))
+        game?.resizeCanvas()
+    })
+
+    $effect(() => {
+        loop?.setSimHz(Number(settings["render.simHz"]))
+    })
+
+    let saveTimer: ReturnType<typeof setTimeout>
+
+    $effect(() => {
+        // Stringifying establishes the dependency on every key at once.
+        const snapshot = JSON.stringify(toStorable(settings))
+        if (!browser) return
+
+        clearTimeout(saveTimer)
+        saveTimer = setTimeout(() => {
+            try {
+                localStorage.setItem(STORAGE_KEY, snapshot)
+            } catch (error) {
+                console.warn("settings: could not be saved", error)
+            }
+        }, 300)
     })
 </script>
 
@@ -98,21 +179,20 @@
         {/each}
     </div>
 
-    {#if hasLight}
-        <!--
-            Invisible by request: a hit target in the top-right corner that
-            opens the native picker. Kept a real input rather than a custom
-            control so the OS colour wheel and eyedropper come for free.
-        -->
-        <input
-            id="light"
-            type="color"
-            title="light colour"
-            aria-label="light colour"
-            value={lightColor}
-            oninput={(event) => setLightColor(event.currentTarget.value)}
-        />
-    {/if}
+    <!--
+        Invisible by request: a hit target in the top-right corner that opens
+        the native picker. Kept a real input rather than a custom control so the
+        OS colour wheel and eyedropper come for free. It writes the same setting
+        the panel does, so the two stay in step on their own.
+    -->
+    <input
+        id="light"
+        type="color"
+        title="light colour"
+        aria-label="light colour"
+        value={settings["light.color"] as string}
+        oninput={(event) => settings["light.color"] = event.currentTarget.value}
+    />
 
     {#if viewNames.length > 1}
         <div id="picker">
@@ -128,6 +208,8 @@
             <button onclick={() => selectView(viewIndex + 1)} aria-label="next">›</button>
         </div>
     {/if}
+
+    <SettingsPanel {settings} onreset={resetSettings} />
 
     <canvas bind:this={canvas}></canvas>
 </div>

@@ -1,3 +1,5 @@
+import type { VertexAttribute } from "./mesh"
+
 export const BASIC_VERTEX_SHADER = `#version 300 es
 
 // Vec2 since it's a 2d game
@@ -92,6 +94,8 @@ uniform float uTint;          // how strongly the light colours what it lights
 uniform float uAmbientBleed;  // how strongly ambient fills what it does not
 uniform vec3 uAmbientColor;
 
+uniform float uMultiply;      // 0 = add the light's colour, 1 = filter by it
+
 flat out vec3 vLit;
 
 void main() {
@@ -105,8 +109,7 @@ void main() {
     float distSq = dot(toLight, toLight);
     float intensity = min(uLightIntensity / (1.0 + distSq / (uLightRange * uLightRange)), 1.0);
 
-    // Carry the light direction back into hull space, so the per-cell maths
-    // needs no trigonometry. Scale cancels in the normalise.
+    // Carry the light direction back into hull space, so the per-cell maths needs no trigonometry. Scale cancels in the normalise.
     float len = length(toLight);
     vec2 world = len > 0.0001 ? toLight / len : vec2(0.0, -1.0);
     vec2 lightDir = normalize(vec2(
@@ -126,12 +129,34 @@ void main() {
 
     float e = 0.5 + (diffuse - 0.5) * radial * intensity;
 
-    // -1 fully shadowed, 0 base colour, +1 fully lit.
-    float k = (e - 0.5) * 2.0;
+    // -1 fully shadowed, 0 base colour, +1 fully lit. The 2.5 overdrives that
+    // range deliberately, so the extremes are reached before the terminator.
+    float k = (e - 0.5) * 2.5;
 
-    vLit = k >= 0.0
-        ? aColor * (1.0 + uContrast * k) + uLightColor * (k * uTint)
-        : aColor * (1.0 + uShadowDepth * k) + uAmbientColor * (-k * uAmbientBleed);
+    float gain = k >= 0.0 ? 1.0 + uContrast * k : 1.0 + uShadowDepth * k;
+
+    if (uMultiply > 0.5) {
+        // The light filters the surface rather than adding to it.
+        //
+        // Adding can only raise the channels the base is *low* in, which is
+        // desaturation by definition — an additive purple on a green hull
+        // washes it grey instead of colouring it. Filtering takes away the
+        // hues the light lacks, so the surface goes darker and keeps its own
+        // colour, which is also what actually happens to a green object under
+        // a purple lamp.
+        //
+        // uTint keeps its meaning: 0 leaves the surface alone, 1 applies the
+        // light's colour in full. Clamped because k overdrives past 1.
+        vec3 filtered = k >= 0.0
+            ? mix(vec3(1.0), uLightColor, clamp(uTint * k, 0.0, 1.0))
+            : mix(vec3(1.0), uAmbientColor, clamp(uAmbientBleed * -k, 0.0, 1.0));
+
+        vLit = aColor * gain * filtered;
+    } else {
+        vLit = k >= 0.0
+            ? aColor * gain + uLightColor * (k * uTint)
+            : aColor * gain + uAmbientColor * (-k * uAmbientBleed);
+    }
 
     gl_Position = uProjection * vec4(rotated + aTransform.xy, 0.0, 1.0);
 }
@@ -169,3 +194,60 @@ void main() {
     fragColor = vec4(shade(vColor), 1.0);
 }
 `
+
+/**
+ * The shaders a grid mesh can be drawn with, as data.
+ *
+ * A shader and the attribute layout it declares have to agree exactly, and
+ * nothing at runtime notices when they stop agreeing — a mismatched location
+ * silently reads the wrong floats. Keeping them in one entry is the cheapest
+ * way to stop that happening, and it gives the settings panel a list to build
+ * its picker from, the same way engine/hulls gives it the ship list.
+ *
+ * Only mesh shaders live here. BASIC_VERTEX_SHADER takes its colour per
+ * instance rather than per vertex, so it cannot draw a hull at all — it is for
+ * the squares baseline and nothing else.
+ */
+export interface MeshShaderDef {
+    id: string
+    label: string
+    vertex: string
+    fragment: string
+    base: VertexAttribute[]
+    instance: VertexAttribute[]
+    /** Needs the cell centres `buildGridMesh` can append. */
+    needsCellCentres: boolean
+    /** Reads the light and shading uniforms. */
+    lit: boolean
+}
+
+export const MESH_SHADERS: readonly MeshShaderDef[] = [
+    {
+        id: "lit",
+        label: "per-cell lit",
+        vertex: LIT_MESH_VERTEX_SHADER,
+        fragment: LIT_FRAGMENT_SHADER,
+        base: [{ location: 0, size: 2 }, { location: 1, size: 3 }, { location: 2, size: 2 }],
+        instance: [{ location: 3, size: 4 }],
+        needsCellCentres: true,
+        lit: true
+    },
+    {
+        id: "flat",
+        label: "flat (unlit)",
+        vertex: MESH_VERTEX_SHADER,
+        fragment: BASIC_FRAGMENT_SHADER,
+        base: [{ location: 0, size: 2 }, { location: 1, size: 3 }],
+        instance: [{ location: 2, size: 4 }],
+        needsCellCentres: false,
+        lit: false
+    },
+]
+
+/** Throws on an unknown id: that is a typo in code, not bad user data. */
+export function meshShader(id: string): MeshShaderDef {
+    const found = MESH_SHADERS.find(shader => shader.id === id)
+    if (!found) throw new Error(`no mesh shader named "${id}"`)
+
+    return found
+}

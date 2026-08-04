@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "values": {
+    "render.scale": 1,
+    "render.simHz": 60,
+
+    "scene.name": "ships",
+    "scene.hullId": "demoShip",
+    "scene.shader": "lit",
+    "scene.cellSize": 24,
+    "scene.gap": 0.15,
+    "scene.wireColor": "#00ddff",
+
+    "light.color": "#fffbe6",
+    "light.intensity": 1,
+    "light.range": 1.5,
+    "light.offsetX": -0.5,
+    "light.offsetY": -0.5,
+
+    "shading.blend": "additive",
+    "shading.contrast": 0.55,
+    "shading.shadowDepth": 0.45,
+    "shading.tint": 0.22,
+    "shading.ambientBleed": 0.16,
+    "shading.ambientColor": "#284682"
+  }
+}

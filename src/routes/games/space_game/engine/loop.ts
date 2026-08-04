@@ -39,7 +39,9 @@ export interface LoopOptions {
 
 export class GameLoop {
     readonly stats = new FrameStats()
-    readonly stepMs: number
+
+    /** Milliseconds one simulation step covers. Changes with `setSimHz`. */
+    stepMs: number
 
     private readonly maxCatchup: number
     private frameId = 0
@@ -53,6 +55,21 @@ export class GameLoop {
     ) {
         this.stepMs = 1000 / (options.simHz ?? 60)
         this.maxCatchup = options.maxCatchup ?? 5
+    }
+
+    /**
+     * Changes the simulation rate.
+     *
+     * Clears the accumulator rather than rescaling it: leftover time measured
+     * in the old step size means a different number of steps in the new one,
+     * and the worst case is a burst of catch-up right after the change.
+     */
+    setSimHz(hz: number) {
+        const stepMs = 1000 / Math.max(hz, 1)
+        if (stepMs === this.stepMs) return
+
+        this.stepMs = stepMs
+        this.accumulator = 0
     }
 
     start() {

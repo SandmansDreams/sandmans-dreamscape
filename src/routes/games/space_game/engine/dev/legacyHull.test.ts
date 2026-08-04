@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest"
 
+import { hexToRgb } from "../color"
 import { loadHull, loadHullDetailed, type HullData } from "../hull"
 import { appendShape } from "../shapes"
 import {
-    convertLegacyHull, hexToRgb, LEGACY_SHAPES,
+    convertLegacyHull, LEGACY_SHAPES,
     type LegacyCell, type LegacyHull
 } from "./legacyHull"
 
@@ -49,28 +50,6 @@ function centroidOf(data: HullData): { x: number, y: number } {
 
     return { x: cx / total, y: cy / total }
 }
-
-describe("hexToRgb", () => {
-    it("maps the channel extremes", () => {
-        expect(hexToRgb("#ff0000")).toEqual([1, 0, 0])
-        expect(hexToRgb("#000000")).toEqual([0, 0, 0])
-        expect(hexToRgb("#ffffff")).toEqual([1, 1, 1])
-    })
-
-    it("expands the three-digit form", () => {
-        expect(hexToRgb("#f80")).toEqual(hexToRgb("#ff8800"))
-    })
-
-    it("rounds to three decimals", () => {
-        // 0x80 / 255 = 0.50196…
-        expect(hexToRgb("#808080")).toEqual([0.502, 0.502, 0.502])
-    })
-
-    it("rejects anything that is not a colour", () => {
-        expect(() => hexToRgb("#gg0000")).toThrow()
-        expect(() => hexToRgb("blue")).toThrow()
-    })
-})
 
 describe("LEGACY_SHAPES", () => {
     const CENTRE = SIZE / 2
