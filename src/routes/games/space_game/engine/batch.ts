@@ -45,18 +45,34 @@ readonly capacity: number
     /** Preallocated at capacity — refilled each frame, never reallocated. */
     private readonly instanceData: Float32Array
     private readonly floatsPerInstance: number
-    private readonly baseVertexCount: number
+
+    /** Floats per base vertex — kept so geometry can be swapped later. */
+    private readonly baseStride: number
+    private baseVertexCount: number
 
     private count = 0
+
+    /**
+     * What the base geometry is: triangles, or LINES for wireframes.
+     *
+     * Held rather than passed to draw() because it is a property of the
+     * geometry in the buffer — a batch built from line segments can never
+     * sensibly be drawn as triangles.
+     */
+    private readonly primitive: number
 
     constructor(
         private readonly gl2: WebGL2RenderingContext,
         baseGeometry: Float32Array,
         baseLayout: VertexAttribute[],
         instanceLayout: VertexAttribute[],
-        capacity: number
+        capacity: number,
+        primitive: number = gl2.TRIANGLES
     ) {
+        this.primitive = primitive
+
         const baseStride = baseLayout.reduce((total, a) => total + a.size, 0)
+        this.baseStride = baseStride
         this.baseVertexCount = baseGeometry.length / baseStride
 
         this.floatsPerInstance = instanceLayout.reduce((total, a) => total + a.size, 0)
@@ -86,6 +102,19 @@ readonly capacity: number
 
     begin() {
         this.count = 0
+    }
+
+    /**
+     * Replaces the base geometry in place.
+     *
+     * The attribute layout is unchanged, so the VAO stays valid — only the
+     * buffer contents and the vertex count move. Without this, an edited hull
+     * would mean rebuilding the batch, its VAO and both of its buffers.
+     */
+    setBaseGeometry(data: Float32Array) {
+        this.gl2.bindBuffer(this.gl2.ARRAY_BUFFER, this.baseBuffer)
+        this.gl2.bufferData(this.gl2.ARRAY_BUFFER, data, this.gl2.STATIC_DRAW)
+        this.baseVertexCount = data.length / this.baseStride
     }
 
     add(x: number, y: number, rotation: number, scale: number, r: number, g: number, b: number) {
@@ -131,8 +160,9 @@ readonly capacity: number
         this.count++
     }
 
-    draw() {
-        if (this.count === 0) return
+    /** @returns draw calls issued — 0 when there was nothing to draw. */
+    draw(): number {
+        if (this.count === 0) return 0
 
         this.gl2.bindVertexArray(this.vertexArray)
         this.gl2.bindBuffer(this.gl2.ARRAY_BUFFER, this.instanceBuffer)
@@ -145,8 +175,10 @@ readonly capacity: number
         )
 
         this.gl2.drawArraysInstanced(
-            this.gl2.TRIANGLES, 0, this.baseVertexCount, this.count
+            this.primitive, 0, this.baseVertexCount, this.count
         )
+
+        return 1
     }
 
     dispose() {

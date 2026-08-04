@@ -1,4 +1,4 @@
-import { appendShape, DRAWN_SHAPES, MIRRORABLE_SHAPES, type BlockShape } from "./shapes"
+import { appendShape, DRAWN_SHAPES, MIRRORABLE_SHAPES, type BlockShape } from "../shapes"
 
 /**
  * A visual proof sheet for the tessellator: one row per shape, four columns of

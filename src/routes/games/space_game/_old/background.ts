@@ -1,5 +1,5 @@
 import {Vector2} from "./physics"
-import type { Camera } from "../types"
+import type { Camera } from "./types"
 
 const starColors = [30, 50, 60, 150]
 

@@ -43,6 +43,33 @@ export const DRAWN_SHAPES: readonly BlockShape[] =
  */
 export const MIRRORABLE_SHAPES: readonly BlockShape[] = ["halfWedge", "halfArc"]
 
+/**
+ * Named turn values, so hull code says what it means.
+ *
+ * Writing `turns: 3` while meaning "bite out of the north-west" is a real and
+ * silent mistake — the hull still renders, just wrong. These are verified in
+ * the spec by checking where each variant's mass actually lands, so they
+ * cannot drift from the tessellator.
+ */
+
+/** Which corner the arc's rounded bite is taken out of. */
+export const ARC_BITE = { SE: 0, SW: 1, NW: 2, NE: 3 } as const
+
+/** Which corner of the wedge keeps its right angle. */
+export const WEDGE_SOLID = { NW: 0, NE: 1, SE: 2, SW: 3 } as const
+
+/** Which corner `quarter` sits in. */
+export const QUARTER_IN = { NW: 0, NE: 1, SE: 2, SW: 3 } as const
+
+/** Which half of the cell `half` fills. */
+export const HALF_FILLS = { N: 0, E: 1, S: 2, W: 3 } as const
+
+/** Which edge `halfWedge` and `halfArc` sit flush against. */
+export const RAMP_ON = { N: 0, E: 1, S: 2, W: 3 } as const
+
+/** Which edge `edgeLine` runs along. */
+export const EDGE_LINE_ON = { N: 0, E: 1, S: 2, W: 3 } as const
+
 /** Segments per quarter-turn of arc. */
 const ARC_SEGMENTS = 8
 

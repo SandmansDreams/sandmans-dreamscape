@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { appendShape, DRAWN_SHAPES, MIRRORABLE_SHAPES, type BlockShape } from "./shapes"
+import {
+    appendShape,
+    ARC_BITE, DRAWN_SHAPES, EDGE_LINE_ON, HALF_FILLS, MIRRORABLE_SHAPES,
+    QUARTER_IN, RAMP_ON, WEDGE_SOLID,
+    type BlockShape
+} from "./shapes"
 
 /**
  * Specification for the block tessellator.
@@ -232,6 +237,53 @@ describe("appendShape", () => {
             for (const shape of SOLID_SHAPES) {
                 expect(build(shape, -1)).toEqual(build(shape, 3))
             }
+        })
+    })
+
+    /**
+     * The named turn constants are the interface hull code actually uses, so
+     * they need pinning to the geometry rather than to a comment. Each is
+     * checked by where the shape's mass lands relative to the cell centre.
+     */
+    describe("direction constants", () => {
+        function expectMassToward(shape: BlockShape, turns: number, compass: string) {
+            const c = centroid(build(shape, turns))
+
+            if (compass.includes("N")) expect(c.y, `${compass}: expected mass north`).toBeLessThan(CELL_CENTRE.y)
+            if (compass.includes("S")) expect(c.y, `${compass}: expected mass south`).toBeGreaterThan(CELL_CENTRE.y)
+            if (compass.includes("W")) expect(c.x, `${compass}: expected mass west`).toBeLessThan(CELL_CENTRE.x)
+            if (compass.includes("E")) expect(c.x, `${compass}: expected mass east`).toBeGreaterThan(CELL_CENTRE.x)
+        }
+
+        it.each(Object.entries(WEDGE_SOLID))("WEDGE_SOLID.%s keeps that corner", (corner, turns) => {
+            expectMassToward("wedge", turns, corner)
+        })
+
+        it.each(Object.entries(HALF_FILLS))("HALF_FILLS.%s fills that side", (side, turns) => {
+            expectMassToward("half", turns, side)
+        })
+
+        it.each(Object.entries(QUARTER_IN))("QUARTER_IN.%s sits in that corner", (corner, turns) => {
+            expectMassToward("quarter", turns, corner)
+        })
+
+        it.each(Object.entries(RAMP_ON))("RAMP_ON.%s sits on that edge", (side, turns) => {
+            expectMassToward("halfWedge", turns, side)
+        })
+
+        it.each(Object.entries(EDGE_LINE_ON))("EDGE_LINE_ON.%s runs along that edge", (side, turns) => {
+            expectMassToward("edgeLine", turns, side)
+        })
+
+        // The arc is the inverse case: the bite is the *absent* corner, so the
+        // remaining mass sits opposite it.
+        it.each(Object.entries(ARC_BITE))("ARC_BITE.%s removes that corner", (corner, turns) => {
+            const opposite = corner
+                .replace("N", "s").replace("S", "n")
+                .replace("E", "w").replace("W", "e")
+                .toUpperCase()
+
+            expectMassToward("arc", turns, opposite)
         })
     })
 

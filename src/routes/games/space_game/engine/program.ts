@@ -101,6 +101,18 @@ export class Program {
         this.gl2.uniformMatrix4fv(this.uniform(name), false, value)
     }
 
+    setFloat(name: string, value: number) {
+        this.gl2.uniform1f(this.uniform(name), value)
+    }
+
+    setVec2(name: string, x: number, y: number) {
+        this.gl2.uniform2f(this.uniform(name), x, y)
+    }
+
+    setVec3(name: string, x: number, y: number, z: number) {
+        this.gl2.uniform3f(this.uniform(name), x, y, z)
+    }
+
     dispose() {
         this.gl2.deleteProgram(this.program)
         this.locations.clear()
