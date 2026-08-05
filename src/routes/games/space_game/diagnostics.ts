@@ -14,18 +14,18 @@ export class Assert {
     }
 
     private static unpack<T>(
-        variables: Record<string, T>
+        variable: T
     ): [string, T] {
-        return Object.entries(variables)[0] as [string, T]
+        const name = Object.keys({variable})[0]
+        return [name, variable]
     }
 
-    static exists<T>( // Checks that a variable works and is non-null
-        variables: Record<string, T>
-    ): asserts variables is Record<string, NonNullable<T>> {
-        const [name, value] = this.unpack(variables)
-
-        if (value == null) {
-            this.fail(`'${name}' was null or undefined at:`, new Error().stack)
+    static exists<T>( // Checks that a variable is non-null
+        variable: T,
+        name: string
+    ): asserts variable is NonNullable<T> {
+        if (variable == null) {
+            this.fail(`'${name}' was null or undefined `, new Error().stack)
         }
     }
 }

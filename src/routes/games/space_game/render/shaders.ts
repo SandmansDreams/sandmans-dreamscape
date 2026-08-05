@@ -6,17 +6,17 @@ export const MINIMAL_2D_VERTEX_SHADER = `#version 300 es
 // Vertex Shader
 precision highp float; // High float precision for positions
 
-uniform mat3 u_Transform; // The transform to apply to the vector
+/////uniform mat3 u_Transform; // The transform to apply to the vector
 
 layout(location = 0) in vec2 a_Vertex; // The vertex location
-layout(location = 1) in vec4 a_Color; // The color location
+layout(location = 1) in vec3 a_Color; // The color location
 
 flat out vec4 v_Color; // Color output
 
 void main() {
-    v_Color = a_Color // Set the color
-    vec3 position = u_Transform * vec3(a_Vertex, 1.0); // Transform the location of the vertex
-    gl_Position = vec4(position.xy, 0.0, 1.0); // Set the output
+    v_Color = vec4(a_Color, 1.0); // Set the color
+    /////vec3 position = u_Transform * vec3(a_Vertex, 1.0); // Transform the location of the vertex
+    gl_Position = vec4(a_Vertex, 0.0, 1.0); // Set the output
 }
 `
 
@@ -33,6 +33,15 @@ void main() {
 }
 `
 
+export const WOOZY_POST_SHADER = `#version 300 es
+// Fragment Shader
+precision mediump float; 
+
+void main() {
+
+}
+`
+
 /*~~~ CLASSES ~~~*/
 export class Program {
     program: WebGLProgram
@@ -45,11 +54,12 @@ export class Program {
     ) {
         this.shaders = shaders
         this.program = this.create(shaders)
+        this.use()
     }
 
     create(shaders: Shader[]) { // Creates a program to run on the GPU
         const program = this.gl2.createProgram()
-        Assert.exists({program})
+        Assert.exists(program, "program")
 
         // Attach each shader to the program
         for (const Shader of shaders) {
@@ -67,9 +77,9 @@ export class Program {
         return program
     }
 
-    addShader(shader: Shader) {
-        this.shaders.push(shader)
-        this.gl2.attachShader(this.program, shader)
+    addShader(Shader: Shader) {
+        this.shaders.push(Shader)
+        this.gl2.attachShader(this.program, Shader.shader)
     }
 
     use() {
@@ -81,7 +91,7 @@ export class Program {
 
         if (location === undefined) {
             location = this.gl2.getUniformLocation(this.program, name)
-            Assert.exists({location})
+            Assert.exists(location, "location")
 
             this.uniforms.set(name, location!)
         }
@@ -136,37 +146,36 @@ export class Shader { // A single shader and its GLSL code
 
 export class Buffer { // An individual buffer for storing data on the GPU
     buffer: WebGLBuffer
+    data: number[]
+    drawType: GLenum
 
     constructor (
         private readonly gl2: WebGL2RenderingContext,
         data: number[],
-        drawType?: GLenum
+        drawType?: GLenum,
     ) {
-        this.buffer = drawType ? this.create(data, drawType) : this.create(data)
-    }
+        this.data = data
+        this.drawType = drawType ? drawType : this.gl2.STATIC_DRAW
 
-    create(data?: number[], drawType?: GLenum) { // Creates a new buffer with a new id and data
         const buffer = this.gl2.createBuffer()
-        Assert.exists({buffer})
+        Assert.exists(buffer, "buffer")
+        this.buffer = buffer
 
-        if (data) {
-            this.passData(data, drawType ? drawType : this.gl2.STATIC_DRAW)
-        }
-
-        return buffer 
+        this.passData(data)
     }
 
-    passData(data: number[], drawType?: GLenum) { // Pass data to the GPU (after setting this to active)
+    passData(data: number[]) { // Pass data to the GPU (after setting this to active)
         this.setActive()
+        this.data = data
 
         this.gl2.bufferData( // Upload data to the GPU
             this.gl2.ARRAY_BUFFER,
             new Float32Array(data), 
-            drawType ? drawType : this.gl2.STATIC_DRAW
+            this.drawType
         )
     }
 
-    setActive(buffer?: WebGLBuffer) { // Changes the active buffer to this buffer
-        this.gl2.bindBuffer(this.gl2.ARRAY_BUFFER, buffer ? buffer : this.buffer)
+    setActive() { // Changes the active buffer to this buffer
+        this.gl2.bindBuffer(this.gl2.ARRAY_BUFFER, this.buffer)
     }
 }

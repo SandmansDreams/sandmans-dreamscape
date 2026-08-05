@@ -1,14 +1,16 @@
 <script lang="ts">
     import { onMount } from "svelte";
     import { Assert } from "./diagnostics";
+  import { MINIMAL_2D_FRAGMENT_SHADER, MINIMAL_2D_VERTEX_SHADER, Program, Shader } from "./render/shaders";
+  import { Mesh } from "./render/mesh";
 
     let canvas = $state<HTMLCanvasElement | null>(null)
     let gl2 = $state<WebGL2RenderingContext | null | undefined>(null)
 
     function resizeCanvas(renderScale: number = 1) {
         if (!canvas || !gl2) {
-            Assert.exists({canvas})
-            Assert.exists({gl2})
+            Assert.exists(canvas, "canvas")
+            Assert.exists(gl2, "gl2")
             return
         }
     
@@ -30,14 +32,30 @@
         return true
     }
 
+    const vertices = [
+        [ 0.0,  0.25,   1, 0, 0],   // top
+        [ 0.5, -0.25,   0, 1, 0],   // bottom right
+        [-0.5, -0.25,   0, 0, 1],   // bottom left
+    ]
+
+    const triangle1 = [vertices[0], vertices[1], vertices[2]].flat()
+
     onMount(() => {
-        Assert.exists({canvas})
+        Assert.exists(canvas, "canvas")
 
         gl2 = canvas?.getContext("webgl2")
-        Assert.exists({gl2})
+        Assert.exists(gl2, "gl2")
+
+        const vertexShader = new Shader(gl2, gl2.VERTEX_SHADER, MINIMAL_2D_VERTEX_SHADER)
+        const fragmentShader = new Shader(gl2, gl2.FRAGMENT_SHADER, MINIMAL_2D_FRAGMENT_SHADER)
+        const program = new Program(gl2, [vertexShader, fragmentShader])
+
+        const mesh = new Mesh(gl2, triangle1)
 
         resizeCanvas()
 
+        program.use()
+        mesh.draw()
     })
 </script>
 
