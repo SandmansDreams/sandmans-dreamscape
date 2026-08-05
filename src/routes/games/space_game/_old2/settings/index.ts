@@ -1,6 +1,6 @@
-import { isHexColor } from "../color"
+import { isHexColor } from "../engine/color"
 import { HULLS } from "../hulls"
-import { MESH_SHADERS } from "../shaders"
+import { MESH_SHADERS } from "../engine/shaders"
 import defaultsFile from "./defaults.json"
 
 /**

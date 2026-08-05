@@ -2,7 +2,7 @@
     import {
         DEFAULTS, SETTINGS_SCHEMA, SETTING_KEYS,
         isModified, settingGroup, type Settings
-    } from "./engine/settings"
+    } from "./settings"
 
     /**
      * Settings, built from the schema rather than written out by hand.

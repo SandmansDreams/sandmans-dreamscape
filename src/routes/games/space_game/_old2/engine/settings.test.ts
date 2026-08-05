@@ -6,7 +6,7 @@ import {
     DEFAULTS, SETTINGS_SCHEMA, SETTINGS_VERSION, SETTING_KEYS,
     diffFromDefaults, isModified, resolveSettings, settingGroup, toStorable,
     type Settings
-} from "./settings"
+} from "../settings"
 
 /**
  * Specification for settings.

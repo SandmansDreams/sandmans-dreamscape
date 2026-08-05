@@ -1,0 +1,50 @@
+# Notes:
+- 8-bit color depth is "full color" to most people, should be fine for this
+- Using TRIANGLE_STRIP is probably most efficient for my purposes but might need some special shader math to figure out, would save on verticies (from n * 3 to n + 2) and GPU strain as a result
+    - Actually NOT, because each vertex needs its own color
+- Use RGBA color in vec4 floats
+    - To make bright, move towards 1
+    - To make dark, move towards 0
+- Lighting
+    - Ambient light - Light that comes from nowhere, will be needed
+        - Good values are between 0.1 and 0.4
+    - Can use cos(angle) to get the amount of reflected light off a surface based on how the light is hitting it
+    - Advanced lighting setup:
+        - Get the amount of ambient light from a light source model.
+        - Calculate the angle between the surface normal vector and the light direction.
+        - Multiply the cosine of the angle times the surface’s diffuse color.
+        - Calculate the angle between the light reflection and the camera direction.
+        - Multiply the cosine of the angle times the light model’s specular color.
+        - Add the ambient, diffuse, and specular colors. This is the color of the pixel for this fragment of the triangle’s surface.
+- One normal per face will always be up for our 2d implementation
+    - Can be calculated from getting cross-product of two tri edges
+- Shaders
+    - Vertex Shader - Transforms each vertex to its correct location for the scene
+    - Fragment Shader - Assigns a color to each pixel that composed part of a shape
+    - GLSL Data types
+        - Uniform - A data value that remains constant
+        - Attribute - A data value that changes for every vertex
+        - Varying - A data value that changes for every fragment
+    - For each model in your scene:
+        - Pass the uniform values
+        - Attach each attribute to an appropriate buffer
+        - Call the gl.drawArrays() function
+    - Variables formatted as 'letter_Name', letter being what kind of variable it is
+- When rendering, minimize "context switching":
+    - Selecting a shader program
+    - Setting a uniform variable's value
+    - Attaching an attribute to a buffer
+    - Any action that changes gl JS object
+    - In the ideal case, you will copy all of your model data to the GPU only once
+- Optimal GPU passing:
+    - Put static data into a separate buffer and pass it at the beginning
+    - Put any changing data into a separate buffer
+    - First get stuff to render correctly, then optimize later
+- Buffers
+    - A block of memory that can be quidky accessed on the GPU
+    - All buffers will be composed of Float32Array (7 digits of accuracy)
+
+
+
+# ToDo:
+- 
