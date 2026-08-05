@@ -33,12 +33,58 @@ void main() {
 }
 `
 
-export const WOOZY_POST_SHADER = `#version 300 es
-// Fragment Shader
-precision mediump float; 
+export const CHROMATIC_ABERRATION_2D_VERTEX_SHADER = `#version 300 es
+// Vertex Shader - screen-covering triangle, no attributes needed
+precision highp float;
+
+out vec2 v_UV;
 
 void main() {
+    // IDs 0,1,2 -> UV (0,0),(2,0),(0,2) -> clip (-1,-1),(3,-1),(-1,3)
+    v_UV = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+    gl_Position = vec4(v_UV * 2.0 - 1.0, 0.0, 1.0);
+}
+`
 
+export const CHROMATIC_ABERRATION_2D_FRAGMENT_SHADER = `#version 300 es
+// Fragment Shader
+precision highp float; 
+
+uniform sampler2D u_Scene;  // The rendered scene
+uniform vec2 u_Resolution;  // Size of the framebuffer being drawn INTO, in pixels
+uniform float u_Time;       // Seconds since start, drives the rotation
+uniform float u_Intensity;  // 0.0 = off. Subtle at 0.01-0.03, wild past 0.1
+
+in vec2 v_UV;
+
+out vec4 fragColor;
+
+void main() {
+    // Nothing to do when the effect is off. Uniform branches are coherent
+    // across the whole draw, so this costs essentially nothing.
+    if (u_Intensity <= 0.0) {
+        fragColor = texture(u_Scene, v_UV);
+        return;
+    }
+
+    // Split the three channels 120 degrees apart, rotating over time
+    float angle = u_Time;
+    vec2 redOffset = vec2(cos(angle), sin(angle));
+    angle += radians(120.0);
+    vec2 greenOffset = vec2(cos(angle), sin(angle));
+    angle += radians(120.0);
+    vec2 blueOffset = vec2(cos(angle), sin(angle));
+
+    // Offset grows with distance from screen center: zero in the middle,
+    // strongest at the corners. Measured in pixels.
+    float offsetSize = u_Intensity * length(gl_FragCoord.xy - 0.5 * u_Resolution);
+
+    // Sample each channel from a slightly different place (pixels -> UV)
+    float red   = texture(u_Scene, v_UV - offsetSize * redOffset   / u_Resolution).r;
+    float green = texture(u_Scene, v_UV - offsetSize * greenOffset / u_Resolution).g;
+    float blue  = texture(u_Scene, v_UV - offsetSize * blueOffset  / u_Resolution).b;
+
+    fragColor = vec4(red, green, blue, 1.0);
 }
 `
 
@@ -75,11 +121,6 @@ export class Program {
         }
 
         return program
-    }
-
-    addShader(Shader: Shader) {
-        this.shaders.push(Shader)
-        this.gl2.attachShader(this.program, Shader.shader)
     }
 
     use() {

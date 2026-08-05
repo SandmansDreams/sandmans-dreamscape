@@ -2,8 +2,9 @@ import type { Vec3Like } from "ts-gl-matrix";
 import { Buffer } from "./shaders";
 import { Assert } from "../diagnostics";
 
-export const ATTR_VERTEX = 0
-export const ATTR_COLOR = 1
+// Gets the attibute from the location, should be moved to shader
+export const ATTR_VERTEX = 0 
+export const ATTR_COLOR = 1 
 const FLOATS_PER_VERTEX = 5          // x, y, r, g, b
 const STRIDE = FLOATS_PER_VERTEX * 4 // bytes
 

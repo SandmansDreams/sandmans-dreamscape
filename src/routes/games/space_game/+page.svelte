@@ -1,17 +1,28 @@
 <script lang="ts">
     import { onMount } from "svelte";
     import { Assert } from "./diagnostics";
-  import { MINIMAL_2D_FRAGMENT_SHADER, MINIMAL_2D_VERTEX_SHADER, Program, Shader } from "./render/shaders";
-  import { Mesh } from "./render/mesh";
+    import {
+        MINIMAL_2D_VERTEX_SHADER,
+        MINIMAL_2D_FRAGMENT_SHADER,
+        CHROMATIC_ABERRATION_2D_VERTEX_SHADER,
+        CHROMATIC_ABERRATION_2D_FRAGMENT_SHADER,
+        Program,
+        Shader,
+    } from "./render/shaders";
+    import { Mesh } from "./render/mesh";
+    import { RenderTarget } from "./render/targets";
+    import { FullscreenPass } from "./render/passes";
 
     let canvas = $state<HTMLCanvasElement | null>(null)
     let gl2 = $state<WebGL2RenderingContext | null | undefined>(null)
+
+    let intensity = $state(0.01) // The knob that replaced the mouse
 
     function resizeCanvas(renderScale: number = 1) {
         if (!canvas || !gl2) {
             Assert.exists(canvas, "canvas")
             Assert.exists(gl2, "gl2")
-            return
+            return false
         }
     
         const rect = canvas!.getBoundingClientRect()
@@ -33,29 +44,67 @@
     }
 
     const vertices = [
-        [ 0.0,  0.25,   1, 0, 0],   // top
-        [ 0.5, -0.25,   0, 1, 0],   // bottom right
-        [-0.5, -0.25,   0, 0, 1],   // bottom left
+        [ 0.0,  0.25,   1, 1, 1],
+        [ 0.5, -0.25,   1, 1, 1],
+        [-0.5, -0.25,   1, 1, 1],
     ]
-
     const triangle1 = [vertices[0], vertices[1], vertices[2]].flat()
 
     onMount(() => {
         Assert.exists(canvas, "canvas")
+        const cvs = canvas          // capture: narrowing doesn't survive into frame()
 
-        gl2 = canvas?.getContext("webgl2")
+        gl2 = cvs.getContext("webgl2")
         Assert.exists(gl2, "gl2")
+        const gl = gl2              // same reason
 
-        const vertexShader = new Shader(gl2, gl2.VERTEX_SHADER, MINIMAL_2D_VERTEX_SHADER)
-        const fragmentShader = new Shader(gl2, gl2.FRAGMENT_SHADER, MINIMAL_2D_FRAGMENT_SHADER)
-        const program = new Program(gl2, [vertexShader, fragmentShader])
+        // --- Scene ---
+        const sceneProgram = new Program(gl, [
+            new Shader(gl, gl.VERTEX_SHADER, MINIMAL_2D_VERTEX_SHADER),
+            new Shader(gl, gl.FRAGMENT_SHADER, MINIMAL_2D_FRAGMENT_SHADER),
+        ])
+        const mesh = new Mesh(gl, triangle1)
 
-        const mesh = new Mesh(gl2, triangle1)
+        // --- Post ---
+        resizeCanvas() // size the canvas before the target copies its dimensions
+        const sceneTarget = new RenderTarget(gl, cvs.width, cvs.height)
+        const chromatic = new FullscreenPass(
+            gl,
+            CHROMATIC_ABERRATION_2D_VERTEX_SHADER,
+            CHROMATIC_ABERRATION_2D_FRAGMENT_SHADER,
+        )
 
-        resizeCanvas()
+        let running = true
+        const start = performance.now()
 
-        program.use()
-        mesh.draw()
+        function frame(now: number) {
+            if (!running) return
+
+            if (resizeCanvas()) {
+                sceneTarget.resize(cvs.width, cvs.height)
+            }
+
+            // Pass 1: draw the game into the offscreen target
+            sceneTarget.bind()
+            gl.clearColor(0, 0, 0, 1)
+            gl.clear(gl.COLOR_BUFFER_BIT)
+
+            sceneProgram.use()
+            mesh.draw()
+
+            // Pass 2: draw that target through the effect onto the canvas
+            RenderTarget.bindCanvas(gl, cvs.width, cvs.height)
+            chromatic.draw(sceneTarget, (program) => {
+                gl.uniform2f(program.uniform("u_Resolution"), cvs.width, cvs.height)
+                gl.uniform1f(program.uniform("u_Time"), (now - start) / 1000)
+                gl.uniform1f(program.uniform("u_Intensity"), intensity)
+            })
+
+            requestAnimationFrame(frame)
+        }
+        requestAnimationFrame(frame)
+
+        return () => { running = false } // stop the loop on unmount
     })
 </script>
 
