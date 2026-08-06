@@ -29,6 +29,7 @@ type Mode = "instanced" | "batched" | "per-mesh"
 class SquaresScene implements DevSceneInstance {
     private readonly simple: Program    // per-vertex colour, one transform per draw
     private readonly instanced: Program // per-instance transform and colour
+    private readonly gl2: WebGL2RenderingContext
 
     // Only the resources for the active mode are alive at any moment.
     private meshes: Mesh[] = []         // per-mesh
@@ -65,17 +66,20 @@ class SquaresScene implements DevSceneInstance {
         return BASE_VIEW_HEIGHT / this.zoom
     }
 
-    constructor(private readonly context: SceneContext) {
-        const gl2 = context.gl2
+    constructor(
+        private readonly context: SceneContext
+        
+    ) {
+        this.gl2 = context.gl2
 
-        this.simple = new Program(gl2, [
-            new Shader(gl2, gl2.VERTEX_SHADER, MINIMAL_2D_VERTEX_SOURCE),
-            new Shader(gl2, gl2.FRAGMENT_SHADER, MINIMAL_2D_FRAGMENT_SOURCE),
+        this.simple = new Program(this.gl2, [
+            new Shader(this.gl2, this.gl2.VERTEX_SHADER, MINIMAL_2D_VERTEX_SOURCE),
+            new Shader(this.gl2, this.gl2.FRAGMENT_SHADER, MINIMAL_2D_FRAGMENT_SOURCE),
         ])
 
-        this.instanced = new Program(gl2, [
-            new Shader(gl2, gl2.VERTEX_SHADER, INSTANCED_2D_VERTEX_SOURCE),
-            new Shader(gl2, gl2.FRAGMENT_SHADER, MINIMAL_2D_FRAGMENT_SOURCE),
+        this.instanced = new Program(this.gl2, [
+            new Shader(this.gl2, this.gl2.VERTEX_SHADER, INSTANCED_2D_VERTEX_SOURCE),
+            new Shader(this.gl2, this.gl2.FRAGMENT_SHADER, MINIMAL_2D_FRAGMENT_SOURCE),
         ])
     }
 
@@ -84,7 +88,7 @@ class SquaresScene implements DevSceneInstance {
         const mode = settings.string("mode") as Mode
 
         const countChanged = count !== this.builtCount
-        if (countChanged) {
+        if (count !== this.builtCount) {
             this.reseed(count)   // must run first - buildFor() reads this.color
             this.builtCount = count
         }

@@ -38,6 +38,7 @@ class PostProcessScene implements DevSceneInstance {
     private readonly program: Program
     private readonly chromatic: FullscreenPass
     private readonly scanlines: FullscreenPass
+    private readonly gl2: WebGL2RenderingContext
     private mesh: Mesh
     private builtPattern: string
     private time = 0
@@ -46,7 +47,6 @@ class PostProcessScene implements DevSceneInstance {
     private crtIntensity = 0
     private falloff = 1
     private scanlineCount = 200
-    private readonly gl2: WebGL2RenderingContext
 
     constructor(
         private readonly context: SceneContext,
