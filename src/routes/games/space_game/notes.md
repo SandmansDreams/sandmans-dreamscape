@@ -44,7 +44,5 @@
     - A block of memory that can be quidky accessed on the GPU
     - All buffers will be composed of Float32Array (7 digits of accuracy)
 
-
-
-# ToDo:
-- 
+# To Do:
+- Add scenes and dev tools

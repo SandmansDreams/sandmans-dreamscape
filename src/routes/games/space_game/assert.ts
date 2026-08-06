@@ -28,4 +28,8 @@ export class Assert {
             this.fail(`'${name}' was null or undefined `, new Error().stack)
         }
     }
+
+    static that(condition: boolean, reason: string): asserts condition { // Checks that a condition is true
+        if (!condition) this.fail(reason, new Error().stack)
+    }
 }

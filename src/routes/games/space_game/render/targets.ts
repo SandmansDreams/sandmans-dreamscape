@@ -1,4 +1,4 @@
-import { Assert } from "../diagnostics"
+import { Assert } from "../assert"
 
 
 export class RenderTarget { // Offscreen framebuffer for texture sampling post-effects

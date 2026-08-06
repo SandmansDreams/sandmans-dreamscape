@@ -1,22 +1,31 @@
 <script lang="ts">
-    import { onMount } from "svelte";
-    import { Assert } from "./diagnostics";
-    import {
-        MINIMAL_2D_VERTEX_SHADER,
-        MINIMAL_2D_FRAGMENT_SHADER,
-        CHROMATIC_ABERRATION_2D_VERTEX_SHADER,
-        CHROMATIC_ABERRATION_2D_FRAGMENT_SHADER,
-        Program,
-        Shader,
-    } from "./render/shaders";
-    import { Mesh } from "./render/mesh";
-    import { RenderTarget } from "./render/targets";
+    import { onMount, untrack } from "svelte";
+    import { Assert } from "./assert";
+    import { DEV_SCENES, DevHarness, type DevSceneDefinition } from "./dev/DevScene";
+    import { defaultValues, type SettingValues } from "./settings";
     import { FullscreenPass } from "./render/passes";
+    import { MINIMAL_2D_FRAGMENT_SOURCE, MINIMAL_2D_VERTEX_SOURCE, PASSTHROUGH_FRAGMENT_SOURCE } from "./render/shaders";
+    import { RenderTarget } from "./render/targets";
+    import SettingsPanel from "./dev/SettingsPanel.svelte";
+    
 
     let canvas = $state<HTMLCanvasElement | null>(null)
     let gl2 = $state<WebGL2RenderingContext | null | undefined>(null)
 
-    let intensity = $state(0.01) // The knob that replaced the mouse
+    // Dev mode
+    let devMode = $state(true) // If want only in dev, swith to 'import.meta.env.DEV'
+    let harness = $state<DevHarness | null>(null)
+    let selected = $state<DevSceneDefinition | null>(DEV_SCENES[0] ?? null)
+    let values = $state<SettingValues>(
+        DEV_SCENES[0] ? defaultValues(DEV_SCENES[0].settings) : {}
+    )
+    let fps = $state(0)
+    let fpsClass = $derived(fps >= 55 ? "good" : fps >= 30 ? "ok" : "bad")
+
+    function selectScene(definition: DevSceneDefinition) {
+        selected = definition
+        values = defaultValues(definition.settings) // reset before the scene loads
+    }
 
     function resizeCanvas(renderScale: number = 1) {
         if (!canvas || !gl2) {
@@ -43,77 +52,85 @@
         return true
     }
 
-    const vertices = [
-        [ 0.0,  0.25,   1, 1, 1],
-        [ 0.5, -0.25,   1, 1, 1],
-        [-0.5, -0.25,   1, 1, 1],
-    ]
-    const triangle1 = [vertices[0], vertices[1], vertices[2]].flat()
+    // Rebuild the scene when the selection changes - untrack keeps a slider
+    // drag from tearing down and recreating every GPU resource
+    $effect(() => {
+        const definition = selected
+        if (!harness || !definition) return
+        harness.load(definition, untrack(() => values))
+    })
+
+    // Push value changes through every frame without reloading
+    $effect(() => {
+        harness?.setValues(values)
+    })
 
     onMount(() => {
         Assert.exists(canvas, "canvas")
-        const cvs = canvas          // capture: narrowing doesn't survive into frame()
 
-        gl2 = cvs.getContext("webgl2")
+        gl2 = canvas.getContext("webgl2")
         Assert.exists(gl2, "gl2")
-        const gl = gl2              // same reason
 
-        // --- Scene ---
-        const sceneProgram = new Program(gl, [
-            new Shader(gl, gl.VERTEX_SHADER, MINIMAL_2D_VERTEX_SHADER),
-            new Shader(gl, gl.FRAGMENT_SHADER, MINIMAL_2D_FRAGMENT_SHADER),
-        ])
-        const mesh = new Mesh(gl, triangle1)
-
-        // --- Post ---
         resizeCanvas() // size the canvas before the target copies its dimensions
-        const sceneTarget = new RenderTarget(gl, cvs.width, cvs.height)
-        const chromatic = new FullscreenPass(
-            gl,
-            CHROMATIC_ABERRATION_2D_VERTEX_SHADER,
-            CHROMATIC_ABERRATION_2D_FRAGMENT_SHADER,
+
+        // Default presentation for scenes that don't override present()
+        const basicPresentation = new FullscreenPass(
+            gl2, PASSTHROUGH_FRAGMENT_SOURCE
         )
 
-        let running = true
-        const start = performance.now()
+        const created = new DevHarness(canvas, gl2, (target) => {
+            RenderTarget.bindCanvas(gl2!, canvas!.width, canvas!.height)
+            basicPresentation.draw(target)
+        })
 
-        function frame(now: number) {
-            if (!running) return
+        harness = created
+        created.start()
 
-            if (resizeCanvas()) {
-                sceneTarget.resize(cvs.width, cvs.height)
-            }
+        const stats = setInterval(() => {fps = created.fps}, 100)
 
-            // Pass 1: draw the game into the offscreen target
-            sceneTarget.bind()
-            gl.clearColor(0, 0, 0, 1)
-            gl.clear(gl.COLOR_BUFFER_BIT)
-
-            sceneProgram.use()
-            mesh.draw()
-
-            // Pass 2: draw that target through the effect onto the canvas
-            RenderTarget.bindCanvas(gl, cvs.width, cvs.height)
-            chromatic.draw(sceneTarget, (program) => {
-                gl.uniform2f(program.uniform("u_Resolution"), cvs.width, cvs.height)
-                gl.uniform1f(program.uniform("u_Time"), (now - start) / 1000)
-                gl.uniform1f(program.uniform("u_Intensity"), intensity)
-            })
-
-            requestAnimationFrame(frame)
+        return () => {
+            clearInterval(stats)
+            created.dispose()
+            harness = null
         }
-        requestAnimationFrame(frame)
-
-        return () => { running = false } // stop the loop on unmount
     })
 </script>
 
-<svelte:window /* onkeydown={onKeyDown} */ />
+<svelte:window onkeydown={(e) => { if (e.key === "`") devMode = !devMode }} />
 
 <div id="container">
-    <div id="stats">
+    {#if devMode}
+        <div id="dev">
+            <header>
+                <span class="title">DEV</span>
+                <span class="fps {fpsClass}">{fps.toFixed(0)} fps</span>
+            </header>
 
-    </div>
+            <span class="select">
+                <select
+                    value={selected?.id ?? ""}
+                    onchange={(e) => {
+                        const found = DEV_SCENES.find((s) => s.id === e.currentTarget.value)
+                        if (found) selectScene(found)
+                    }}
+                >
+                    {#each DEV_SCENES as definition (definition.id)}
+                        <option value={definition.id}>{definition.name}</option>
+                    {/each}
+                </select>
+            </span>
+
+            {#if selected}
+                <p class="description">{selected.description}</p>
+                <div class="divider"></div>
+                <SettingsPanel schema={selected.settings} bind:values />
+            {:else}
+                <p class="description">No dev scenes found.</p>
+            {/if}
+
+            <footer>` toggles this panel</footer>
+        </div>
+    {/if}
 
     <canvas bind:this={canvas}></canvas>
 </div>
@@ -142,15 +159,105 @@
         overflow: hidden;
     }
 
-    #stats {
+    #dev {
+        --accent: #0df;
+        --line: #0df3;
+        --track: #ffffff14;
+
         position: absolute;
-        top: 8px;
-        left: 8px;
+        top: 12px;
+        left: 12px;
         z-index: 1;
-        font: 12px/1.4 monospace;
-        color: #0df;
+        font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: #fff;
+        background: #070b0ee6;
+        backdrop-filter: blur(6px);
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        box-shadow: 0 6px 24px #000a;
+        padding: 10px;
+        width: 320px;
+        max-height: calc(100vh - 48px);
+        overflow-y: auto;
+    }
+
+    header {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        margin-bottom: 8px;
+    }
+
+    .title {
+        color: var(--accent);
+        letter-spacing: 0.18em;
+        opacity: 0.8;
+    }
+
+    .fps {
+        font-variant-numeric: tabular-nums;
+        opacity: 0.9;
+    }
+
+    .fps.good { color: #6f6; }
+    .fps.ok   { color: #fc4; }
+    .fps.bad  { color: #f66; }
+
+    .select {
+        position: relative;
+        display: block;
+    }
+
+    .select::after { /* the arrow - the native one can't be styled */
+        content: "";
+        position: absolute;
+        top: 50%;
+        right: 8px;
+        margin-top: -2px;
+        border: 4px solid transparent;
+        border-top-color: var(--accent);
         pointer-events: none;
-        white-space: pre-wrap;
-        max-width: calc(100vw - 16px);
+    }
+
+    #dev select {
+        appearance: none;
+        -webkit-appearance: none;
+        width: 100%;
+        padding: 5px 22px 5px 7px;
+        background: var(--track);
+        color: #fff;
+        border: 1px solid var(--line);
+        border-radius: 3px;
+        font: inherit;
+        cursor: pointer;
+    }
+
+    #dev select:hover,
+    #dev select:focus-visible {
+        border-color: var(--accent);
+        outline: none;
+    }
+
+    #dev option {
+        background: #0b0f12;
+        color: #fff;
+    }
+
+    .divider {
+        height: 1px;
+        background: var(--line);
+        margin: 10px 0 8px;
+    }
+
+    .description {
+        opacity: 0.55;
+        margin: 8px 0 0;
+    }
+
+    footer {
+        margin-top: 10px;
+        padding-top: 8px;
+        border-top: 1px solid var(--line);
+        opacity: 0.35;
     }
 </style>
