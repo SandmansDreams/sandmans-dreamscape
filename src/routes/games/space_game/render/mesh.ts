@@ -11,20 +11,25 @@ const STRIDE = FLOATS_PER_VERTEX * 4 // bytes
 export class Mesh {
     private readonly vao: WebGLVertexArrayObject
     private readonly buffer: Buffer
-    readonly vertexCount: number
+    vertexCount: number
 
     constructor(
         private readonly gl2: WebGL2RenderingContext,
-        data: number[]
+        data: number[] | Float32Array,
+        drawType?: GLenum
     ) {
+        Assert.that(
+            data.length % FLOATS_PER_VERTEX === 0,
+            `Mesh data length ${data.length} is not a multiple of ${FLOATS_PER_VERTEX}`
+        )
         this.vertexCount = data.length / FLOATS_PER_VERTEX
 
         const vao = gl2.createVertexArray()
         Assert.exists(vao, "vao")
         this.vao = vao
 
-        gl2.bindVertexArray(vao)            // VAO starts recording
-        this.buffer = new Buffer(gl2, data) // creates, binds, uploads
+        gl2.bindVertexArray(vao)                      // VAO starts recording
+        this.buffer = new Buffer(gl2, data, drawType) // creates, binds, uploads
 
         gl2.enableVertexAttribArray(ATTR_VERTEX)
         gl2.vertexAttribPointer(ATTR_VERTEX, 2, gl2.FLOAT, false, STRIDE, 0)
@@ -33,6 +38,18 @@ export class Mesh {
         gl2.vertexAttribPointer(ATTR_COLOR, 3, gl2.FLOAT, false, STRIDE, 2 * 4)
 
         gl2.bindVertexArray(null)           // stop recording
+    }
+
+    // Re-uploads the vertex data into the existing buffer. The attribute
+    // layout is unchanged, so the VAO stays valid - this is how you animate
+    // geometry without recreating a VAO and VBO every frame.
+    update(data: number[] | Float32Array) {
+        Assert.that(
+            data.length % FLOATS_PER_VERTEX === 0,
+            `Mesh data length ${data.length} is not a multiple of ${FLOATS_PER_VERTEX}`
+        )
+        this.vertexCount = data.length / FLOATS_PER_VERTEX
+        this.buffer.passData(data)
     }
 
     draw() {

@@ -94,12 +94,12 @@ export class Shader { // A single shader and its GLSL code
 
 export class Buffer { // An individual buffer for storing data on the GPU
     buffer: WebGLBuffer
-    data: number[]
+    data: number[] | Float32Array
     drawType: GLenum
 
     constructor (
         private readonly gl2: WebGL2RenderingContext,
-        data: number[],
+        data: number[] | Float32Array,
         drawType?: GLenum,
     ) {
         this.data = data
@@ -112,13 +112,16 @@ export class Buffer { // An individual buffer for storing data on the GPU
         this.passData(data)
     }
 
-    passData(data: number[]) { // Pass data to the GPU (after setting this to active)
+    // Pass data to the GPU (after setting this to active). A Float32Array is
+    // uploaded as-is; anything else has to be copied into one first, so pass
+    // a Float32Array on any path that runs every frame.
+    passData(data: number[] | Float32Array) {
         this.setActive()
         this.data = data
 
         this.gl2.bufferData( // Upload data to the GPU
             this.gl2.ARRAY_BUFFER,
-            new Float32Array(data), 
+            data instanceof Float32Array ? data : new Float32Array(data),
             this.drawType
         )
     }
@@ -132,7 +135,8 @@ export class Buffer { // An individual buffer for storing data on the GPU
 
 /*~~~~ SHADER SOURCES ~~~*/
 export const MINIMAL_2D_VERTEX_SOURCE = `#version 300 es
-    // Vertex Shader
+    // Vertex Shader - per-vertex colour, one transform for the whole draw.
+    // Attribute locations must match ATTR_VERTEX / ATTR_COLOR in mesh.ts.
     precision highp float; // High float precision for positions
 
     uniform mat3 u_Transform; // The transform to apply to the vector
@@ -146,6 +150,34 @@ export const MINIMAL_2D_VERTEX_SOURCE = `#version 300 es
         v_Color = vec4(a_Color, 1.0); // Set the color
         vec3 position = u_Transform * vec3(a_Vertex, 1.0); // Transform the location of the vertex
         gl_Position = vec4(position.xy, 0.0, 1.0); // Set the output
+    }
+`
+
+export const INSTANCED_2D_VERTEX_SOURCE = `#version 300 es
+    // Vertex Shader - instanced sprites.
+    // Attribute locations must match the INST_* constants in batch.ts.
+    precision highp float;
+
+    uniform mat3 u_Transform; // world -> clip, set once per frame
+
+    layout(location = 0) in vec2 a_Vertex;   // per vertex: the base geometry
+    layout(location = 1) in vec2 a_Offset;   // per instance: world position
+    layout(location = 2) in vec2 a_Rotation; // per instance: (cos, sin) * scale
+    layout(location = 3) in vec3 a_Color;    // per instance
+
+    flat out vec4 v_Color;
+
+    void main() {
+        v_Color = vec4(a_Color, 1.0);
+
+        // [c -s; s c] with the scale already folded into c and s
+        vec2 world = a_Offset + vec2(
+            a_Vertex.x * a_Rotation.x - a_Vertex.y * a_Rotation.y,
+            a_Vertex.x * a_Rotation.y + a_Vertex.y * a_Rotation.x
+        );
+
+        vec3 position = u_Transform * vec3(world, 1.0);
+        gl_Position = vec4(position.xy, 0.0, 1.0);
     }
 `
 

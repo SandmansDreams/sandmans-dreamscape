@@ -26,3 +26,7 @@ export class Vector2 {
         return new Vector2(this.x, this.y)
     }
 }
+
+export class PhysicsObject {
+    
+}
