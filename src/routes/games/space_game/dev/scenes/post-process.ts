@@ -4,8 +4,21 @@ import { CHROMATIC_ABERRATION_2D_FRAGMENT_SOURCE, CRT_SCANLINES_FRAGMENT_SOURCE,
 import { quad, triangle } from "../../render/shapes"
 import { RenderTarget } from "../../render/targets"
 import { aspectScale2D } from "../../render/transform"
-import type { Settings } from "../../settings"
+import type { SettingsSchema, ValuesOf } from "../../settings/settings"
 import type { DevSceneDefinition, DevSceneInstance, SceneContext } from "../DevScene"
+
+const SETTINGS = {
+    effect:        { type: "selection", label: "Effect",     default: "chromatic", options: ["chromatic", "scanlines"] },
+    pattern:       { type: "selection", label: "Pattern",    default: "grid",      options: ["grid", "bars", "triangle"] },
+    intensity:     { type: "range",     label: "Aberration", default: 0.02, min: 0,  max: 0.1, step: 0.001 },
+    falloff:       { type: "range",     label: "Falloff",    default: 1,    min: 0,  max: 4,   step: 0.1 },
+    crtIntensity:  { type: "range",     label: "CRT",        default: 0.5,  min: 0,  max: 1,   step: 0.01 },
+    scanlineCount: { type: "range",     label: "Scanlines",  default: 200,  min: 20, max: 600, step: 10 },
+    speed:         { type: "range",     label: "Speed",      default: 1,    min: 0,  max: 4,   step: 0.1 },
+    animate:       { type: "checkbox",  label: "Animate",    default: true },
+} as const satisfies SettingsSchema
+
+type PostValues = ValuesOf<typeof SETTINGS>
 
 function buildPattern(gl2: WebGL2RenderingContext, pattern: string): Mesh {
     const builder = new MeshBuilder()
@@ -34,7 +47,7 @@ function buildPattern(gl2: WebGL2RenderingContext, pattern: string): Mesh {
     return builder.build(gl2)
 }
 
-class PostProcessScene implements DevSceneInstance {
+class PostProcessScene implements DevSceneInstance<PostValues> {
     private readonly program: Program
     private readonly chromatic: FullscreenPass
     private readonly scanlines: FullscreenPass
@@ -66,18 +79,18 @@ class PostProcessScene implements DevSceneInstance {
         this.mesh = buildPattern(this.gl2, this.builtPattern)
     }
 
-    update(dt: number, settings: Settings) {
-        if (settings.boolean("animate")) {
-            this.time += dt * settings.number("speed")
+    update(dt: number, settings: PostValues) {
+        if (settings.animate) {
+            this.time += dt * settings.speed
         }
 
-        this.effect = settings.string("effect")
-        this.intensity = settings.number("intensity")
-        this.crtIntensity = settings.number("crtIntensity")
-        this.falloff = settings.number("falloff")
-        this.scanlineCount = settings.number("scanlineCount")
+        this.effect = settings.effect
+        this.intensity = settings.intensity
+        this.crtIntensity = settings.crtIntensity
+        this.falloff = settings.falloff
+        this.scanlineCount = settings.scanlineCount
 
-        const pattern = settings.string("pattern")
+        const pattern = settings.pattern
         if (pattern !== this.builtPattern) { // rebuild only when it actually changes
             this.mesh.dispose()
             this.mesh = buildPattern(this.gl2, pattern)
@@ -124,20 +137,11 @@ class PostProcessScene implements DevSceneInstance {
     }
 }
 
-const scene: DevSceneDefinition = {
+const scene: DevSceneDefinition<PostValues> = {
     id: "post-process",
     name: "Post Processing",
     description: "Chromatic aberration and CRT scanlines over a high-contrast pattern. Falloff controls how fast the aberration grows toward the corners.",
-    settings: [
-        { type: "selection", key: "effect",        label: "Effect",     default: "chromatic", options: ["chromatic", "scanlines"] },
-        { type: "selection", key: "pattern",       label: "Pattern",    default: "grid",      options: ["grid", "bars", "triangle"] },
-        { type: "range",     key: "intensity",     label: "Aberration", default: 0.02, min: 0,  max: 0.1, step: 0.001 },
-        { type: "range",     key: "falloff",       label: "Falloff",    default: 1,    min: 0,  max: 4,   step: 0.1 },
-        { type: "range",     key: "crtIntensity",  label: "CRT",        default: 0.5,  min: 0,  max: 1,   step: 0.01 },
-        { type: "range",     key: "scanlineCount", label: "Scanlines",  default: 200,  min: 20, max: 600, step: 10 },
-        { type: "range",     key: "speed",         label: "Speed",      default: 1,    min: 0,  max: 4,   step: 0.1 },
-        { type: "checkbox",  key: "animate",       label: "Animate",    default: true },
-    ],
+    settings: SETTINGS,
     create: (context) => new PostProcessScene(context),
 }
 export default scene

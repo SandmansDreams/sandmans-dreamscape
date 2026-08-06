@@ -1,10 +1,14 @@
 <script lang="ts">
-    import type { SettingSchema, SettingValue, SettingValues } from "../settings"
+    import type { SettingsSchema, SettingValue, SettingValues } from "../settings/settings"
 
     let { schema, values = $bindable() }: {
-        schema: readonly SettingSchema[]
+        schema: SettingsSchema
         values: SettingValues
     } = $props()
+
+    // Object key order is insertion order for string keys, so rows appear in
+    // the order the scene declared them
+    let entries = $derived(Object.entries(schema))
 
     // Replace the object rather than mutating, so the parent's effect fires
     function set(key: string, value: number | boolean | string) {
@@ -26,7 +30,7 @@
 </script>
 
 <div class="panel">
-    {#each schema as setting (setting.key)}
+    {#each entries as [key, setting] (key)}
         <label class="row" class:wide={setting.type !== "range"}>
             <span class="name">{setting.label}</span>
 
@@ -36,24 +40,24 @@
                     min={setting.min}
                     max={setting.max}
                     step={setting.step ?? 1}
-                    value={values[setting.key] as number}
-                    style="--fill: {fillPercent(values[setting.key], setting.min, setting.max)}%"
-                    oninput={(e) => set(setting.key, e.currentTarget.valueAsNumber)}
+                    value={values[key] as number}
+                    style="--fill: {fillPercent(values[key], setting.min, setting.max)}%"
+                    oninput={(e) => set(key, e.currentTarget.valueAsNumber)}
                 />
-                <span class="value">{format(values[setting.key], setting.step)}</span>
+                <span class="value">{format(values[key], setting.step)}</span>
 
             {:else if setting.type === "checkbox"}
                 <input
                     type="checkbox"
-                    checked={values[setting.key] as boolean}
-                    onchange={(e) => set(setting.key, e.currentTarget.checked)}
+                    checked={values[key] as boolean}
+                    onchange={(e) => set(key, e.currentTarget.checked)}
                 />
 
             {:else if setting.type === "selection"}
                 <span class="select">
                     <select
-                        value={values[setting.key] as string}
-                        onchange={(e) => set(setting.key, e.currentTarget.value)}
+                        value={values[key] as string}
+                        onchange={(e) => set(key, e.currentTarget.value)}
                     >
                         {#each setting.options as option}
                             <option value={option}>{option}</option>

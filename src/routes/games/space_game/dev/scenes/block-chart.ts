@@ -1,9 +1,16 @@
 import { Camera } from "../../render/camera";
+import { appendText, GLYPH_HEIGHT, measureText } from "../../render/font";
 import { Mesh } from "../../render/mesh";
 import { MINIMAL_2D_FRAGMENT_SOURCE, MINIMAL_2D_VERTEX_SOURCE, Program, Shader } from "../../render/shaders";
 import { appendShape, BLOCK_SHAPES, type BlockShape, MIRRORABLE_SHAPES } from "../../render/shapes";
-import type { Settings } from "../../settings";
+import type { SettingsSchema, ValuesOf } from "../../settings/settings";
 import type { DevSceneDefinition, DevSceneInstance, SceneContext } from "../DevScene";
+
+const SETTINGS = {
+    gap: { type: "range", label: "Gap", default: 8, min: 0, max: 25, step: 1 },
+} as const satisfies SettingsSchema
+
+type ChartValues = ValuesOf<typeof SETTINGS>
 
 const BACKDROP_COLOR: [number, number, number] = [0.10, 0.10, 0.10]
 
@@ -27,15 +34,18 @@ const ROW_COLORS: [number, number, number][] = [
 const TURN_COUNT = 4
 const CELL = 40 // world units per cell; at camera zoom 1 that is 40 pixels
 
-class BlockChart implements DevSceneInstance {
+const LABEL_COLOR: [number, number, number] = [0.55, 0.60, 0.65]
+const FONT_PIXEL = 3  // world units per font pixel, so a glyph is 15 x 21
+const LABEL_GAP = 12  // between a label and the cell it names
+
+class BlockChart implements DevSceneInstance<ChartValues> {
     private readonly canvas: HTMLCanvasElement
     private readonly gl2: WebGL2RenderingContext
     private readonly program: Program
     private readonly camera = new Camera()
 
     private mesh: Mesh | null = null
-    private width = 1
-    private height = 1
+    private bounds = { left: 0, top: 0, right: 1, bottom: 1 }
     private builtGap = -1
 
     constructor(
@@ -52,8 +62,8 @@ class BlockChart implements DevSceneInstance {
         ])
     }
 
-    update(dt: number, settings: Settings): void {
-        const gap = settings.number("gap")
+    update(dt: number, settings: ChartValues): void {
+        const gap = settings.gap
 
         if (gap !== this.builtGap) {
             this.rebuild(gap)
@@ -65,10 +75,8 @@ class BlockChart implements DevSceneInstance {
         if (!this.mesh) return
 
         // Refit every frame so a window resize reframes the chart for free.
-        this.camera.fit(
-            0, 0, this.width, this.height,
-            this.canvas.width, this.canvas.height
-        )
+        const { left, top, right, bottom } = this.bounds
+        this.camera.fit(left, top, right, bottom, this.canvas.width, this.canvas.height)
 
         this.program.use()
         this.gl2.uniformMatrix3fv(
@@ -90,8 +98,7 @@ class BlockChart implements DevSceneInstance {
 
         this.mesh?.dispose()
         this.mesh = new Mesh(this.gl2, built.vertices)
-        this.width = built.width
-        this.height = built.height
+        this.bounds = built.bounds
     }
 
     private pushBackdrop(
@@ -146,23 +153,53 @@ class BlockChart implements DevSceneInstance {
             }
         }
 
+        // Shape name to the left of each row, right-aligned against the grid
+        const [lr, lg, lb] = LABEL_COLOR
+        const glyphHeight = GLYPH_HEIGHT * FONT_PIXEL
+        let widestLabel = 0
+
+        for (let row = 0; row < shapes.length; row++) {
+            const width = measureText(shapes[row], FONT_PIXEL)
+            widestLabel = Math.max(widestLabel, width)
+
+            appendText(
+                out, shapes[row],
+                -LABEL_GAP - width,                    // right edge sits LABEL_GAP from the grid
+                row * step + (cell - glyphHeight) / 2, // vertically centred on the cell
+                FONT_PIXEL, lr, lg, lb
+            )
+        }
+
+        // Turn number above each column; M marks the mirrored group
+        const headerTop = -LABEL_GAP - glyphHeight
+
+        for (const mirrored of anyMirrored ? [false, true] : [false]) {
+            for (let turn = 0; turn < TURN_COUNT; turn++) {
+                const text = (mirrored ? "M" : "T") + turn
+                const width = measureText(text, FONT_PIXEL)
+                const centre = columnX(turn, mirrored) + cell / 2
+
+                appendText(out, text, centre - width / 2, headerTop, FONT_PIXEL, lr, lg, lb)
+            }
+        }
+
         return {
             vertices: new Float32Array(out),
-            width: columns * step - gap + (anyMirrored ? gap : 0),
-            height: Math.max(1, shapes.length) * step - gap,
-            shapes,
-            columns
+            bounds: {
+                left: -LABEL_GAP - widestLabel,
+                top: headerTop,
+                right: columns * step - gap + (anyMirrored ? gap : 0),
+                bottom: Math.max(1, shapes.length) * step - gap,
+            },
         }
     }
 }
 
-const scene: DevSceneDefinition = {
+const scene: DevSceneDefinition<ChartValues> = {
     id: "block-chart",
     name: "Block Chart",
     description: "Every block shape (rows) in all four turns, plus mirrored variants for the shapes that need them. Auto-fits to the viewport.",
-    settings: [
-        { type: "range", key: "gap", label: "Gap", default: 8, min: 0, max: 25, step: 1 },
-    ],
+    settings: SETTINGS,
     create: (context: SceneContext) => new BlockChart(context),
 }
 

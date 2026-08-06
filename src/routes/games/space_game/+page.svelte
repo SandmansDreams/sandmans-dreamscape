@@ -2,12 +2,11 @@
     import { onMount, untrack } from "svelte";
     import { Assert } from "./assert";
     import { DEV_SCENES, DevHarness, type DevSceneDefinition } from "./dev/DevScene";
-    import { defaultValues, type SettingValues } from "./settings";
+    import { defaultValues, loadLastSceneId, saveLastSceneId, type SettingValues } from "./settings/settings";
     import { FullscreenPass } from "./render/passes";
     import { MINIMAL_2D_FRAGMENT_SOURCE, MINIMAL_2D_VERTEX_SOURCE, PASSTHROUGH_FRAGMENT_SOURCE } from "./render/shaders";
     import { RenderTarget } from "./render/targets";
     import SettingsPanel from "./dev/SettingsPanel.svelte";
-    
 
     let canvas = $state<HTMLCanvasElement | null>(null)
     let gl2 = $state<WebGL2RenderingContext | null | undefined>(null)
@@ -15,7 +14,7 @@
     // Dev mode
     let devMode = $state(true) // If want only in dev, swith to 'import.meta.env.DEV'
     let harness = $state<DevHarness | null>(null)
-    let selected = $state<DevSceneDefinition | null>(DEV_SCENES[0] ?? null)
+    let scene = $state<DevSceneDefinition | null>(DEV_SCENES[0] ?? null)
     let values = $state<SettingValues>(
         DEV_SCENES[0] ? defaultValues(DEV_SCENES[0].settings) : {}
     )
@@ -23,8 +22,9 @@
     let fpsClass = $derived(fps >= 55 ? "good" : fps >= 30 ? "ok" : "bad")
 
     function selectScene(definition: DevSceneDefinition) {
-        selected = definition
+        scene = definition
         values = defaultValues(definition.settings) // reset before the scene loads
+        saveLastSceneId(definition.id)
     }
 
     function resizeCanvas(renderScale: number = 1) {
@@ -55,7 +55,7 @@
     // Rebuild the scene when the selection changes - untrack keeps a slider
     // drag from tearing down and recreating every GPU resource
     $effect(() => {
-        const definition = selected
+        const definition = scene
         if (!harness || !definition) return
         harness.load(definition, untrack(() => values))
     })
@@ -66,6 +66,15 @@
     })
 
     onMount(() => {
+        // Restore before the harness exists. The load effect bails out while
+        // `harness` is null, so setting the scene first means it fires once with
+        // the right one rather than building DEV_SCENES[0] and replacing it.
+        // localStorage is only readable in the browser, so this cannot be done
+        // in the $state initialiser above without an SSR/hydration mismatch.
+        const lastId = loadLastSceneId()
+        const restored = DEV_SCENES.find((definition) => definition.id === lastId)
+        if (restored) selectScene(restored)
+
         Assert.exists(canvas, "canvas")
 
         gl2 = canvas.getContext("webgl2")
@@ -108,7 +117,7 @@
 
             <span class="select">
                 <select
-                    value={selected?.id ?? ""}
+                    value={scene?.id ?? ""}
                     onchange={(e) => {
                         const found = DEV_SCENES.find((s) => s.id === e.currentTarget.value)
                         if (found) selectScene(found)
@@ -120,10 +129,10 @@
                 </select>
             </span>
 
-            {#if selected}
-                <p class="description">{selected.description}</p>
+            {#if scene}
+                <p class="description">{scene.description}</p>
                 <div class="divider"></div>
-                <SettingsPanel schema={selected.settings} bind:values />
+                <SettingsPanel schema={scene.settings} bind:values />
             {:else}
                 <p class="description">No dev scenes found.</p>
             {/if}

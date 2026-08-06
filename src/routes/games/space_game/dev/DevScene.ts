@@ -1,4 +1,4 @@
-import { Settings, type SettingSchema, type SettingValues} from "../settings"
+import type { SettingsSchema, SettingValues } from "../settings/settings"
 import { RenderTarget } from "../render/targets"
 
 export interface SceneContext { // Everything the harness hands a scene so it can build itself
@@ -7,16 +7,23 @@ export interface SceneContext { // Everything the harness hands a scene so it ca
     readonly target: RenderTarget
 }
 
-export interface DevSceneDefinition {
+/**
+ * `V` is the scene's own value type, normally `ValuesOf<typeof SETTINGS>`.
+ *
+ * It defaults to `any` so DEV_SCENES can hold scenes with different schemas in
+ * one array. Nothing is lost by that - the harness has no use for the types,
+ * and each scene checks its own values where it declares them.
+ */
+export interface DevSceneDefinition<V = any> {
     readonly id: string
     readonly name: string
     readonly description: string
-    readonly settings: readonly SettingSchema[]
-    create(context: SceneContext): DevSceneInstance
+    readonly settings: SettingsSchema
+    create(context: SceneContext): DevSceneInstance<V>
 }
 
-export interface DevSceneInstance {
-    update(dt: number, settings: Settings): void
+export interface DevSceneInstance<V = any> {
+    update(dt: number, settings: V): void
     render(): void
     present?(target: RenderTarget): void // Override the target
     resize?(width: number, height: number): void
@@ -37,7 +44,7 @@ export const DEV_SCENES: DevSceneDefinition[] = Object.values(modules)
 export class DevHarness {
     readonly target: RenderTarget
     private instance: DevSceneInstance | null = null
-    private settings = new Settings({})
+    private settings: SettingValues = {}
 
     private isRunning = false
     private lastTime = 0
@@ -55,7 +62,7 @@ export class DevHarness {
 
     load(definition: DevSceneDefinition, values: SettingValues) {
         this.instance?.dispose()
-        this.settings = new Settings(values)
+        this.settings = values
         this.instance = definition.create({
             gl2: this.gl2,
             canvas: this.canvas,
@@ -64,7 +71,7 @@ export class DevHarness {
     }
 
     setValues(values: SettingValues) {
-        this.settings = new Settings(values)
+        this.settings = values
     }
 
     start() {

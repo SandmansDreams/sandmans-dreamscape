@@ -1,5 +1,5 @@
 import type { DevSceneDefinition, DevSceneInstance, SceneContext } from "../DevScene"
-import type { Settings } from "../../settings"
+import type { SettingsSchema, ValuesOf } from "../../settings/settings"
 import {
     INSTANCED_2D_VERTEX_SOURCE,
     MINIMAL_2D_FRAGMENT_SOURCE,
@@ -24,9 +24,21 @@ const MAX_STEPS = 5             // spiral-of-death guard
 const FLOATS_PER_SQUARE = 30    // 6 vertices x [x, y, r, g, b]
 const BASE_VIEW_HEIGHT = 800    // world units visible vertically at zoom 1
 
-type Mode = "instanced" | "batched" | "per-mesh"
+const SETTINGS = {
+    mode:  { type: "selection", label: "Draw mode", default: "instanced",
+             options: ["instanced", "batched", "per-mesh"] },
+    count: { type: "range", label: "Squares", default: 1000, min: 100, max: 500000, step: 10 },
+    size:  { type: "range", label: "Size",    default: 5,    min: 1,   max: 40,     step: 1 },
+    zoom:  { type: "range", label: "Zoom",    default: 1,    min: 0.2, max: 4,      step: 0.05 },
+} as const satisfies SettingsSchema
 
-class SquaresScene implements DevSceneInstance {
+type SquaresValues = ValuesOf<typeof SETTINGS>
+
+// Inferred straight from the schema's options - adding a mode there is a
+// compile error here until the switch in render() handles it.
+type Mode = SquaresValues["mode"]
+
+class SquaresScene implements DevSceneInstance<SquaresValues> {
     private readonly simple: Program    // per-vertex colour, one transform per draw
     private readonly instanced: Program // per-instance transform and colour
     private readonly gl2: WebGL2RenderingContext
@@ -83,9 +95,9 @@ class SquaresScene implements DevSceneInstance {
         ])
     }
 
-    update(dt: number, settings: Settings) {
-        const count = settings.number("count")
-        const mode = settings.string("mode") as Mode
+    update(dt: number, settings: SquaresValues) {
+        const count = settings.count
+        const mode = settings.mode
 
         const countChanged = count !== this.builtCount
         if (count !== this.builtCount) {
@@ -98,8 +110,8 @@ class SquaresScene implements DevSceneInstance {
         }
 
         this.mode = mode
-        this.size = settings.number("size")
-        this.zoom = settings.number("zoom")
+        this.size = settings.size
+        this.zoom = settings.zoom
 
         // Fixed-step integration, interpolated at render time
         this.accumulator += dt
@@ -343,17 +355,11 @@ class SquaresScene implements DevSceneInstance {
     }
 }
 
-const scene: DevSceneDefinition = {
+const scene: DevSceneDefinition<SquaresValues> = {
     id: "render-basic-benchmark",
     name: "Basic Squares Benchmark",
     description: "The same field of squares drawn three ways. Instanced is one draw call; batched rebuilds one buffer per frame; per-mesh issues three GL calls per square and will stall hard at high counts.",
-    settings: [
-        { type: "selection", key: "mode",   label: "Draw mode", default: "instanced",
-          options: ["instanced", "batched", "per-mesh"] },
-        { type: "range", key: "count",      label: "Squares", default: 1000,   min: 100,   max: 500000,   step: 10},
-        { type: "range", key: "size", label: "Size", default: 5, min: 1,   max: 40, step: 1 },
-        { type: "range", key: "zoom", label: "Zoom", default: 1, min: 0.2, max: 4,  step: 0.05 },
-    ],
+    settings: SETTINGS,
     create: (context: SceneContext) => new SquaresScene(context),
 }
 
