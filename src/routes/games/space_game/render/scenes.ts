@@ -8,6 +8,20 @@ export interface SceneContext {
     readonly target: RenderTarget
 
     /**
+     * A second target the same size as `target`, for running an effect at scene
+     * resolution rather than canvas resolution.
+     *
+     * A fullscreen pass drawn straight to the canvas executes once per canvas
+     * pixel, so its maths runs at full resolution no matter how small the scene
+     * target is - the scene looks chunky but the effect stays smooth. Draw the
+     * effect in here and hand it to presentToCanvas() to keep both chunky.
+     */
+    readonly effectTarget: RenderTarget
+
+    /** Upscales a target to the canvas with the runner's default passthrough. */
+    presentToCanvas(target: RenderTarget): void
+
+    /**
      * Fraction of the canvas the offscreen target is rendered at. 1 is native,
      * 0.25 is quarter resolution upscaled at present time.
      *
@@ -53,6 +67,7 @@ export interface SceneDefinition<V = any> {
  */
 export class SceneRunner {
     readonly target: RenderTarget
+    readonly effectTarget: RenderTarget
     private instance: SceneInstance | null = null
     private settings: SettingValues = {}
 
@@ -74,6 +89,7 @@ export class SceneRunner {
 
         this.syncCanvasSize()
         this.target = new RenderTarget(gl2, ...this.targetSize())
+        this.effectTarget = new RenderTarget(gl2, ...this.targetSize())
     }
 
     /**
@@ -95,7 +111,9 @@ export class SceneRunner {
             gl2: this.gl2,
             canvas: this.canvas,
             target: this.target,
+            effectTarget: this.effectTarget,
             setRenderScale: (scale) => this.setRenderScale(scale),
+            presentToCanvas: (target) => this.present(target),
         })
     }
 
@@ -161,6 +179,7 @@ export class SceneRunner {
                 this.renderScale = this.pendingScale
                 const [width, height] = this.targetSize()
                 this.target.resize(width, height)
+                this.effectTarget.resize(width, height) // kept in step with target
                 this.instance?.resize?.(width, height)
             }
 

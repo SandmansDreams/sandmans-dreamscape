@@ -9,6 +9,7 @@ import type { SceneContext, SceneInstance } from "../../render/scenes"
 import type { DevSceneDefinition } from "../DevScene"
 
 const SETTINGS = {
+    resolution: { type: "range", label: "Resolution",    default: 1,   min: 0.05,  max: 1,  step: 0.05 },
     effect:        { type: "selection", label: "Effect",     default: "chromatic", options: ["chromatic", "scanlines"] },
     pattern:       { type: "selection", label: "Pattern",    default: "grid",      options: ["grid", "bars", "triangle"] },
     intensity:     { type: "range",     label: "Aberration", default: 0.02, min: 0,  max: 0.1, step: 0.001 },
@@ -81,6 +82,8 @@ class PostProcessScene implements SceneInstance<PostValues> {
     }
 
     update(dt: number, settings: PostValues) {
+        this.context.setRenderScale(settings.resolution)
+
         if (settings.animate) {
             this.time += dt * settings.speed
         }
@@ -112,22 +115,28 @@ class PostProcessScene implements SceneInstance<PostValues> {
     }
 
     present(target: RenderTarget) { // Target -> effect -> canvas
-        const { gl2, canvas } = this.context
+        const { gl2, effectTarget, presentToCanvas } = this.context
 
-        RenderTarget.bindCanvas(gl2, canvas.width, canvas.height)
+        // Run the effect at scene resolution, not canvas resolution. Drawing
+        // straight to the canvas runs the shader once per canvas pixel, which
+        // leaves a smooth effect sitting over a chunky scene.
+        effectTarget.bind()
 
         const scanlines = this.effect === "scanlines"
         const pass = scanlines ? this.scanlines : this.chromatic
 
         // Uniforms the active shader doesn't declare resolve to null, and
-        // setting a null location is a defined no-op
+        // setting a null location is a defined no-op.
+        // u_Resolution and u_SceneResolution are supplied by the pass itself.
         pass.draw(target, (program) => {
-            gl2.uniform2f(program.uniform("u_Resolution"), canvas.width, canvas.height)
             gl2.uniform1f(program.uniform("u_Time"), this.time)
             gl2.uniform1f(program.uniform("u_Intensity"), scanlines ? this.crtIntensity : this.intensity)
             gl2.uniform1f(program.uniform("u_Falloff"), this.falloff)
             gl2.uniform1f(program.uniform("u_ScanlineCount"), this.scanlineCount)
         })
+
+        // Then upscale the finished low-res image to the canvas
+        presentToCanvas(effectTarget)
     }
 
     dispose() {

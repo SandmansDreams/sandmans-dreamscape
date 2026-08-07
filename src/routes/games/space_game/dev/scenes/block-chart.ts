@@ -8,10 +8,10 @@ import type { SceneContext, SceneInstance } from "../../render/scenes";
 import type { DevSceneDefinition } from "../DevScene";
 
 const SETTINGS = {
+    resolution: { type: "range", label: "Resolution",    default: 1,   min: 0.05,  max: 1,  step: 0.05 },
     rows:    { type: "range", label: "Rows",    default: 6,   min: 1,  max: 13,  step: 1 },
     gap:     { type: "range", label: "Gap",     default: 5,   min: 0,  max: 40,  step: 1 },
     mode:    { type: "selection", label: "Mode", default: "squares", options: ["lines", "squares"]},
-    resolution: { type: "range", label: "Resolution",    default: 1,   min: 0.05,  max: 1,  step: 0.05 },
 } as const satisfies SettingsSchema
 
 type ChartValues = ValuesOf<typeof SETTINGS>

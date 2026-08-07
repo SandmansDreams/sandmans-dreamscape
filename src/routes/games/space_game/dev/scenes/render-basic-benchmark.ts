@@ -26,6 +26,7 @@ const FLOATS_PER_SQUARE = 30    // 6 vertices x [x, y, r, g, b]
 const BASE_VIEW_HEIGHT = 800    // world units visible vertically at zoom 1
 
 const SETTINGS = {
+    resolution: { type: "range", label: "Resolution",    default: 1,   min: 0.05,  max: 1,  step: 0.05 },
     mode:  { type: "selection", label: "Draw mode", default: "instanced",
              options: ["instanced", "batched", "per-mesh"] },
     count: { type: "range", label: "Squares", default: 1000, min: 100, max: 500000, step: 10 },
@@ -97,6 +98,8 @@ class SquaresScene implements SceneInstance<SquaresValues> {
     }
 
     update(dt: number, settings: SquaresValues) {
+        this.context.setRenderScale(settings.resolution)
+
         const count = settings.count
         const mode = settings.mode
 

@@ -31,6 +31,16 @@ export class FullscreenPass { // Runs a fragment shader over an entire image
         this.gl2.bindTexture(this.gl2.TEXTURE_2D, input.texture)
         this.gl2.uniform1i(this.program.uniform("u_Scene"), 0)
 
+        // Both resolutions, since they differ whenever the scene renders at a
+        // reduced scale. gl_FragCoord is in destination pixels, so u_Resolution
+        // comes from the viewport rather than the input; u_SceneResolution is
+        // the input's own size, for anything needing a texel step.
+        // Either resolves to null and is skipped if the shader omits it.
+        const viewport = this.gl2.getParameter(this.gl2.VIEWPORT) as Int32Array
+        this.gl2.uniform2f(this.program.uniform("u_Resolution"), viewport[2], viewport[3])
+        this.gl2.uniform2f(this.program.uniform("u_SceneResolution"), input.width, input.height)
+
+        // After the defaults, so a scene can still override either
         configure?.(this.program)
 
         this.gl2.bindVertexArray(this.vao)
