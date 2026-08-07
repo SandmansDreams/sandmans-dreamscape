@@ -1,5 +1,5 @@
 import { Camera } from "../../render/camera";
-import { appendText, GLYPH_HEIGHT, measureText } from "../../render/font";
+import { DEFAULT_FONT } from "../../render/font";
 import { Mesh } from "../../render/mesh";
 import { MINIMAL_2D_FRAGMENT_SOURCE, MINIMAL_2D_VERTEX_SOURCE, Program, Shader } from "../../render/shaders";
 import { appendShape, BLOCK_SHAPES, type BlockShape, MIRRORABLE_SHAPES } from "../../render/shapes";
@@ -121,7 +121,7 @@ function blockHeight(layout: ChartLayout): number {
 }
 
 function labelHeight(layout: ChartLayout): number {
-    return GLYPH_HEIGHT * layout.fontPixel
+    return DEFAULT_FONT.glyphHeight * layout.fontPixel
 }
 
 /** One block, or two side by side when the shape is mirrorable. */
@@ -131,7 +131,7 @@ function blocksWidth(shape: BlockShape, layout: ChartLayout): number {
 }
 
 function groupWidth(shape: BlockShape, layout: ChartLayout): number {
-    return Math.max(blocksWidth(shape, layout), measureText(shape, layout.fontPixel))
+    return Math.max(blocksWidth(shape, layout), DEFAULT_FONT.measureText(shape, layout.fontPixel))
 }
 
 function groupHeight(layout: ChartLayout): number {
@@ -199,7 +199,7 @@ function appendGroup(
     x: number, y: number,
     layout: ChartLayout, color: Color
 ) {
-    appendText(out, shape, x, y, layout.fontPixel, ...LABEL_COLOR)
+    DEFAULT_FONT.appendText(out, shape, x, y, layout.fontPixel, ...LABEL_COLOR)
 
     const blockY = y + labelHeight(layout) + layout.labelGap
     appendTurnBlock(out, shape, false, x, blockY, layout, color)
@@ -211,9 +211,9 @@ function appendGroup(
     // Right-aligned against the mirrored block, so a long shape name like
     // HALFWEDGE cannot run into it.
     const marker = "M"
-    appendText(
+    DEFAULT_FONT.appendText(
         out, marker,
-        mirroredX + blockWidth(layout) - measureText(marker, layout.fontPixel),
+        mirroredX + blockWidth(layout) - DEFAULT_FONT.measureText(marker, layout.fontPixel),
         y,
         layout.fontPixel, ...LABEL_COLOR
     )
@@ -309,8 +309,10 @@ class BlockChart implements SceneInstance<ChartValues> {
         // camera fit are both resolution independent.
         this.context.setRenderScale(settings.resolution)
 
-        // Any of these three changes the geometry, so rebuild on all of them
-        const key = `${settings.mode}/${settings.rows}/${settings.gap}`
+        // Any of these three changes the geometry, so rebuild on all of them.
+        // The font's `loaded` joins them because the sheet arrives
+        // asynchronously - the first build has no glyphs and needs redoing.
+        const key = `${settings.mode}/${settings.rows}/${settings.gap}/${DEFAULT_FONT.loaded}`
         if (key === this.builtKey) return
 
         this.rebuild(makeLayout(settings))

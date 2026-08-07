@@ -31,7 +31,11 @@
 
 <div class="panel">
     {#each entries as [key, setting] (key)}
-        <label class="row" class:wide={setting.type !== "range"}>
+        <label
+            class="row"
+            class:wide={setting.type !== "range"}
+            class:stack={setting.type === "text"}
+        >
             <span class="name">{setting.label}</span>
 
             {#if setting.type === "range"}
@@ -52,6 +56,30 @@
                     checked={values[key] as boolean}
                     onchange={(e) => set(key, e.currentTarget.checked)}
                 />
+
+            {:else if setting.type === "text"}
+                <!-- oninput, not onchange: the scene should follow every
+                     keystroke rather than waiting for the field to be blurred -->
+                {#if (setting.rows ?? 1) > 1}
+                    <textarea
+                        class="text"
+                        rows={setting.rows}
+                        value={values[key] as string}
+                        placeholder={setting.placeholder ?? ""}
+                        spellcheck="false"
+                        oninput={(e) => set(key, e.currentTarget.value)}
+                    ></textarea>
+                {:else}
+                    <input
+                        type="text"
+                        class="text"
+                        value={values[key] as string}
+                        placeholder={setting.placeholder ?? ""}
+                        spellcheck="false"
+                        autocomplete="off"
+                        oninput={(e) => set(key, e.currentTarget.value)}
+                    />
+                {/if}
 
             {:else if setting.type === "selection"}
                 <span class="select">
@@ -92,6 +120,13 @@
 
     .row.wide {
         grid-template-columns: 78px 1fr;
+    }
+
+    /* Text gets the panel's full width - a sentence in a 1fr column next to
+       the label is narrow enough that you type into a scrolling keyhole. */
+    .row.stack {
+        grid-template-columns: 1fr;
+        gap: 4px;
     }
 
     .row:hover {
@@ -210,6 +245,38 @@
         border: solid #000;
         border-width: 0 2px 2px 0;
         transform: rotate(45deg);
+    }
+
+    /*~~~ Text ~~~*/
+    input.text,
+    textarea.text {
+        width: 100%;
+        padding: 4px 7px;
+        border: 1px solid var(--line);
+        background: var(--track);
+        color: #fff;
+        font: inherit;
+    }
+
+    textarea.text {
+        display: block; /* kills the baseline gap under an inline textarea */
+        resize: vertical;
+        line-height: 1.5;
+        white-space: pre-wrap; /* soft-wrap long lines rather than scroll sideways */
+    }
+
+    input.text::placeholder,
+    textarea.text::placeholder {
+        color: #fff;
+        opacity: 0.3;
+    }
+
+    input.text:hover,
+    input.text:focus-visible,
+    textarea.text:hover,
+    textarea.text:focus-visible {
+        border-color: var(--accent);
+        outline: none;
     }
 
     /*~~~ Selection ~~~*/

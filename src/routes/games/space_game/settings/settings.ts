@@ -12,6 +12,8 @@ export type SettingSpec =
     | { type: "range";     label: string; default: number;  min: number; max: number; step?: number }
     | { type: "checkbox";  label: string; default: boolean }
     | { type: "selection"; label: string; default: string;  options: readonly string[] }
+    // `rows` above 1 renders a textarea, where newlines can be typed
+    | { type: "text";      label: string; default: string;  placeholder?: string; rows?: number }
 
 /** A scene's settings, keyed by setting name. */
 export type SettingsSchema = Record<string, SettingSpec>
@@ -34,6 +36,7 @@ export type ValuesOf<S extends SettingsSchema> = {
     [K in keyof S]:
         S[K] extends { type: "range" }    ? number  :
         S[K] extends { type: "checkbox" } ? boolean :
+        S[K] extends { type: "text" }     ? string  :
         S[K] extends { type: "selection"; options: readonly (infer O)[] } ? O :
         never
 }
@@ -87,6 +90,15 @@ export function loadSettings(
                 settings[key] =
                     typeof value === "string" &&
                     spec.options.includes(value)
+                        ? value
+                        : spec.default
+                break
+
+            // Free text, so there is nothing to validate past the type - a
+            // stored empty string is a legitimate value and is kept.
+            case "text":
+                settings[key] =
+                    typeof value === "string"
                         ? value
                         : spec.default
                 break
