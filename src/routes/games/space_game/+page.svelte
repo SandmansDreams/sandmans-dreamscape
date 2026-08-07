@@ -1,7 +1,8 @@
 <script lang="ts">
     import { onMount, untrack } from "svelte";
     import { Assert } from "./assert";
-    import { DEV_SCENES, DevHarness, type DevSceneDefinition } from "./dev/DevScene";
+    import { DEV_SCENES } from "./dev/DevScene";
+    import { SceneRunner, type SceneDefinition } from "./render/scenes";
     import { defaultValues, loadLastSceneId, saveLastSceneId, type SettingValues } from "./settings/settings";
     import { FullscreenPass } from "./render/passes";
     import { MINIMAL_2D_FRAGMENT_SOURCE, MINIMAL_2D_VERTEX_SOURCE, PASSTHROUGH_FRAGMENT_SOURCE } from "./render/shaders";
@@ -13,43 +14,20 @@
 
     // Dev mode
     let devMode = $state(true) // If want only in dev, swith to 'import.meta.env.DEV'
-    let harness = $state<DevHarness | null>(null)
-    let scene = $state<DevSceneDefinition | null>(DEV_SCENES[0] ?? null)
+    // Any scene, not just a dev one - DEV_SCENES is simply what the picker offers
+    let harness = $state<SceneRunner | null>(null)
+    let scene = $state<SceneDefinition | null>(DEV_SCENES[0] ?? null)
     let values = $state<SettingValues>(
         DEV_SCENES[0] ? defaultValues(DEV_SCENES[0].settings) : {}
     )
     let fps = $state(0)
     let fpsClass = $derived(fps >= 55 ? "good" : fps >= 30 ? "ok" : "bad")
 
-    function selectScene(definition: DevSceneDefinition) {
+    function selectScene(definition: SceneDefinition) {
         scene = definition
-        values = defaultValues(definition.settings) // reset before the scene loads
+        // A game scene may declare no settings at all
+        values = defaultValues(definition.settings ?? {}) // reset before the scene loads
         saveLastSceneId(definition.id)
-    }
-
-    function resizeCanvas(renderScale: number = 1) {
-        if (!canvas || !gl2) {
-            Assert.exists(canvas, "canvas")
-            Assert.exists(gl2, "gl2")
-            return false
-        }
-    
-        const rect = canvas!.getBoundingClientRect()
-        //const cssHeight = rect.height
-        //const cssWidth = rect.width
-
-        const dpr = window.devicePixelRatio || 1
-
-        const width = Math.max(1, Math.round(rect.width * dpr * renderScale))
-        const height = Math.max(1, Math.round(rect.height * dpr * renderScale))
-
-        // Don't change unless different
-        if (canvas.width === width && canvas.height === height) return false
-
-        canvas.width = width
-        canvas.height = height
-        gl2.viewport(0, 0, width, height)
-        return true
     }
 
     // Rebuild the scene when the selection changes - untrack keeps a slider
@@ -80,14 +58,12 @@
         gl2 = canvas.getContext("webgl2")
         Assert.exists(gl2, "gl2")
 
-        resizeCanvas() // size the canvas before the target copies its dimensions
-
         // Default presentation for scenes that don't override present()
         const basicPresentation = new FullscreenPass(
             gl2, PASSTHROUGH_FRAGMENT_SOURCE
         )
 
-        const created = new DevHarness(canvas, gl2, (target) => {
+        const created = new SceneRunner(canvas, gl2, (target) => {
             RenderTarget.bindCanvas(gl2!, canvas!.width, canvas!.height)
             basicPresentation.draw(target)
         })
@@ -132,7 +108,7 @@
             {#if scene}
                 <p class="description">{scene.description}</p>
                 <div class="divider"></div>
-                <SettingsPanel schema={scene.settings} bind:values />
+                <SettingsPanel schema={scene.settings ?? {}} bind:values />
             {:else}
                 <p class="description">No dev scenes found.</p>
             {/if}

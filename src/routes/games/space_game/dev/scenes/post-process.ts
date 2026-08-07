@@ -5,7 +5,8 @@ import { quad, triangle } from "../../render/shapes"
 import { RenderTarget } from "../../render/targets"
 import { aspectScale2D } from "../../render/transform"
 import type { SettingsSchema, ValuesOf } from "../../settings/settings"
-import type { DevSceneDefinition, DevSceneInstance, SceneContext } from "../DevScene"
+import type { SceneContext, SceneInstance } from "../../render/scenes"
+import type { DevSceneDefinition } from "../DevScene"
 
 const SETTINGS = {
     effect:        { type: "selection", label: "Effect",     default: "chromatic", options: ["chromatic", "scanlines"] },
@@ -47,7 +48,7 @@ function buildPattern(gl2: WebGL2RenderingContext, pattern: string): Mesh {
     return builder.build(gl2)
 }
 
-class PostProcessScene implements DevSceneInstance<PostValues> {
+class PostProcessScene implements SceneInstance<PostValues> {
     private readonly program: Program
     private readonly chromatic: FullscreenPass
     private readonly scanlines: FullscreenPass

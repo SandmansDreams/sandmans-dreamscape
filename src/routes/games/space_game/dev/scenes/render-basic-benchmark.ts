@@ -1,4 +1,5 @@
-import type { DevSceneDefinition, DevSceneInstance, SceneContext } from "../DevScene"
+import type { SceneContext, SceneInstance } from "../../render/scenes"
+import type { DevSceneDefinition } from "../DevScene"
 import type { SettingsSchema, ValuesOf } from "../../settings/settings"
 import {
     INSTANCED_2D_VERTEX_SOURCE,
@@ -38,7 +39,7 @@ type SquaresValues = ValuesOf<typeof SETTINGS>
 // compile error here until the switch in render() handles it.
 type Mode = SquaresValues["mode"]
 
-class SquaresScene implements DevSceneInstance<SquaresValues> {
+class SquaresScene implements SceneInstance<SquaresValues> {
     private readonly simple: Program    // per-vertex colour, one transform per draw
     private readonly instanced: Program // per-instance transform and colour
     private readonly gl2: WebGL2RenderingContext
