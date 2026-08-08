@@ -1,0 +1,32 @@
+{
+	"nodes":[
+		{"id":"70aec5b7edf2f088","x":-740,"y":-380,"width":400,"height":456,"type":"group","label":"Internal State"},
+		{"id":"3b15f2fb066795ff","x":-220,"y":-147,"width":383,"height":413,"type":"group","label":"Rendering Pipeline"},
+		{"id":"9ab48647fb51abf3","x":280,"y":-440,"width":400,"height":192,"type":"group","label":"RenderPassDesc"},
+		{"id":"77f9f52896b4cf88","x":-727,"y":-373,"width":250,"height":60,"type":"text","text":"renderPass"},
+		{"id":"26e30e3f03436b28","x":-700,"y":-313,"width":340,"height":60,"type":"text","text":"pipeline"},
+		{"id":"3587c491067a9841","x":-157,"y":-111,"width":250,"height":97,"type":"text","text":"[[Attributes]]"},
+		{"id":"86411bbc3caf494b","x":-157,"y":46,"width":250,"height":60,"type":"text","text":"[[Vertex Shader]]"},
+		{"id":"037732fa4a2abbf4","x":-157,"y":166,"width":250,"height":60,"type":"text","text":"[[Fragment Shader]]"},
+		{"id":"d8c498a28a89f6fb","type":"text","text":"vertexBuffer 0\nvertexBuffer 1\nvertexBuffer n...","x":-700,"y":-193,"width":340,"height":93},
+		{"id":"d493f79b8dfacf30","type":"text","text":"viewport","x":-700,"y":-253,"width":340,"height":60},
+		{"id":"726cace6e928a990","type":"text","text":"indexBuffer","x":-700,"y":-100,"width":340,"height":60},
+		{"id":"76e95ead5cc84d1b","type":"text","text":"bindGroup 0\nbindGroup 1\nbindGroup n...","x":-700,"y":-44,"width":340,"height":90},
+		{"id":"5cca0913987a8609","x":340,"y":-406,"width":250,"height":103,"type":"text","text":"colorAttachment 0\ncolorAttachment 1\ncolorAttachment n..."},
+		{"id":"7e67ab700fb6b9a6","x":700,"y":-397,"width":250,"height":60,"type":"text","text":"Texture View"},
+		{"id":"a32758fd000a8aa5","x":700,"y":-294,"width":250,"height":60,"type":"text","text":"Texture"}
+	],
+	"edges":[
+		{"id":"d644b4a77dedd353","fromNode":"3587c491067a9841","fromSide":"bottom","toNode":"86411bbc3caf494b","toSide":"top"},
+		{"id":"8dfbb26ba0469f20","fromNode":"86411bbc3caf494b","fromSide":"bottom","toNode":"037732fa4a2abbf4","toSide":"top"},
+		{"id":"845685a0f8509fce","fromNode":"7e67ab700fb6b9a6","fromSide":"bottom","toNode":"a32758fd000a8aa5","toSide":"top"},
+		{"id":"bda3b13b03c3c023","fromNode":"5cca0913987a8609","fromSide":"right","toNode":"7e67ab700fb6b9a6","toSide":"left"},
+		{"id":"49ab9ab8dc5f6d6a","fromNode":"77f9f52896b4cf88","fromSide":"right","toNode":"9ab48647fb51abf3","toSide":"left"},
+		{"id":"d9b9df4c1f206435","fromNode":"037732fa4a2abbf4","fromSide":"right","toNode":"9ab48647fb51abf3","toSide":"left"},
+		{"id":"002b18589d556460","fromNode":"26e30e3f03436b28","fromSide":"right","toNode":"3b15f2fb066795ff","toSide":"top"},
+		{"id":"6d119f39df53ea90","fromNode":"86411bbc3caf494b","fromSide":"left","toNode":"76e95ead5cc84d1b","toSide":"right"},
+		{"id":"30d085548befb740","fromNode":"037732fa4a2abbf4","fromSide":"left","toNode":"76e95ead5cc84d1b","toSide":"right"},
+		{"id":"adb66b5b65d0a0e1","fromNode":"3587c491067a9841","fromSide":"left","toNode":"d8c498a28a89f6fb","toSide":"right"},
+		{"id":"5087ead88a2eae82","fromNode":"3587c491067a9841","fromSide":"left","toNode":"726cace6e928a990","toSide":"right"}
+	]
+}

@@ -1,0 +1,3 @@
+- Computes vertices
+- Returns vertex positions
+- Draws triangles

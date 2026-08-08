@@ -1,0 +1,2 @@
+- Does a repeating function quickly
+- Outputs an iteration number each call

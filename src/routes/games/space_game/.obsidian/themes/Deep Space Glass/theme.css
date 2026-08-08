@@ -1,0 +1,678 @@
+/* ============================================================
+   DEEP SPACE GLASS — tema Obsidian
+   Identidade visual extraída do Dashboard de Dopamina (V3):
+   fundo quase-preto com aurora, vidro translúcido,
+   duotone ciano→violeta e glow de precisão.
+   Todos os valores derivam dos tokens de :root do dashboard.
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* ------------------------------------------------------------
+   1. TOKENS — espelho fiel do dashboard
+   ------------------------------------------------------------ */
+.theme-dark {
+  --ds-bg:            #01030a;
+  --ds-surface:       rgba(10, 19, 36, 0.5);
+  --ds-surface-2:     rgba(18, 32, 58, 0.55);
+  --ds-solid:         #0a1424;
+  --ds-glass:         rgba(10, 18, 33, 0.55);
+  --ds-border:        rgba(125, 200, 255, 0.16);
+  --ds-border-strong: rgba(125, 200, 255, 0.32);
+
+  --ds-text:          #e7f0fa;
+  --ds-text-muted:    #7e95b5;
+  --ds-text-faint:    #55688a;
+
+  --ds-accent:        #22d3ee;
+  --ds-accent-soft:   rgba(34, 211, 238, 0.12);
+  --ds-indigo:        #818cf8;
+  --ds-violet:        #8b5cf6;
+  --ds-magenta:       #e879f9;
+  --ds-positive:      #34d399;
+  --ds-warning:       #fbbf24;
+  --ds-danger:        #f87171;
+
+  --ds-grad: linear-gradient(135deg, #22d3ee 0%, #818cf8 55%, #a855f7 100%);
+  --ds-glow:      0 0 18px rgba(34, 211, 238, 0.5);
+  --ds-glow-soft: 0 0 10px rgba(34, 211, 238, 0.3);
+  --ds-shadow-card:
+    0 20px 50px -30px rgba(0, 0, 0, 0.9),
+    0 0 38px -16px rgba(34, 211, 238, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+
+  --ds-display: 'Chakra Petch', 'Inter', sans-serif;
+  --ds-blur: blur(18px);
+
+  /* ---------- mapeamento para as variáveis do Obsidian ----------
+     Superfícies OPACAS: transparência em painéis do workspace faz o
+     Obsidian empilhar camadas de render (texto duplicado/fantasma).
+     A aurora é aplicada como gradiente opaco em cada superfície. */
+  --background-primary:       #04070f;
+  --background-primary-alt:   #01030a;
+  --background-secondary:     #030509;
+  --background-secondary-alt: #02050c;
+
+  --background-modifier-border:       var(--ds-border);
+  --background-modifier-border-hover: var(--ds-border-strong);
+  --background-modifier-border-focus: var(--ds-accent);
+  --background-modifier-hover:        rgba(34, 211, 238, 0.08);
+  --background-modifier-active-hover: rgba(34, 211, 238, 0.14);
+  --background-modifier-form-field:   rgba(10, 20, 36, 0.6);
+  --background-modifier-success:      var(--ds-positive);
+  --background-modifier-error:        var(--ds-danger);
+  --background-modifier-error-rgb:    248, 113, 113;
+
+  --text-normal:       var(--ds-text);
+  --text-muted:        var(--ds-text-muted);
+  --text-faint:        var(--ds-text-faint);
+  --text-on-accent:    #04060e;
+  --text-accent:       var(--ds-accent);
+  --text-accent-hover: #67e8f9;
+  --text-selection:    rgba(34, 211, 238, 0.28);
+  --text-highlight-bg: rgba(139, 92, 246, 0.35);
+  --text-error:        var(--ds-danger);
+  --text-success:      var(--ds-positive);
+  --text-warning:      var(--ds-warning);
+
+  --interactive-normal:       var(--ds-surface-2);
+  --interactive-hover:        rgba(18, 32, 58, 0.8);
+  --interactive-accent:       var(--ds-accent);
+  --interactive-accent-hover: #67e8f9;
+  --color-accent:   var(--ds-accent);
+  --color-accent-1: var(--ds-indigo);
+  --color-accent-2: var(--ds-violet);
+
+  --divider-color:             var(--ds-border);
+  --scrollbar-thumb-bg:        rgba(34, 211, 238, 0.35);
+  --scrollbar-active-thumb-bg: rgba(139, 92, 246, 0.55);
+  --scrollbar-bg:              transparent;
+
+  --link-color:              var(--ds-accent);
+  --link-color-hover:        #67e8f9;
+  --link-unresolved-color:   var(--ds-magenta);
+  --link-unresolved-opacity: 0.55;
+  --link-external-color:     var(--ds-indigo);
+  --link-external-color-hover: #a5b4fc;
+  --link-decoration:         none;
+  --link-decoration-hover:   underline;
+
+  /* tipografia */
+  --font-text-theme:      'Inter', system-ui, -apple-system, sans-serif;
+  --font-interface-theme: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-monospace-theme: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --h1-font: var(--ds-display);
+  --h2-font: var(--ds-display);
+  --h3-font: var(--ds-display);
+  --h4-font: var(--ds-display);
+  --h5-font: var(--font-text-theme);
+  --h6-font: var(--font-text-theme);
+
+  --h1-color: var(--ds-text);
+  --h2-color: var(--ds-accent);
+  --h3-color: var(--ds-indigo);
+  --h4-color: var(--ds-text);
+  --h5-color: var(--ds-text-muted);
+  --h6-color: var(--ds-text-faint);
+
+  --h1-weight: 700;  --h1-size: 2.25em;  --h1-line-height: 1.16;
+  --h2-weight: 700;  --h2-size: 1.6em;
+  --h3-weight: 600;  --h3-size: 1.28em;
+  --h4-weight: 600;  --h4-size: 1.04em;
+  --h5-weight: 600;  --h5-size: 0.94em;
+  --h6-weight: 600;  --h6-size: 0.85em;
+
+  /* negrito e itálico bem visíveis */
+  --bold-weight: 700;
+  --bold-color: var(--ds-accent);
+  --italic-color: var(--ds-magenta);
+
+  /* forma — raio-sm 9 / md 12 / lg 16 do dashboard */
+  --radius-s:  9px;
+  --radius-m:  12px;
+  --radius-l:  16px;
+  --radius-xl: 18px;
+  --input-radius: 12px;
+  --tab-radius: 9px;
+  --tab-radius-active: 9px;
+
+  /* superfícies de UI */
+  --titlebar-background:         transparent;
+  --titlebar-background-focused: transparent;
+  --tab-container-background:    transparent;
+  --tab-background-active:       rgba(18, 32, 58, 0.55);
+  --tab-text-color-focused-active: var(--ds-accent);
+  --tab-outline-color:           var(--ds-border);
+  --ribbon-background:           transparent;
+
+  --nav-item-color:             var(--ds-text-muted);
+  --nav-item-color-hover:       var(--ds-text);
+  --nav-item-color-active:      var(--ds-accent);
+  --nav-item-background-hover:  rgba(18, 32, 58, 0.7);
+  --nav-item-weight-active:     600;
+  --nav-indentation-guide-color: rgba(125, 200, 255, 0.14);
+
+  --modal-background:        var(--ds-solid);
+  --modal-border-color:      var(--ds-border-strong);
+  --prompt-border-color:     var(--ds-border-strong);
+  --blockquote-border-color: var(--ds-accent);
+  --hr-color:                var(--ds-border);
+
+  --table-header-background:    rgba(10, 20, 36, 0.7);
+  --table-row-alt-background:   rgba(125, 200, 255, 0.025);
+  --table-row-background-hover: rgba(34, 211, 238, 0.07);
+  --table-border-color:         var(--ds-border);
+
+  --checkbox-color:        var(--ds-accent);
+  --checkbox-color-hover:  #67e8f9;
+  --checkbox-border-color: var(--ds-border-strong);
+
+  --tag-color:            var(--ds-accent);
+  --tag-background:       rgba(34, 211, 238, 0.12);
+  --tag-background-hover: rgba(34, 211, 238, 0.22);
+  --tag-border-color:     rgba(34, 211, 238, 0.35);
+  --tag-border-width:     1px;
+  --tag-radius:           999px;
+
+  --code-background: rgba(10, 20, 36, 0.65);
+  --code-normal:     var(--ds-accent);
+  --embed-border-left: 2px solid var(--ds-violet);
+
+  --icon-color:        var(--ds-text-muted);
+  --icon-color-hover:  var(--ds-accent);
+  --icon-color-active: var(--ds-accent);
+
+  --graph-line:            rgba(125, 200, 255, 0.18);
+  --graph-node:            var(--ds-text-muted);
+  --graph-node-tag:        var(--ds-accent);
+  --graph-node-attachment: var(--ds-violet);
+  --graph-node-unresolved: var(--ds-magenta);
+  --graph-node-focused:    #67e8f9;
+}
+
+/* ------------------------------------------------------------
+   2. FUNDO — aurora fixa + grade técnica de 48px
+   Réplica exata do body do dashboard.
+   ------------------------------------------------------------ */
+.theme-dark body {
+  background:
+    radial-gradient(1000px 560px at 78% -12%, rgba(139, 92, 246, 0.30), transparent 62%),
+    radial-gradient(880px 520px at 8% 4%,    rgba(34, 211, 238, 0.22), transparent 58%),
+    radial-gradient(900px 900px at 96% 92%,  rgba(232, 121, 249, 0.14), transparent 62%),
+    radial-gradient(700px 500px at 45% 60%,  rgba(99, 102, 241, 0.08), transparent 65%),
+    linear-gradient(rgba(125, 200, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(125, 200, 255, 0.03) 1px, transparent 1px),
+    var(--ds-bg);
+  background-size: auto, auto, auto, auto, 48px 48px, 48px 48px, auto;
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* A aurora entra no editor como GRADIENTE OPACO (base #04070f sólida):
+   nada de camadas transparentes empilhadas = nada de texto fantasma. */
+.theme-dark .workspace-leaf-content[data-type='markdown'] .view-content,
+.theme-dark .workspace-leaf-content[data-type='empty'] .view-content,
+.theme-dark .workspace-leaf-content[data-type='canvas'] .view-content,
+.theme-dark .workspace-leaf-content[data-type='graph'] .view-content {
+  background:
+    radial-gradient(900px 500px at 80% -10%, rgba(139, 92, 246, 0.14), transparent 60%),
+    radial-gradient(800px 480px at 4% 0%,   rgba(34, 211, 238, 0.10), transparent 55%),
+    radial-gradient(700px 700px at 96% 100%, rgba(232, 121, 249, 0.07), transparent 60%),
+    linear-gradient(rgba(125, 200, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(125, 200, 255, 0.02) 1px, transparent 1px),
+    #04070f;
+  background-size: auto, auto, auto, 48px 48px, 48px 48px, auto;
+}
+.theme-dark .markdown-source-view,
+.theme-dark .markdown-reading-view,
+.theme-dark .cm-editor,
+.theme-dark .cm-scroller {
+  background: transparent;
+}
+
+.theme-dark ::selection { background: rgba(34, 211, 238, 0.30); }
+
+/* ------------------------------------------------------------
+   3. SIDEBAR — vidro escuro com halo ciano na borda
+   ------------------------------------------------------------ */
+.theme-dark .workspace-split.mod-left-split,
+.theme-dark .workspace-split.mod-right-split {
+  background: linear-gradient(180deg, #040912, #02050c) !important;
+}
+.theme-dark .workspace-split.mod-left-split {
+  border-right: 1px solid var(--ds-border);
+  box-shadow: 1px 0 30px -10px rgba(34, 211, 238, 0.25);
+}
+.theme-dark .workspace-split.mod-right-split {
+  border-left: 1px solid var(--ds-border);
+  box-shadow: -1px 0 30px -10px rgba(139, 92, 246, 0.25);
+}
+.theme-dark .workspace-ribbon {
+  background: linear-gradient(180deg, #040912, #02050c) !important;
+  border-right: 1px solid var(--ds-border);
+}
+
+/* item de navegação ativo — exatamente o .nav-item.ativo do dashboard */
+.theme-dark .nav-file-title,
+.theme-dark .nav-folder-title {
+  border-radius: var(--radius-m);
+  border: 1px solid transparent;
+  transition: background 0.15s, color 0.15s, box-shadow 0.2s, border-color 0.2s;
+}
+.theme-dark .nav-file-title.is-active,
+.theme-dark .tree-item-self.is-active {
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.14), rgba(139, 92, 246, 0.12)) !important;
+  border: 1px solid rgba(34, 211, 238, 0.35);
+  color: var(--ds-accent);
+  box-shadow: 0 0 20px -4px rgba(34, 211, 238, 0.5), inset 0 0 14px rgba(34, 211, 238, 0.08);
+}
+.theme-dark .nav-folder-title-content {
+  font-family: var(--ds-display);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+/* cabeçalho de painel em HUD, como o .card-titulo / .hero-kicker */
+.theme-dark .nav-header .nav-buttons-container,
+.theme-dark .view-header {
+  border-bottom: 1px solid var(--ds-border);
+}
+.theme-dark .view-header-title {
+  font-family: var(--ds-display);
+  letter-spacing: 0.02em;
+}
+.theme-dark .tree-item-self.mod-collapsible > .tree-item-inner {
+  font-family: var(--ds-display);
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ds-text-muted);
+}
+
+/* ------------------------------------------------------------
+   4. ABAS — vidro, com filete de brilho ciano no ativo
+   ------------------------------------------------------------ */
+.theme-dark .workspace-tab-header-container {
+  background: #02050c !important;
+  border-bottom: 1px solid var(--ds-border);
+}
+.theme-dark .workspace-tab-header { position: relative; }
+.theme-dark .workspace-tab-header.is-active .workspace-tab-header-inner {
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.12), rgba(139, 92, 246, 0.10));
+  border-radius: var(--radius-s);
+  box-shadow: inset 0 0 14px rgba(34, 211, 238, 0.08);
+}
+.theme-dark .workspace-tab-header.is-active::after {
+  content: '';
+  position: absolute;
+  left: 10px; right: 10px; bottom: 0;
+  height: 2px;
+  background: var(--ds-grad);
+  border-radius: 2px;
+  box-shadow: 0 0 12px rgba(34, 211, 238, 0.7);
+}
+
+/* ------------------------------------------------------------
+   5. TIPOGRAFIA — Chakra Petch nos títulos, H1 com glow
+   ------------------------------------------------------------ */
+/* H1 — ciano claro com glow duplo, voz de título-herói.
+   Sem background-clip: text (transformava emojis em silhuetas). */
+.theme-dark .markdown-rendered h1,
+.theme-dark .HyperMD-header-1,
+.theme-dark .inline-title {
+  font-family: var(--ds-display);
+  letter-spacing: 0.005em;
+  color: #67e8f9;
+  text-shadow:
+    0 0 28px rgba(34, 211, 238, 0.45),
+    0 0 60px rgba(129, 140, 248, 0.3);
+}
+
+/* H2 com filete duotone abaixo — eco do .hero-kicker */
+.theme-dark .markdown-rendered h2,
+.theme-dark .HyperMD-header-2 {
+  font-family: var(--ds-display);
+  text-shadow: 0 0 22px rgba(34, 211, 238, 0.4);
+}
+.theme-dark .markdown-rendered h2::after {
+  content: '';
+  display: block;
+  margin-top: 0.3em;
+  height: 1px;
+  width: 100%;
+  background: linear-gradient(90deg, var(--ds-accent), rgba(139, 92, 246, 0.5) 45%, transparent 85%);
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.45);
+}
+
+/* H3 — barra vertical duotone antes do texto, voz de sub-seção */
+.theme-dark .markdown-rendered h3::before {
+  content: '';
+  display: inline-block;
+  width: 4px;
+  height: 0.85em;
+  margin-right: 10px;
+  border-radius: 2px;
+  background: var(--ds-grad);
+  box-shadow: 0 0 10px rgba(34, 211, 238, 0.6);
+  vertical-align: -0.08em;
+}
+.theme-dark .markdown-rendered h3,
+.theme-dark .HyperMD-header-3 {
+  font-family: var(--ds-display);
+}
+
+/* H6 vira kicker HUD — versalete com traço luminoso */
+.theme-dark .markdown-rendered h6 {
+  font-family: var(--ds-display);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--ds-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.theme-dark .markdown-rendered h6::before {
+  content: '';
+  width: 26px;
+  height: 1px;
+  flex-shrink: 0;
+  background: linear-gradient(90deg, var(--ds-accent), transparent);
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.8);
+}
+
+/* NEGRITO — ciano 700 com glow sutil, salta do texto */
+.theme-dark strong,
+.theme-dark .cm-strong {
+  color: var(--ds-accent);
+  font-weight: 700;
+  text-shadow: 0 0 12px rgba(34, 211, 238, 0.45);
+}
+/* ITÁLICO — magenta, inconfundível ao lado do corpo azulado */
+.theme-dark em,
+.theme-dark .cm-em {
+  color: var(--ds-magenta);
+  font-style: italic;
+}
+/* negrito + itálico juntos — índigo com glow (emoji-safe) */
+.theme-dark strong em,
+.theme-dark em strong,
+.theme-dark .cm-strong.cm-em {
+  color: var(--ds-indigo);
+  font-weight: 700;
+  font-style: italic;
+  text-shadow: 0 0 12px rgba(129, 140, 248, 0.55);
+}
+.theme-dark mark {
+  color: #04060e;
+  background: linear-gradient(135deg, #22d3ee, #818cf8);
+  padding: 0 4px;
+  border-radius: 4px;
+}
+
+.theme-dark hr,
+.theme-dark .markdown-rendered hr {
+  border: none;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(34, 211, 238, 0.45), rgba(139, 92, 246, 0.35), transparent);
+}
+
+/* números tabulares no display, como .num */
+.theme-dark .markdown-rendered td:has(+ td),
+.theme-dark .markdown-rendered .num { font-variant-numeric: tabular-nums; }
+
+/* ------------------------------------------------------------
+   6. LINKS INTERNOS — ciano, com glow no hover
+   ------------------------------------------------------------ */
+.theme-dark .internal-link,
+.theme-dark .cm-hmd-internal-link {
+  color: var(--ds-accent);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(34, 211, 238, 0.25);
+  transition: color 0.15s, border-color 0.15s, text-shadow 0.15s;
+}
+.theme-dark .internal-link:hover,
+.theme-dark .cm-hmd-internal-link:hover {
+  color: #67e8f9;
+  border-bottom-color: #67e8f9;
+  text-shadow: 0 0 10px rgba(34, 211, 238, 0.6);
+}
+.theme-dark .internal-link.is-unresolved { color: var(--ds-magenta); border-bottom-style: dashed; }
+.theme-dark .cm-formatting-link,
+.theme-dark .cm-formatting-link-string { color: var(--ds-text-faint); }
+
+/* ------------------------------------------------------------
+   7. CALLOUTS — o tema NÃO estiliza callouts.
+   Eles ficam por conta dos snippets do vault
+   (custom-callouts / nick-milo-callouts-pt), como era antes.
+   ------------------------------------------------------------ */
+
+/* ------------------------------------------------------------
+   8. CITAÇÃO E CÓDIGO
+   ------------------------------------------------------------ */
+.theme-dark blockquote {
+  background: rgba(34, 211, 238, 0.05);
+  border-left: 2px solid var(--ds-accent);
+  border-radius: 0 var(--radius-s) var(--radius-s) 0;
+  padding: 10px 18px;
+  color: #cfe0f2;
+  box-shadow: inset 8px 0 24px -18px rgba(34, 211, 238, 0.9);
+}
+
+.theme-dark code,
+.theme-dark .cm-inline-code {
+  background: rgba(10, 20, 36, 0.65);
+  border: 1px solid var(--ds-border);
+  border-radius: 6px;
+  padding: 1px 6px;
+  font-size: 0.87em;
+  color: var(--ds-accent);
+}
+.theme-dark pre,
+.theme-dark .HyperMD-codeblock-bg {
+  background: rgba(10, 20, 36, 0.6) !important;
+  backdrop-filter: var(--ds-blur);
+  -webkit-backdrop-filter: var(--ds-blur);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--radius-m);
+  box-shadow: var(--ds-shadow-card);
+}
+.theme-dark pre code { border: none; background: transparent; padding: 0; }
+
+/* ------------------------------------------------------------
+   9. TABELAS — cabeçalho HUD, linha ativa com filete duotone
+   ------------------------------------------------------------ */
+.theme-dark .markdown-rendered table {
+  border-collapse: separate;
+  border-spacing: 0;
+  background: var(--ds-glass);
+  backdrop-filter: var(--ds-blur);
+  -webkit-backdrop-filter: var(--ds-blur);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--radius-l);
+  overflow: hidden;
+  box-shadow: var(--ds-shadow-card);
+}
+.theme-dark .markdown-rendered th {
+  background: rgba(10, 20, 36, 0.7);
+  color: var(--ds-text-muted);
+  font-family: var(--ds-display);
+  font-size: 0.76em;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 12px 16px;
+}
+.theme-dark .markdown-rendered td { padding: 11px 16px; font-variant-numeric: tabular-nums; }
+.theme-dark .markdown-rendered tbody tr:hover td { background: rgba(34, 211, 238, 0.07); }
+.theme-dark .markdown-rendered tbody tr:hover td:first-child {
+  box-shadow: inset 3px 0 0 var(--ds-accent);
+}
+
+/* ------------------------------------------------------------
+   10. TAGS — pílula ciano, como o .chip-filtro
+   ------------------------------------------------------------ */
+.theme-dark a.tag,
+.theme-dark .cm-hashtag {
+  font-family: var(--ds-display);
+  font-size: 0.76em;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  padding: 3px 11px;
+  border: 1px solid rgba(34, 211, 238, 0.35);
+  background: rgba(34, 211, 238, 0.12);
+  color: var(--ds-accent);
+  border-radius: 999px;
+  text-decoration: none;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.theme-dark a.tag:hover {
+  background: rgba(34, 211, 238, 0.22);
+  box-shadow: var(--ds-glow-soft);
+}
+
+/* ------------------------------------------------------------
+   11. PROPERTIES / FRONTMATTER — painel de vidro
+   ------------------------------------------------------------ */
+.theme-dark .metadata-container {
+  background: var(--ds-glass);
+  backdrop-filter: var(--ds-blur);
+  -webkit-backdrop-filter: var(--ds-blur);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--radius-l);
+  padding: 14px 18px;
+  box-shadow: var(--ds-shadow-card);
+}
+.theme-dark .metadata-property-key-input {
+  font-family: var(--ds-display);
+  color: var(--ds-text-muted);
+  font-size: 0.8em;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* ------------------------------------------------------------
+   12. BOTÕES, CAMPOS, MODAIS
+   ------------------------------------------------------------ */
+.theme-dark button:not(.clickable-icon) {
+  background: var(--ds-surface-2);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--radius-m);
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+.theme-dark button:not(.clickable-icon):hover { border-color: var(--ds-accent); }
+.theme-dark .mod-cta {
+  background: var(--ds-grad);
+  border-color: transparent;
+  color: #04060e;
+  font-family: var(--ds-display);
+  font-weight: 700;
+  box-shadow: 0 0 22px -6px rgba(34, 211, 238, 0.7);
+}
+.theme-dark .mod-cta:hover { transform: translateY(-1px); }
+
+.theme-dark input[type='text'],
+.theme-dark input[type='search'],
+.theme-dark textarea,
+.theme-dark select {
+  background: rgba(10, 20, 36, 0.6);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--radius-m);
+}
+.theme-dark input:focus-visible,
+.theme-dark button:focus-visible,
+.theme-dark textarea:focus-visible {
+  outline: 2px solid var(--ds-accent);
+  outline-offset: 2px;
+}
+
+/* menus e modais usam --solid: precisam ser legíveis sobre a aurora */
+.theme-dark .modal,
+.theme-dark .prompt,
+.theme-dark .suggestion-container,
+.theme-dark .menu {
+  background: var(--ds-solid) !important;
+  border: 1px solid var(--ds-border-strong);
+  border-radius: var(--radius-l);
+  box-shadow:
+    0 30px 70px -30px rgba(0, 0, 0, 0.95),
+    0 0 40px -14px rgba(34, 211, 238, 0.35);
+}
+.theme-dark .modal-bg,
+.theme-dark .prompt-bg { background: rgba(1, 3, 10, 0.7); }
+.theme-dark .suggestion-item.is-selected {
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.14), rgba(139, 92, 246, 0.12));
+  color: var(--ds-accent);
+}
+
+/* ------------------------------------------------------------
+   13. CHECKBOX / TAREFAS
+   ------------------------------------------------------------ */
+.theme-dark input[type='checkbox'] {
+  border-radius: 5px;
+  border: 1px solid var(--ds-border-strong);
+}
+.theme-dark input[type='checkbox']:checked {
+  background: var(--ds-grad);
+  border-color: transparent;
+  box-shadow: 0 0 12px -2px rgba(34, 211, 238, 0.7);
+}
+.theme-dark .task-list-item.is-checked { color: var(--ds-text-faint); }
+
+/* ------------------------------------------------------------
+   14. GRAPH VIEW E BUSCA
+   ------------------------------------------------------------ */
+.theme-dark .graph-view.color-fill          { color: var(--ds-text-muted); }
+.theme-dark .graph-view.color-fill-focused  { color: #67e8f9; }
+.theme-dark .graph-view.color-line          { color: rgba(125, 200, 255, 0.18); }
+.theme-dark .graph-view.color-fill-tag      { color: var(--ds-accent); }
+.theme-dark .graph-view.color-fill-attachment { color: var(--ds-violet); }
+.theme-dark .graph-view.color-fill-unresolved { color: var(--ds-magenta); }
+.theme-dark .graph-view.color-circle        { color: var(--ds-indigo); }
+
+.theme-dark .search-result-file-match:hover {
+  background: rgba(34, 211, 238, 0.08);
+  box-shadow: inset 3px 0 0 var(--ds-accent);
+}
+.theme-dark .search-result-file-matched-text {
+  background: rgba(139, 92, 246, 0.32);
+  color: var(--ds-text);
+}
+
+/* ------------------------------------------------------------
+   15. STATUS BAR — HUD inferior
+   ------------------------------------------------------------ */
+.theme-dark .status-bar {
+  background: #02050c !important;
+  border-top: 1px solid var(--ds-border);
+  color: var(--ds-text-muted);
+  font-family: var(--ds-display);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+}
+
+/* ------------------------------------------------------------
+   16. SCROLLBAR — duotone ciano→violeta
+   ------------------------------------------------------------ */
+.theme-dark ::-webkit-scrollbar { width: 10px; height: 10px; }
+.theme-dark ::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(34, 211, 238, 0.35), rgba(139, 92, 246, 0.35));
+  border-radius: 6px;
+}
+.theme-dark ::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(34, 211, 238, 0.6), rgba(139, 92, 246, 0.6));
+}
+.theme-dark ::-webkit-scrollbar-track { background: transparent; }
+
+/* ------------------------------------------------------------
+   17. MOVIMENTO REDUZIDO
+   ------------------------------------------------------------ */
+@media (prefers-reduced-motion: reduce) {
+  .theme-dark *, .theme-dark *::before, .theme-dark *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

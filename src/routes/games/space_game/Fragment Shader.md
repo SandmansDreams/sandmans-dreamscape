@@ -1,0 +1,2 @@
+- Computes colors
+- Renders pixels

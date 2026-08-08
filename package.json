@@ -21,6 +21,7 @@
 		"@sveltejs/adapter-auto": "^7.0.0",
 		"@sveltejs/kit": "^2.50.2",
 		"@sveltejs/vite-plugin-svelte": "^6.2.4",
+		"@webgpu/types": "^0.1.71",
 		"mdsvex": "^0.12.7",
 		"svelte": "^5.51.0",
 		"svelte-check": "^4.3.6",

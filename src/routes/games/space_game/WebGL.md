@@ -1,0 +1,12 @@
+- The canvas is made up of points from -1 - 1 on the x and y axis
+- Any point can be the location of a vertex, which is part of what makes up a line or shape
+	- Two vertexes can create a line, three can make a triangle (or primitive), four could make a quad
+	- In 3D, each vertex is 3 variables [x, y, z]
+	- In 2D, you can ignore z
+	- Each vertex contains its own color data, allowing for color blending per-tri
+- Lighting can bounce off of a surface
+- Color and transforms can be handled by [[Shaders]]
+	- There are several types of shaders but the main two are:
+		- Vertex Shader - Handles vertex positioning, including transform over time
+		- Fragment Shader - Handles color and lighting
+- Shaders run on the GPU, which can do graphics calculations a lot than the CPU faster due to using [[Matrix|Matrices]]

@@ -1,22 +1,111 @@
 <script lang="ts">
     import { onMount } from "svelte";
-    import { Assert } from "./assert";
+    import { Assert } from "./dev/assert";
 
     let canvas = $state<HTMLCanvasElement | null>(null)
-    let gl2 = $state<WebGL2RenderingContext | null | undefined>(null)
+    let context: GPUCanvasContext | null
+    let adapter
+    let device: GPUDevice | undefined
 
     // Dev mode
     let devMode = $state(true) // If want only in dev, swith to 'import.meta.env.DEV'
     //let scene = $state<Scene | null>(null)
 
-    let fps = $state(0)
+    let fps = $state(-1)
     let fpsClass = $derived(fps >= 55 ? "good" : fps >= 30 ? "ok" : "bad")
+
+    function render(renderPassDescriptor: GPURenderPassDescriptor, pipeline: GPURenderPipeline) {
+        Assert.exists(context, "context")
+
+        // Get the current texture from the canvas context and
+        // set it as the texture to render to.
+        renderPassDescriptor.colorAttachments[0]!.view = context.getCurrentTexture().createView();
+    
+        // make a command encoder to start encoding commands
+        const encoder = device!.createCommandEncoder({ label: 'our encoder' });
+    
+        // make a render pass encoder to encode render specific commands
+        const pass = encoder.beginRenderPass(renderPassDescriptor);
+        pass.setPipeline(pipeline);
+        pass.draw(3);  // call our vertex shader 3 times
+        pass.end();
+    
+        const commandBuffer = encoder.finish();
+        device!.queue.submit([commandBuffer]); 
+    }
 
     onMount(() => {
         Assert.exists(canvas, "canvas")
 
-        gl2 = canvas.getContext("webgl2")
-        Assert.exists(gl2, "gl2")
+        // Check that the browser supports WebGPU, inside an inner call because onMount() can't be async and also return something
+        void (async () => {
+            adapter = await navigator.gpu?.requestAdapter()
+            device = await adapter?.requestDevice()
+            Assert.that(device instanceof GPUDevice, "Your browser does not support WebGPU... sorry.")
+
+            // Get a WebGPU context from the canvas and configure it
+            context = canvas?.getContext('webgpu')
+            Assert.exists(context, "context")
+
+            const format = navigator.gpu.getPreferredCanvasFormat()
+            context?.configure(
+                {
+                    device,
+                    format
+                }
+            )
+
+            // Declare a vertex and fragment shader
+            const module = device.createShaderModule({
+                label: 'doubling compute module',
+                code: /* wgsl */ `
+                @group(0) @binding(0) var<storage, read_write> data: array<f32>;
+            
+                @compute @workgroup_size(1) fn computeSomething(
+                    @builtin(global_invocation_id) id: vec3u
+                ) {
+                    let i = id.x;
+                    data[i] = data[i] * 2.0;
+                }
+                `,
+            });
+    
+            // Create a render pipeline
+            const pipeline = device?.createRenderPipeline(
+                {
+                    label: 'our hardcoded red triangle pipeline',
+                    layout: 'auto',
+                    vertex: {
+                        entryPoint: 'vs',
+                        module,
+                    },
+                    fragment: {
+                        entryPoint: 'fs',
+                        module,
+                        targets: [{ format }],
+                    },
+                }
+            )
+
+            // Create a render pass descriptor that describes a texture to draw and how to use them
+            const renderPassDescriptor = {
+                label: 'our basic canvas renderPass',
+                colorAttachments: [
+                    {
+                        view: context.getCurrentTexture().createView(),
+                        clearValue: [0.3, 0.3, 0.3, 1],
+                        loadOp: 'clear',
+                        storeOp: 'store',
+                    },
+                ],
+            } as GPURenderPassDescriptor
+
+            render(renderPassDescriptor, pipeline)
+        })() // These parentheses are important
+
+
+
+
 
         //const stats = setInterval(() => {fps = created.fps}, 100)
 
@@ -108,83 +197,10 @@
         opacity: 100%;
     }
 
-    header {
-        display: flex;
-        align-items: baseline;
-        justify-content: space-between;
-        margin-bottom: 8px;
-    }
-
-    .title {
-        color: var(--accent);
-        letter-spacing: 0.18em;
-        opacity: 0.8;
-    }
-
     .fps {
         font-variant-numeric: tabular-nums;
-        opacity: 0.9;
     }
-
     .fps.good { color: #6f6; }
     .fps.ok   { color: #fc4; }
     .fps.bad  { color: #f66; }
-
-    .select {
-        position: relative;
-        display: block;
-    }
-
-    .select::after { /* the arrow - the native one can't be styled */
-        content: "";
-        position: absolute;
-        top: 50%;
-        right: 8px;
-        margin-top: -2px;
-        border: 4px solid transparent;
-        border-top-color: var(--accent);
-        pointer-events: none;
-    }
-
-    #dev select {
-        appearance: none;
-        -webkit-appearance: none;
-        width: 100%;
-        padding: 5px 22px 5px 7px;
-        background: var(--track);
-        color: #fff;
-        border: 1px solid var(--line);
-        border-radius: 3px;
-        font: inherit;
-        cursor: pointer;
-    }
-
-    #dev select:hover,
-    #dev select:focus-visible {
-        border-color: var(--accent);
-        outline: none;
-    }
-
-    #dev option {
-        background: #0b0f12;
-        color: #fff;
-    }
-
-    .divider {
-        height: 1px;
-        background: var(--line);
-        margin: 10px 0 8px;
-    }
-
-    .description {
-        opacity: 0.55;
-        margin: 8px 0 0;
-    }
-
-    footer {
-        margin-top: 10px;
-        padding-top: 8px;
-        border-top: 1px solid var(--line);
-        opacity: 0.35;
-    }
 </style>
