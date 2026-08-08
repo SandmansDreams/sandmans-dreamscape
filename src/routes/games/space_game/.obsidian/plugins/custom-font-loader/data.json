@@ -1,7 +1,7 @@
 {
   "font_folder": ".obsidian/fonts/",
-  "font": "Jost-VariableFont_wght.ttf",
-  "force_mode": false,
+  "font": "all",
+  "force_mode": true,
   "custom_css_mode": false,
   "custom_css": ""
 }

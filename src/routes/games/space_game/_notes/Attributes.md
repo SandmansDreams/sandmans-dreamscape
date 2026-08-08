@@ -1,0 +1,1 @@
+Attributes define the inputs and outputs of shaders stored at a given location on the GPU

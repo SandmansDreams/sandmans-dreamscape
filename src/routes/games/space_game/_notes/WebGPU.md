@@ -1,9 +1,12 @@
+Really good website for examples with code: https://webgpu.github.io/webgpu-samples/
+
 - WebGPU works similarly to [[WebGL]], but faster
 	- [[Vertex Shader]]
 	- [[Fragment Shader]]
 	- [[Compute Shader]]
 	- [[Buffer]]
 	- [[Texture]]
+	- It's actually *lower level* than WebGL
 - [[WebGPU Flow.canvas]]
 	- Theres a 'pipeline' which the GPU will run
 		- Pipeline contains shaders (including compute)

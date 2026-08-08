@@ -1,11 +1,13 @@
 <script lang="ts">
     import { onMount } from "svelte";
     import { Assert } from "./dev/assert";
+    import { GPU } from "./render/gpu"
+    import { Shader } from "./render/shader"
+    import { Pipeline } from "./render/pipeline"
+    import { FrameLoop } from "./render/loop"
+    import { FLAT_TRIANGLE } from "./render/shaders/flat"
 
     let canvas = $state<HTMLCanvasElement | null>(null)
-    let context: GPUCanvasContext | null
-    let adapter
-    let device: GPUDevice | undefined
 
     // Dev mode
     let devMode = $state(true) // If want only in dev, swith to 'import.meta.env.DEV'
@@ -14,146 +16,33 @@
     let fps = $state(-1)
     let fpsClass = $derived(fps >= 55 ? "good" : fps >= 30 ? "ok" : "bad")
 
-    function render(renderPassDescriptor: GPURenderPassDescriptor, pipeline: GPURenderPipeline) {
-        Assert.exists(context, "context")
-
-        // Get the current texture from the canvas context and
-        // set it as the texture to render to.
-        renderPassDescriptor.colorAttachments[0]!.view = context.getCurrentTexture().createView();
-    
-        // make a command encoder to start encoding commands
-        const encoder = device!.createCommandEncoder({ label: 'our encoder' });
-    
-        // make a render pass encoder to encode render specific commands
-        const pass = encoder.beginRenderPass(renderPassDescriptor);
-        pass.setPipeline(pipeline);
-        pass.draw(3);  // call our vertex shader 3 times
-        pass.end();
-    
-        const commandBuffer = encoder.finish();
-        device!.queue.submit([commandBuffer]); 
-    }
-
     onMount(() => {
         Assert.exists(canvas, "canvas")
+        const target = canvas
 
-        // Check that the browser supports WebGPU, inside an inner call because onMount() can't be async and also return something
-        void (async () => {
-            adapter = await navigator.gpu?.requestAdapter()
-            device = await adapter?.requestDevice()
-            Assert.that(device instanceof GPUDevice, "Your browser does not support WebGPU... sorry.")
+        let gpu: GPU | null = null
+        const loop = new FrameLoop()
 
-            // Get a WebGPU context from the canvas and configure it
-            context = canvas?.getContext('webgpu')
-            Assert.exists(context, "context")
+        void(async () => {
+            const created = await GPU.create(target)
+            gpu = created
 
-            const format = navigator.gpu.getPreferredCanvasFormat()
-            context?.configure(
-                {
-                    device,
-                    format
-                }
-            )
+            const shader = await Shader.create(created, FLAT_TRIANGLE, "flat triangle")
+            const pipeline = Pipeline.create(created, {label: "flat triangle", shader})
 
-            const module = device.createShaderModule({
-                label: 'doubling compute module',
-                code: /* wgsl */ `
-                @group(0) @binding(0) var<storage, read_write> data: array<f32>;
-            
-                @compute @workgroup_size(1) fn computeSomething(
-                    @builtin(global_invocation_id) id: vec3u
-                ) {
-                    let i = id.x;
-                    data[i] = data[i] * 2.0;
-                }
-                `,
-            });
+            loop.start(() => {
+                created.beginFrame([0.05, 0.05, 0.07, 1])
+                    .setPipeline(pipeline)
+                    .draw(3)
+                    .end()
 
-            // Create a render pipeline
-            const pipeline = device.createComputePipeline({
-                label: 'doubling compute pipeline',
-                layout: 'auto',
-                compute: {
-                module,
-                },
-            });
-
-            // Create a buffer on the GPU to hold our computation input and output
-            const input = new Float32Array([1, 3, 5]);
-
-            const workBuffer = device.createBuffer({
-                label: 'work buffer',
-                size: input.byteLength,
-                usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-            });
-            // Copy our input data to that buffer
-            device.queue.writeBuffer(workBuffer, 0, input);
-
-            // Create a buffer on the GPU to get a copy of the results
-            const resultBuffer = device.createBuffer({
-                label: 'result buffer',
-                size: input.byteLength,
-                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
-            });
-
-            // Setup a bindGroup to tell the shader which
-            // buffer to use for the computation
-            const bindGroup = device.createBindGroup({
-                label: 'bindGroup for work buffer',
-                layout: pipeline.getBindGroupLayout(0),
-                entries: [
-                    { binding: 0, resource: workBuffer  },
-                ],
-            });
-
-            // Encode commands to do the computation
-            const encoder = device.createCommandEncoder({
-                label: 'doubling encoder',
-            });
-            const pass = encoder.beginComputePass({
-                label: 'doubling compute pass',
-            });
-            pass.setPipeline(pipeline);
-            pass.setBindGroup(0, bindGroup);
-            pass.dispatchWorkgroups(input.length);
-            pass.end();
-
-            // Encode a command to copy the results to a mappable buffer.
-            encoder.copyBufferToBuffer(workBuffer, 0, resultBuffer, 0, resultBuffer.size);
-
-            // Finish encoding and submit the commands
-            const commandBuffer = encoder.finish();
-            device.queue.submit([commandBuffer]);
-
-
-            // Read the results
-            await resultBuffer.mapAsync(GPUMapMode.READ);
-            const result = new Float32Array(resultBuffer.getMappedRange());
-            
-            console.log('input', input);
-            console.log('result', result);
-            
-            resultBuffer.unmap();
-            //// Create a render pass descriptor that describes a texture to draw and how to use them
-            //const renderPassDescriptor = {
-            //    label: 'our basic canvas renderPass',
-            //    colorAttachments: [
-            //        {
-            //            view: context.getCurrentTexture().createView(),
-            //            clearValue: [0.3, 0.3, 0.3, 1],
-            //            loadOp: 'clear',
-            //            storeOp: 'store',
-            //        },
-            //    ],
-            //} as GPURenderPassDescriptor
-
-            //render(renderPassDescriptor, pipeline)
-        })() // These parentheses are important
-
-        //const stats = setInterval(() => {fps = created.fps}, 100)
+                fps = loop.fps
+            })
+        })() // These 2 parentheses are important
 
         return () => {
-            //clearInterval(stats)
+            loop.stop()
+            gpu?.destroy()
         }
     })
 </script>

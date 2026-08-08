@@ -11,14 +11,12 @@
             "id": "b90acc569cc9cc02",
             "type": "leaf",
             "state": {
-              "type": "markdown",
+              "type": "vscode-editor",
               "state": {
-                "file": "WebGPU.md",
-                "mode": "source",
-                "source": false
+                "file": "_Old Versions/Vers_2 - Webgl 1/engine/hulls.test.ts"
               },
               "icon": "lucide-file",
-              "title": "WebGPU"
+              "title": "hulls.test"
             }
           }
         ]
@@ -203,22 +201,34 @@
   },
   "active": "b90acc569cc9cc02",
   "lastOpenFiles": [
-    "Shaders.md",
-    "WebGPU.md",
-    "WebGPU Flow.canvas",
-    "Compute Shader.md",
-    "Fragment Shader.md",
-    "Vertex Shader.md",
-    "WebGL.md",
-    "SpaceGame (title tbd).md",
-    "SpaceGame Structure.canvas",
+    "render/loop.ts",
+    "render/shaders/flat.ts",
+    "render/shaders",
+    "render/pipeline.ts",
+    "render/buffer.test.ts",
+    "_Old Versions/Vers_2 - Webgl 1/engine/gridOutline.test.ts",
+    "_notes/Claude Plans/WebGPU 2D render layer — foundation milestone.md",
+    "render/buffer.node.ts",
+    "render/buffer.ts",
+    "render/frame.ts",
+    "render/shader.ts",
+    "render/gpu.ts",
+    "_notes/WebGPU.md",
+    "_notes/Attributes.md",
+    "_notes/old notes.md",
+    "_notes/Matrices.md",
+    "_notes/Vectors.md",
+    "_notes/Shaders.md",
+    "_notes/WebGPU Flow.canvas",
+    "_notes/Compute Shader.md",
+    "_notes/Fragment Shader.md",
+    "_notes/Vertex Shader.md",
+    "_notes/WebGL.md",
+    "_notes/SpaceGame (title tbd).md",
+    "_notes/SpaceGame Structure.canvas",
     "How WebGL Works.canvas",
-    "old notes.md",
-    "dev/assert.ts",
-    "dev/performance.ts",
     "assets/fonts/SpaceGameStylized_spaced_5x7.png",
     "assets/fonts/SpaceGameMono_mono_5x7.png",
-    "assets/fonts/SpaceGameGalactic_spaced_5x7.png",
-    "_Old Versions"
+    "assets/fonts/SpaceGameGalactic_spaced_5x7.png"
   ]
 }
