@@ -1,0 +1,1 @@
+// An open environment with one light and several objects to test the lighting engine. The light can move, the objects may?

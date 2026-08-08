@@ -4,9 +4,9 @@ import type { Vector2 } from "../physics/core";
 
 class Light {
     position: Vector2
-    distance: number // How far the light propogates until it stops having an effect
+    distance: number // How far the light propogates until it stops having an effect, fades out
     rotation?: number // Where the light is pointing
-    arcAngle?: number // The distance of the arc that the light produces
+    arcAngle?: number // The distance of the arc that the light produces (for pointed lights)
     //reflection?
     //transparency?
     constructor (

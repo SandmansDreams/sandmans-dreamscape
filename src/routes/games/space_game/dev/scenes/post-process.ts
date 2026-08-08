@@ -1,4 +1,4 @@
-import { Mesh, MeshBuilder, type Color } from "../../render/mesh"
+import { Mesh, MeshBuilder, type RGB } from "../../render/mesh"
 import { FullscreenPass } from "../../render/passes"
 import { CHROMATIC_ABERRATION_2D_FRAGMENT_SOURCE, CRT_SCANLINES_FRAGMENT_SOURCE, MINIMAL_2D_FRAGMENT_SOURCE, MINIMAL_2D_VERTEX_SOURCE, Program, Shader } from "../../render/shaders"
 import { quad, triangle } from "../../render/shapes"
@@ -42,7 +42,7 @@ function buildPattern(gl2: WebGL2RenderingContext, pattern: string): Mesh {
         for (let col = 0; col < n; col++) {
             const x = -0.85 + (1.7 * col) / (n - 1)
             const y = -0.85 + (1.7 * row) / (n - 1)
-            const lit: Color = (row + col) % 2 === 0 ? [1, 1, 1] : [0.12, 0.12, 0.12]
+            const lit: RGB = (row + col) % 2 === 0 ? [1, 1, 1] : [0.12, 0.12, 0.12]
             builder.add(quad(x, y, 0.16), lit)
         }
     }

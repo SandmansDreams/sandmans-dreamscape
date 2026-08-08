@@ -5,7 +5,7 @@
     import { SceneRunner, type SceneDefinition } from "./render/scenes";
     import { defaultValues, loadLastSceneId, saveLastSceneId, type SettingValues } from "./settings/settings";
     import { FullscreenPass } from "./render/passes";
-    import { MINIMAL_2D_FRAGMENT_SOURCE, MINIMAL_2D_VERTEX_SOURCE, PASSTHROUGH_FRAGMENT_SOURCE } from "./render/shaders";
+    import { PASSTHROUGH_FRAGMENT_SOURCE } from "./render/shaders";
     import { RenderTarget } from "./render/targets";
     import SettingsPanel from "./dev/SettingsPanel.svelte";
 
@@ -14,8 +14,7 @@
 
     // Dev mode
     let devMode = $state(true) // If want only in dev, swith to 'import.meta.env.DEV'
-    // Any scene, not just a dev one - DEV_SCENES is simply what the picker offers
-    let harness = $state<SceneRunner | null>(null)
+    let harness = $state<SceneRunner | null>(null) 
     let scene = $state<SceneDefinition | null>(DEV_SCENES[0] ?? null)
     let values = $state<SettingValues>(
         DEV_SCENES[0] ? defaultValues(DEV_SCENES[0].settings) : {}

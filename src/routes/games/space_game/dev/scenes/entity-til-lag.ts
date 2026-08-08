@@ -1,0 +1,1 @@
+// Choose a game object and spawn it in until lag begins, report the amount of objects before lag began. Should help determine if a particular entity is particularly

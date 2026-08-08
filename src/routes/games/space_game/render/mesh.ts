@@ -2,6 +2,9 @@ import type { Vec3Like } from "ts-gl-matrix";
 import { Buffer } from "./shaders";
 import { Assert } from "../assert";
 
+export type RGB = readonly [number, number, number]
+
+
 // Gets the attibute from the location, should be moved to shader
 export const ATTR_VERTEX = 0 
 export const ATTR_COLOR = 1 
@@ -63,14 +66,11 @@ export class Mesh {
     }
 }
 
-// May Delete
-export type Color = readonly [number, number, number]
-
 export class MeshBuilder { // Accumulates triangles on the CPU, uploads once
     private readonly data: number[] = []
 
     /** verts: flat [x,y, x,y, x,y, ...] triangle list. The color is copied to every vertex. */
-    add(verts: readonly number[], color: Color): this {
+    add(verts: readonly number[], color: RGB): this {
         Assert.that(verts.length % 6 === 0, "verts must be whole triangles")
 
         for (let i = 0; i < verts.length; i += 2) {
