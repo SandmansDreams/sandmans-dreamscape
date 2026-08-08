@@ -1,10 +1,10 @@
-import { Camera } from "../../render/camera";
-import { DEFAULT_FONT } from "../../render/font";
-import { Mesh } from "../../render/mesh";
-import { MINIMAL_2D_FRAGMENT_SOURCE, MINIMAL_2D_VERTEX_SOURCE, Program, Shader } from "../../render/shaders";
-import { appendShape, BLOCK_SHAPES, type BlockShape, MIRRORABLE_SHAPES } from "../../render/shapes";
-import type { SettingsSchema, ValuesOf } from "../../settings/settings";
-import type { SceneContext, SceneInstance } from "../../render/scenes";
+import { Camera } from "../../../render/camera";
+import { DEFAULT_FONT } from "../../../render/font";
+import { Mesh } from "../../../render/mesh";
+import { MINIMAL_2D_FRAGMENT_SOURCE, MINIMAL_2D_VERTEX_SOURCE, Program, Shader } from "../../../render/shaders";
+import { appendShape, BLOCK_SHAPES, type BlockShape, MIRRORABLE_SHAPES } from "../../../render/shapes";
+import type { SettingsSchema, ValuesOf } from "../../../settings/settings";
+import type { SceneContext, SceneInstance } from "../../../render/scenes";
 import type { DevSceneDefinition } from "../DevScene";
 
 const SETTINGS = {

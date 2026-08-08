@@ -1,5 +1,5 @@
-import type { SettingsSchema } from "../settings/settings"
-import type { SceneDefinition } from "../render/scenes"
+import type { SettingsSchema } from "../../settings/settings"
+import type { SceneDefinition } from "../../render/scenes"
 
 /**
  * A dev scene is an ordinary scene that always has settings to tweak.

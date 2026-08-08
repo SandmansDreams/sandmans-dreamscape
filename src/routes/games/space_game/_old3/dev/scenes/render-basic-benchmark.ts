@@ -1,16 +1,16 @@
-import type { SceneContext, SceneInstance } from "../../render/scenes"
+import type { SceneContext, SceneInstance } from "../../../render/scenes"
 import type { DevSceneDefinition } from "../DevScene"
-import type { SettingsSchema, ValuesOf } from "../../settings/settings"
+import type { SettingsSchema, ValuesOf } from "../../../settings/settings"
 import {
     INSTANCED_2D_VERTEX_SOURCE,
     MINIMAL_2D_FRAGMENT_SOURCE,
     MINIMAL_2D_VERTEX_SOURCE,
     Program,
     Shader,
-} from "../../render/shaders"
-import { Mesh, MeshBuilder } from "../../render/mesh"
-import { quad } from "../../render/shapes"
-import { orthographic2D, spriteTransform2D } from "../../render/transform"
+} from "../../../render/shaders"
+import { Mesh, MeshBuilder } from "../../../render/mesh"
+import { quad } from "../../../render/shapes"
+import { orthographic2D, spriteTransform2D } from "../../../render/transform"
 import {
     INST_COLOR,
     INST_OFFSET,
@@ -18,7 +18,7 @@ import {
     INST_VERTEX,
     InstancedBatch,
     UNIT_QUAD,
-} from "../../render/batch"
+} from "../../../render/batch"
 
 const STEP = 1 / 60             // fixed simulation step, seconds
 const MAX_STEPS = 5             // spiral-of-death guard

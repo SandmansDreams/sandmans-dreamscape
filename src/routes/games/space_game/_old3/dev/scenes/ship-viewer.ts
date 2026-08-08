@@ -1,12 +1,12 @@
-import { buildHull, HULLS } from "../../assets/ships";
-import { Camera } from "../../render/camera";
-import { DEFAULT_FONT } from "../../render/font";
-import type { Grid } from "../../render/grid";
-import { buildGridMesh } from "../../render/gridMesh";
-import { Mesh } from "../../render/mesh";
-import { MINIMAL_2D_FRAGMENT_SOURCE, MINIMAL_2D_VERTEX_SOURCE, Program, Shader } from "../../render/shaders";
-import type { SettingsSchema, ValuesOf } from "../../settings/settings";
-import type { SceneContext, SceneInstance } from "../../render/scenes";
+import { buildHull, HULLS } from "../../../assets/ships";
+import { Camera } from "../../../render/camera";
+import { DEFAULT_FONT } from "../../../render/font";
+import type { Grid } from "../../../render/grid";
+import { buildGridMesh } from "../../../render/gridMesh";
+import { Mesh } from "../../../render/mesh";
+import { MINIMAL_2D_FRAGMENT_SOURCE, MINIMAL_2D_VERTEX_SOURCE, Program, Shader } from "../../../render/shaders";
+import type { SettingsSchema, ValuesOf } from "../../../settings/settings";
+import type { SceneContext, SceneInstance } from "../../../render/scenes";
 import type { DevSceneDefinition } from "../DevScene";
 
 /**
