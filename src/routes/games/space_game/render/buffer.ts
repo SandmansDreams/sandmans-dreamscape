@@ -22,7 +22,7 @@ export class Buffer {
     private static make(
         gpu: GPU, 
         usage: GPUBufferUsageFlags,
-        dataSource: number | ArrayBufferView,
+        dataSource: number | ArrayBufferView<ArrayBuffer>,
         label: string
     ) {
         // Get the size requirement of the buffer
@@ -44,23 +44,23 @@ export class Buffer {
         return buffer
     }
 
-    static makeVertexBuffer(gpu: GPU, source: number | ArrayBufferView, label = "vertex buffer"): Buffer {
+    static makeVertexBuffer(gpu: GPU, source: number | ArrayBufferView<ArrayBuffer>, label = "vertex buffer"): Buffer {
         return Buffer.make(gpu, GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST, source, label)
     }
 
-    static makeIndexBuffer(gpu: GPU, source: number | ArrayBufferView, label = "index buffer"): Buffer {
+    static makeIndexBuffer(gpu: GPU, source: number | ArrayBufferView<ArrayBuffer>, label = "index buffer"): Buffer {
         return Buffer.make(gpu, GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST, source, label)
     }
 
-    static makeUniformBuffer(gpu: GPU, source: number | ArrayBufferView, label = "uniform buffer"): Buffer {
+    static makeUniformBuffer(gpu: GPU, source: number | ArrayBufferView<ArrayBuffer>, label = "uniform buffer"): Buffer {
         return Buffer.make(gpu, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST, source, label)
     }
 
-    static makeStorageBuffer(gpu: GPU, source: number | ArrayBufferView, label = "storage buffer"): Buffer {
+    static makeStorageBuffer(gpu: GPU, source: number | ArrayBufferView<ArrayBuffer>, label = "storage buffer"): Buffer {
         return Buffer.make(gpu, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST, source, label)
     }
 
-    write(data: ArrayBufferView, offsetBytes = 0): void { // Copies data into a buffer on the GPU
+    write(data: ArrayBufferView<ArrayBuffer>, offsetBytes = 0): void { // Copies data into a buffer on the GPU
         Assert.that(
             offsetBytes + data.byteLength <= this.size,
             `write of ${data.byteLength}b at ${offsetBytes} overflows a ${this.size}b buffer`,

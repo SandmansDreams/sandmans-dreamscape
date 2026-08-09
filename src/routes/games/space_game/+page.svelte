@@ -6,11 +6,15 @@
     import { Pipeline } from "./render/pipeline"
     import { FrameLoop } from "./render/loop"
     import { FLAT_TRIANGLE } from "./render/shaders/flat"
+    import { Camera, CameraBinding } from "./render/camera"
+    import { MeshBuilder, VERTEX_LAYOUT } from "./render/mesh"
+    import { MESH_2D } from "./render/shaders/mesh2d"
 
     let canvas = $state<HTMLCanvasElement | null>(null)
 
     // Dev mode
     let devMode = $state(true) // If want only in dev, swith to 'import.meta.env.DEV'
+    let rotation = $state(0)
     //let scene = $state<Scene | null>(null)
 
     let fps = $state(-1)
@@ -22,19 +26,38 @@
 
         let gpu: GPU | null = null
         const loop = new FrameLoop()
+        const camera = new Camera()
 
         void(async () => {
             const created = await GPU.create(target)
             gpu = created
 
-            const shader = await Shader.create(created, FLAT_TRIANGLE, "flat triangle")
-            const pipeline = Pipeline.create(created, {label: "flat triangle", shader})
+            const shader = await Shader.create(created, MESH_2D, "mesh 2d")
+            const cameraBinding = CameraBinding.create(created)
+
+            const pipeline = Pipeline.create(created, {
+                label: "mesh_2D",
+                shader,
+                layouts: [cameraBinding.layout],
+                vertexBuffers: [VERTEX_LAYOUT],
+            })
+
+            const mesh = new MeshBuilder()
+                .quad(-20, -20, 40, 40, [1, 1, 1])      // white — origin
+                .quad(-20, 80, 40, 40, [0.2, 1, 0.35])  // green — +y, expect BELOW
+                .quad(80, -20, 40, 40, [1, 0.35, 0.2])  // red   — +x, expect RIGHT
+                .build(created, "axis markers")
 
             loop.start(() => {
-                created.beginFrame([0.05, 0.05, 0.07, 1])
+                camera.rotation = rotation
+                cameraBinding.upload(camera, created.width, created.height)
+
+                const frame = created.beginFrame([0.05, 0.05, 0.07, 1])
+                frame
                     .setPipeline(pipeline)
-                    .draw(3)
-                    .end()
+                    .setBindGroup(0, cameraBinding.group)
+                mesh.draw(frame)
+                frame.end()
 
                 fps = loop.fps
             })
@@ -47,7 +70,11 @@
     })
 </script>
 
-<svelte:window onkeydown={(e) => { if (e.key === "`") devMode = !devMode }} />
+<svelte:window onkeydown={(e) => {
+    if (e.key === "`") devMode = !devMode
+    if (e.key === "]") rotation += 0.1
+    if (e.key === "[") rotation -= 0.1
+}} />
 
 <div id="container">
     {#if devMode}

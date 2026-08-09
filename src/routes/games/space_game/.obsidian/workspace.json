@@ -11,12 +11,14 @@
             "id": "b90acc569cc9cc02",
             "type": "leaf",
             "state": {
-              "type": "vscode-editor",
+              "type": "markdown",
               "state": {
-                "file": "_Old Versions/Vers_2 - Webgl 1/engine/hulls.test.ts"
+                "file": "_notes/Claude Plans/2 WebGPU 2D render layer — camera, batching, scenes, benchmark.md",
+                "mode": "source",
+                "source": false
               },
               "icon": "lucide-file",
-              "title": "hulls.test"
+              "title": "2 WebGPU 2D render layer — camera, batching, scenes, benchmark"
             }
           }
         ]
@@ -201,18 +203,20 @@
   },
   "active": "b90acc569cc9cc02",
   "lastOpenFiles": [
+    "render/camera.test.ts",
+    "render/camera.tests.ts",
+    "render/shaders/mesh2d.ts",
+    "Untitled.md",
+    "_notes/Claude Plans/2 WebGPU 2D render layer — camera, batching, scenes, benchmark.md",
+    "settings/storage.ts",
+    "+page.svelte",
+    "render/mesh.ts",
+    "render/camera.ts",
+    "_notes/Claude Plans/1 WebGPU 2D render layer — foundation milestone.md",
+    "_Old Versions/Vers_2 - Webgl 1/engine/hulls.test.ts",
     "render/loop.ts",
     "render/shaders/flat.ts",
     "render/shaders",
-    "render/pipeline.ts",
-    "render/buffer.test.ts",
-    "_Old Versions/Vers_2 - Webgl 1/engine/gridOutline.test.ts",
-    "_notes/Claude Plans/WebGPU 2D render layer — foundation milestone.md",
-    "render/buffer.node.ts",
-    "render/buffer.ts",
-    "render/frame.ts",
-    "render/shader.ts",
-    "render/gpu.ts",
     "_notes/WebGPU.md",
     "_notes/Attributes.md",
     "_notes/old notes.md",
