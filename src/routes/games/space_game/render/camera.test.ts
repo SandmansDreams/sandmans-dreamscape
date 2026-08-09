@@ -57,7 +57,24 @@ describe("Camera.pack()", () => {
         expect(Number.isFinite(packed[0])).toBe(true)
         expect(packed[0]).not.toBe(0)
     })
-})
+
+    it("agrees with worldToScreen about where a rotated point lands", () => {
+        const width = 800
+        const height = 450
+        const camera = new Camera({ x: 0, y: 0 }, 1, 0.6)
+        const [m00, m01, m10, m11, tx, ty] = camera.pack(width, height)
+
+        // Project (100, 0) through the packed matrix by hand, then clip -> pixels
+        const clipX = m00! * 100 + m10! * 0 + tx!
+        const clipY = m01! * 100 + m11! * 0 + ty!
+        const fromMatrix = { x: (clipX + 1) * width / 2, y: (1 - clipY) * height / 2 }
+
+        const fromHelper = camera.worldToScreen(100, 0)
+
+        expect(fromHelper.x).toBeCloseTo(fromMatrix.x)
+        expect(fromHelper.y).toBeCloseTo(fromMatrix.y)
+    })
+    })
 
 describe("Camera coordinate conversion", () => {
     it("round-trips screen -> world -> screen with rotation and zoom", () => {

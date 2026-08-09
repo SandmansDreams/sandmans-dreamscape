@@ -4,21 +4,19 @@
     "type": "split",
     "children": [
       {
-        "id": "73045d60fc7e5fb4",
+        "id": "43397999a5374baf",
         "type": "tabs",
         "children": [
           {
-            "id": "b90acc569cc9cc02",
+            "id": "d5971898faa58106",
             "type": "leaf",
             "state": {
-              "type": "markdown",
+              "type": "image",
               "state": {
-                "file": "_notes/Claude Plans/2 WebGPU 2D render layer — camera, batching, scenes, benchmark.md",
-                "mode": "source",
-                "source": false
+                "file": "assets/fonts/SpaceGameStylized_spaced_5x7.png"
               },
-              "icon": "lucide-file",
-              "title": "2 WebGPU 2D render layer — camera, batching, scenes, benchmark"
+              "icon": "lucide-image",
+              "title": "SpaceGameStylized_spaced_5x7"
             }
           }
         ]
@@ -201,38 +199,41 @@
       "iconic:Open rulebook": false
     }
   },
-  "active": "b90acc569cc9cc02",
+  "active": "c74c92bff4f8041e",
   "lastOpenFiles": [
-    "render/camera.test.ts",
-    "render/camera.tests.ts",
-    "render/shaders/mesh2d.ts",
-    "Untitled.md",
-    "_notes/Claude Plans/2 WebGPU 2D render layer — camera, batching, scenes, benchmark.md",
-    "settings/storage.ts",
-    "+page.svelte",
-    "render/mesh.ts",
-    "render/camera.ts",
-    "_notes/Claude Plans/1 WebGPU 2D render layer — foundation milestone.md",
-    "_Old Versions/Vers_2 - Webgl 1/engine/hulls.test.ts",
-    "render/loop.ts",
-    "render/shaders/flat.ts",
-    "render/shaders",
-    "_notes/WebGPU.md",
-    "_notes/Attributes.md",
-    "_notes/old notes.md",
-    "_notes/Matrices.md",
-    "_notes/Vectors.md",
-    "_notes/Shaders.md",
-    "_notes/WebGPU Flow.canvas",
-    "_notes/Compute Shader.md",
-    "_notes/Fragment Shader.md",
-    "_notes/Vertex Shader.md",
-    "_notes/WebGL.md",
-    "_notes/SpaceGame (title tbd).md",
-    "_notes/SpaceGame Structure.canvas",
-    "How WebGL Works.canvas",
-    "assets/fonts/SpaceGameStylized_spaced_5x7.png",
+    "render/shaders/instanced2d.ts",
     "assets/fonts/SpaceGameMono_mono_5x7.png",
-    "assets/fonts/SpaceGameGalactic_spaced_5x7.png"
+    "assets/fonts/SpaceGameGalactic_spaced_5x7.png",
+    "+page.svelte",
+    "render/instance.ts",
+    "settings/storage.ts",
+    "settings/defaults.json",
+    "settings",
+    "render/shaders/flat.ts",
+    "render/shaders/mesh2d.ts",
+    "render/shaders",
+    "render/shader.ts",
+    "render/pipeline.ts",
+    "assets/fonts/SpaceGameStylized_spaced_5x7.png",
+    "_notes/Claude Plans/2 WebGPU 2D render layer — camera, batching, scenes, benchmark.md",
+    "_notes/Claude Plans/1 WebGPU 2D render layer — foundation milestone.md",
+    "_notes/old notes.md",
+    "_notes/WebGPU.md",
+    "_notes/WebGPU Flow.canvas",
+    "_notes/WebGL.md",
+    "_notes/Vertex Shader.md",
+    "_notes/Vectors.md",
+    "_notes/SpaceGame Structure.canvas",
+    "_notes/SpaceGame (title tbd).md",
+    "_notes/Shaders.md",
+    "_notes/Matrices.md",
+    "_notes/Fragment Shader.md",
+    "_notes/Compute Shader.md",
+    "_notes/Attributes.md",
+    "_Old Versions/Vers_1 - Canvas/notes.md",
+    "notes.md",
+    "_old/notes.md",
+    "Untitled.md",
+    "How WebGL Works.canvas"
   ]
 }

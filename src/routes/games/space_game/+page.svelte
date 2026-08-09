@@ -3,12 +3,14 @@
     import { Assert } from "./dev/assert";
     import { GPU } from "./render/gpu"
     import { Shader } from "./render/shader"
-    import { Pipeline } from "./render/pipeline"
     import { FrameLoop } from "./render/loop"
     import { FLAT_TRIANGLE } from "./render/shaders/flat"
     import { Camera, CameraBinding } from "./render/camera"
     import { MeshBuilder, VERTEX_LAYOUT } from "./render/mesh"
     import { MESH_2D } from "./render/shaders/mesh2d"
+    import { InstanceBatch } from "./render/instance"
+    import { Pipeline, emptyBindGroupLayout } from "./render/pipeline"
+    import { INSTANCED_2D } from "./render/shaders/instanced2d"
 
     let canvas = $state<HTMLCanvasElement | null>(null)
 
@@ -32,31 +34,53 @@
             const created = await GPU.create(target)
             gpu = created
 
-            const shader = await Shader.create(created, MESH_2D, "mesh 2d")
+            const shader = await Shader.create(created, INSTANCED_2D, "instanced 2d")
             const cameraBinding = CameraBinding.create(created)
+            const instanceLayout = InstanceBatch.layout(created)
 
             const pipeline = Pipeline.create(created, {
-                label: "mesh_2D",
+                label: "instanced 2d",
                 shader,
-                layouts: [cameraBinding.layout],
+                // Group 1 is reserved for materials and is still empty
+                layouts: [cameraBinding.layout, emptyBindGroupLayout(created), instanceLayout],
                 vertexBuffers: [VERTEX_LAYOUT],
             })
 
-            const mesh = new MeshBuilder()
-                .quad(-20, -20, 40, 40, [1, 1, 1])      // white — origin
-                .quad(-20, 80, 40, 40, [0.2, 1, 0.35])  // green — +y, expect BELOW
-                .quad(80, -20, 40, 40, [1, 0.35, 0.2])  // red   — +x, expect RIGHT
-                .build(created, "axis markers")
+            // A 1x1 white quad centred on the origin, so the instance transform
+            // scales about its middle and the instance colour comes through as-is.
+            const quad = new MeshBuilder()
+                .quad(-0.5, -0.5, 1, 1, [1, 1, 1])
+                .build(created, "unit quad")
 
-            loop.start(() => {
+            // Deliberately below COUNT so the first frame exercises grow()
+            const batch = InstanceBatch.create(created, instanceLayout, 1024, "quads")
+
+            const COUNT = 5000
+            let elapsed = 0
+
+            loop.start((dt) => {
+                elapsed += dt
                 camera.rotation = rotation
                 cameraBinding.upload(camera, created.width, created.height)
 
+                batch.begin()
+                for (let i = 0; i < COUNT; i++) {
+                    const angle = i * 0.1 + elapsed
+                    const radius = 20 + i * 0.12
+                    batch.add(
+                        Math.cos(angle) * radius,
+                        Math.sin(angle) * radius,
+                        angle * 2,
+                        14,
+                        0.5 + 0.5 * Math.sin(i * 0.03),
+                        0.5 + 0.5 * Math.sin(i * 0.03 + 2),
+                        0.5 + 0.5 * Math.sin(i * 0.03 + 4),
+                    )
+                }
+
                 const frame = created.beginFrame([0.05, 0.05, 0.07, 1])
-                frame
-                    .setPipeline(pipeline)
-                    .setBindGroup(0, cameraBinding.group)
-                mesh.draw(frame)
+                frame.setPipeline(pipeline).setBindGroup(0, cameraBinding.group)
+                batch.draw(frame, quad)
                 frame.end()
 
                 fps = loop.fps

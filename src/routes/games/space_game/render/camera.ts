@@ -14,7 +14,7 @@ export const CAMERA_BYTES = CAMERA_FLOATS * 4
 export class Camera {
     position: Vec2 // World position
     zoom: number // At zoom 1, one world unit covers one drawing-buffer pixel
-    rotation: number // Radians. Positive turns the WORLD counter-clockwise on screen, i.e. the camera itself clockwise
+    rotation: number // Radians. Positive turns the WORLD clockwise on screen, i.e. the camera itself clockwise
 
     viewportWidth = 1
     viewportHeight = 1
@@ -111,8 +111,8 @@ export class Camera {
         const sin = Math.sin(this.rotation)
 
         return {
-            x: this.position.x + cos * cx - sin * cy,
-            y: this.position.y + sin * cx + cos * cy,
+            x: this.position.x + cos * cx + sin * cy,
+            y: this.position.y - sin * cx + cos * cy,
         }
     }
 
@@ -125,8 +125,8 @@ export class Camera {
         const sin = Math.sin(this.rotation)
 
         return {
-            x: (cos * dx + sin * dy) * zoom + this.viewportWidth / 2,
-            y: (-sin * dx + cos * dy) * zoom + this.viewportHeight / 2,
+            x: (cos * dx - sin * dy) * zoom + this.viewportWidth / 2,
+            y: (sin * dx + cos * dy) * zoom + this.viewportHeight / 2,
         }
     }
 

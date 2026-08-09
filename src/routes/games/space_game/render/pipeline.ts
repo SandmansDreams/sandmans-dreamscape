@@ -84,3 +84,8 @@ export class Pipeline {
         return this.device.createBindGroup({ label, layout, entries })
     }
 }
+
+// Create an empty layout for reserving a group index nothing uses yet
+export function emptyBindGroupLayout(gpu: GPU, label = "empty"): GPUBindGroupLayout {
+    return gpu.device.createBindGroupLayout({ label: `${label} layout`, entries: [] })
+}
