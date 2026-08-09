@@ -3,6 +3,7 @@
 import { devicePixelRatio } from "svelte/reactivity/window" // Svelte reactive version of the built-in dpr
 import { Assert } from "../dev/assert"
 import { COLOR_BLACK, Frame } from "./frame"
+import type { GpuTimer } from "./timing"
 
 export class GPU {
     readonly canvas: HTMLCanvasElement
@@ -57,7 +58,12 @@ export class GPU {
         const adapter = await navigator.gpu.requestAdapter()
         Assert.exists(adapter, "GPU adapter — WebGPU exists but no adapter was available")
 
-        const device = await adapter.requestDevice({ label: "space game device" })
+        const device = await adapter.requestDevice({
+            label: "space game device",
+            // Optional feature: asking for one the adapter lacks rejects the request,
+            // so check first and degrade to no GPU timing rather than failing to start
+            requiredFeatures: adapter.features.has("timestamp-query") ? ["timestamp-query"] : [],
+        })
 
         const context = canvas.getContext("webgpu")
         Assert.exists(context, "webgpu canvas context")
@@ -75,8 +81,8 @@ export class GPU {
         return new GPU(canvas, device, context, format)
     }
 
-    beginFrame(clear: GPUColor = COLOR_BLACK): Frame {
-        return new Frame(this, clear)
+    beginFrame(clear: GPUColor = COLOR_BLACK, timer: GpuTimer | null = null): Frame {
+        return new Frame(this, clear, timer)
     }
 
     get width(): number {

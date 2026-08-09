@@ -60,6 +60,15 @@ export class Buffer {
         return Buffer.make(gpu, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST, source, label)
     }
 
+    static makeQueryResolveBuffer(gpu: GPU, source: number | ArrayBufferView<ArrayBuffer>, label = "query resolve buffer"): Buffer {
+        return Buffer.make(gpu, GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC, source, label)
+    }
+
+    // MAP_READ may only pair with COPY_DST - it is a destination for copies and is never written directly, so this one deliberately has no COPY_SRC or write path.
+    static makeReadbackBuffer(gpu: GPU, source: number | ArrayBufferView<ArrayBuffer>, label = "readback buffer"): Buffer {
+        return Buffer.make(gpu, GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST, source, label)
+    }
+
     write(data: ArrayBufferView<ArrayBuffer>, offsetBytes = 0): void { // Copies data into a buffer on the GPU
         Assert.that(
             offsetBytes + data.byteLength <= this.size,
