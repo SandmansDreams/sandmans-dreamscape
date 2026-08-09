@@ -1,50 +1,36 @@
 <script lang="ts">
-    import { FLAT_TRIANGLE } from "./render/shaders/flat"
-    import { MESH_2D } from "./render/shaders/mesh2d"
-    import { INSTANCED_2D } from "./render/shaders/instanced2d"
-
-    import { onMount } from "svelte";
-    import { Assert } from "./dev/assert";
+    import { onMount, untrack } from "svelte"
+    import { Assert } from "./dev/assert"
+    import { DEV_SCENES } from "./dev/DevScene"
+    import type { StatEntry } from "./dev/performance"
+    import SettingsPanel from "./dev/SettingsPanel.svelte"
     import { GPU } from "./render/gpu"
-    import { Shader } from "./render/shader"
-    import { FrameLoop } from "./render/loop"
-    import { Camera, CameraBinding } from "./render/camera"
-    import { MeshBuilder, VERTEX_LAYOUT } from "./render/mesh"
-    import { InstanceBatch } from "./render/instance"
-    import { Pipeline, emptyBindGroupLayout } from "./render/pipeline"
-    import { Stats, type StatEntry } from "./dev/performance"
-    import { GpuTimer } from "./render/timing"
+    import { SceneRunner, type SceneDefinition } from "./render/scene"
+    import {
+        loadSceneId,
+        loadSceneValues,
+        saveSceneId,
+        saveSceneValues,
+        type SettingValues,
+    } from "./settings/settings"
 
-    let DEV_COLOR = "#87CEEB" // Blue //"#32CD32" // Green
+    const DEV_COLOR = "#87CEEB"
 
     let canvas = $state<HTMLCanvasElement | null>(null)
-
-    // Dev mode
     let devMode = $state(true) // If want only in dev, swith to 'import.meta.env.DEV'
-    let rotation = $state(0)
-    //let scene = $state<Scene | null>(null)
 
-    let statLines = $state<StatEntry[]>([])
-    let gpuTimingSupported = $state(true)
+    // The scene list needs no GPU, so the last-used scene can be restored before the
+    // device exists - the load effect below simply waits for the runner
+    const initial = DEV_SCENES.find((s) => s.id === loadSceneId()) ?? DEV_SCENES[0] ?? null
+
+    let runner = $state<SceneRunner | null>(null)
+    let scene = $state<SceneDefinition | null>(initial)
+    let values = $state<SettingValues>(initial ? loadSceneValues(initial.id, initial.settings ?? {}) : {})
+
     let fps = $state(0)
     let budgetMs = $state(1000 / 60)
-    let fpsColor = $derived(healthColor((60 - fps) / 30))
-
-    // 0 = healthy, 1 = at or past the limit
-    function healthColor(t: number): string {
-        const clamped = Math.min(1, Math.max(0, t))
-
-        // Hue 120 (green) -> 0 (red), through amber at the midpoint
-        return `hsl(${(120 * (1 - clamped)).toFixed(0)} 90% 62%)`
-    }
-
-    function statColor(entry: StatEntry): string {
-        // Counts are neither good nor bad - 5,000 instances is a workload, not a health signal
-        if (entry.unit !== "ms") return ""
-
-        // Full green below 40% of the budget, full red once it reaches the budget
-        return healthColor((entry.average / budgetMs - 0.4) / 0.6)
-    }
+    let statLines = $state<StatEntry[]>([])
+    let gpuTimingSupported = $state(true)
 
     function formatStat(entry: StatEntry): string {
         return entry.unit === "ms"
@@ -52,106 +38,83 @@
             : Math.round(entry.average).toLocaleString()
     }
 
+    function healthColor(t: number): string {
+        const clamped = Math.min(1, Math.max(0, t))
+        return `hsl(${(120 * (1 - clamped)).toFixed(0)} 90% 62%)`
+    }
+
+    function statColor(entry: StatEntry): string {
+        if (entry.unit !== "ms") return ""
+        return healthColor((entry.average / budgetMs - 0.4) / 0.6)
+    }
+
+    let fpsColor = $derived(healthColor((60 - fps) / 30))
+
+    function selectScene(definition: SceneDefinition) {
+        scene = definition
+        values = loadSceneValues(definition.id, definition.settings ?? {})
+        saveSceneId(definition.id)
+    }
+
+    // Selection changes rebuild every GPU resource the scene owns
+    $effect(() => {
+        const definition = scene
+        if (!runner || !definition) return
+        // untrack is what stops a slider drag from tearing down and recreating the
+        // whole scene on every pointer event
+        runner.load(definition, untrack(() => values))
+    })
+
+    // Value changes are pushed through without a rebuild
+    $effect(() => {
+        runner?.setValues(values)
+    })
+
+    let saveTimer: ReturnType<typeof setTimeout> | undefined
+    $effect(() => {
+        const definition = scene
+        const snapshot = values
+        if (!definition) return
+
+        // Debounced: a slider drag would otherwise write localStorage 60 times a second
+        clearTimeout(saveTimer)
+        saveTimer = setTimeout(() => saveSceneValues(definition.id, snapshot), 400)
+    })
+
     onMount(() => {
-        Assert.exists(canvas, "canvas")
         const target = canvas
+        Assert.exists(target, "canvas")
 
-        let gpu: GPU | null = null
-        const loop = new FrameLoop()
-        const camera = new Camera()
+        let created: SceneRunner | null = null
+        let ticker: ReturnType<typeof setInterval> | undefined
 
-        const stats = new Stats()
-        let panelTicker: ReturnType<typeof setInterval> | undefined
-        let timer: GpuTimer | null = null
+        void (async () => {
+            const gpu = await GPU.create(target)
+            created = new SceneRunner(gpu)
+            gpuTimingSupported = created.gpuTimingSupported
 
-        void(async () => {
-            const created = await GPU.create(target)
-            gpu = created
+            // Assigning this is what lets the load effect above build the first scene
+            runner = created
+            created.start()
 
-            const shader = await Shader.create(created, INSTANCED_2D, "instanced 2d")
-            const cameraBinding = CameraBinding.create(created)
-            const instanceLayout = InstanceBatch.layout(created)
-
-            timer = new GpuTimer(created)
-            gpuTimingSupported = timer.supported
-
-            const pipeline = Pipeline.create(created, {
-                label: "instanced 2d",
-                shader,
-                // Group 1 is reserved for materials and is still empty
-                layouts: [cameraBinding.layout, emptyBindGroupLayout(created), instanceLayout],
-                vertexBuffers: [VERTEX_LAYOUT],
-            })
-
-            // A 1x1 white quad centred on the origin, so the instance transform
-            // scales about its middle and the instance colour comes through as-is.
-            const quad = new MeshBuilder()
-                .quad(-0.5, -0.5, 1, 1, [1, 1, 1])
-                .build(created, "unit quad")
-
-            // Deliberately below COUNT so the first frame exercises grow()
-            const batch = InstanceBatch.create(created, instanceLayout, 1024, "quads")
-
-            const COUNT = 15000
-            let elapsed = 0
-
-            loop.start((dt) => {
-                stats.begin("cpu frame")
-                elapsed += dt
-
-                camera.rotation = rotation
-                cameraBinding.upload(camera, created.width, created.height)
-
-                stats.begin("build instances")
-                batch.begin()
-                for (let i = 0; i < COUNT; i++) {
-                    const angle = i * 0.1 + elapsed
-                    const radius = 20 + i * 0.12
-                    batch.add(
-                        Math.cos(angle) * radius,
-                        Math.sin(angle) * radius,
-                        angle * 2,
-                        14,
-                        0.5 + 0.5 * Math.sin(i * 0.03),
-                        0.5 + 0.5 * Math.sin(i * 0.03 + 2),
-                        0.5 + 0.5 * Math.sin(i * 0.03 + 4),
-                    )
-                }
-                stats.end("build instances")
-
-                const frame = created.beginFrame([0.05, 0.05, 0.07, 1], timer)
-                frame.setPipeline(pipeline).setBindGroup(0, cameraBinding.group)
-                batch.draw(frame, quad)
-                frame.end()
-
-                stats.end("cpu frame")
-                stats.set("instances", batch.size)
-                stats.set("draw calls", frame.calls)
-                if (timer?.lastMs !== null && timer !== null) stats.set("gpu pass", timer.lastMs!, "ms")
-
-                fps = loop.fps
-            })
-
-            // Reading every frame would re-render the panel 60 times a second for digits nobody can follow that fast
-            panelTicker = setInterval(() => {
-                statLines = stats.entries()
-                budgetMs = loop.budgetMs
+            ticker = setInterval(() => {
+                fps = created!.fps
+                budgetMs = created!.budgetMs
+                statLines = created!.stats.entries()
             }, 200)
         })() // These 2 parentheses are important
 
         return () => {
-            loop.stop()
-            clearInterval(panelTicker)
-            timer?.destroy()
-            gpu?.destroy()
+            clearInterval(ticker)
+            clearTimeout(saveTimer)
+            created?.dispose()
+            runner = null
         }
     })
 </script>
 
 <svelte:window onkeydown={(e) => {
     if (e.key === "`") devMode = !devMode
-    if (e.key === "]") rotation += 0.1
-    if (e.key === "[") rotation -= 0.1
 }} />
 
 <div id="container">
@@ -160,6 +123,23 @@
             <header>
                 <span class="title">DEV MODE: ON</span>
             </header>
+
+            <select
+                class="scene-select"
+                value={scene?.id ?? ""}
+                onchange={(e) => {
+                    const found = DEV_SCENES.find((s) => s.id === e.currentTarget.value)
+                    if (found) selectScene(found)
+                }}
+            >
+                {#each DEV_SCENES as definition (definition.id)}
+                    <option value={definition.id}>{definition.name}</option>
+                {/each}
+            </select>
+
+            {#if scene}
+                <p class="description">{scene.description}</p>
+            {/if}
 
             <div class="stats">
                 <span class="label">fps</span>
@@ -176,19 +156,9 @@
                 {/if}
             </div>
 
-            <span class="select">
-                <!--<select
-                    value={scene?.id ?? ""}
-                    onchange={(e) => {
-                        const found = DEV_SCENES.find((s) => s.id === e.currentTarget.value)
-                        if (found) selectScene(found)
-                    }}
-                >
-                    {#each DEV_SCENES as definition (definition.id)}
-                        <option value={definition.id}>{definition.name}</option>
-                    {/each}
-                </select>-->
-            </span>
+            {#if scene?.settings}
+                <SettingsPanel schema={scene.settings} bind:values />
+            {/if}
 
             <footer>` toggles this panel</footer>
         </div>
@@ -264,4 +234,19 @@
         text-align: right;
     }
     .stats .muted { color: #ffffff55; }
+
+    .scene-select {
+        width: 100%;
+        background: #0b1116;
+        color: #fff;
+        border: 1px solid var(--line);
+        border-radius: 3px;
+        padding: 3px 5px;
+        font: inherit;
+    }
+
+    .description {
+        color: #ffffff77;
+        margin: 8px 0 0;
+    }
 </style>

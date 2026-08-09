@@ -20,6 +20,17 @@ export class Shader {
         return shader
     }
 
+    /**
+     * For call sites that cannot await, such as SceneDefinition.create. Compilation
+     * problems still surface, but as a console error a moment later rather than a
+     * thrown exception at the call site.
+     */
+    static createNow(gpu: GPU, code: string, label = "shader"): Shader {
+        const shader = new Shader(gpu.device.createShaderModule({ label, code }), label)
+        void shader.check().catch((error) => console.error(error))
+        return shader
+    }
+
     async check(): Promise<void> { // Check to make sure the shader compiled correctly
         const info = await this.module.getCompilationInfo()
         if (info.messages.length === 0) return

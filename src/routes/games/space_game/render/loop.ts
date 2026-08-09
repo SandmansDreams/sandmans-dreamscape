@@ -3,16 +3,24 @@ export class FrameLoop {
     private handle = 0
     private last = 0
     private smoothed = 0
-    private shortest = Infinity
     private running = false
+
+    private readonly recent: number[] = [] // Recent frame times in seconds
 
     get fps(): number {
         return this.smoothed
     }
 
-    // Estimated display frame budget in ms, taken from the shortest frame seen.
+    // Estimated display frame budget in ms
     get budgetMs(): number {
-        return Number.isFinite(this.shortest) ? this.shortest * 1000 : 1000 / 60
+        // Too few samples to judge - assume 60Hz rather than report something wild
+        if (this.recent.length < 20) return 1000 / 60
+
+        /* The 10th percentile, not the minimum. rAF occasionally fires two callbacks
+        almost back to back, and a running minimum would latch onto that gap and go on
+        claiming the display runs at 300Hz for the rest of the session. */
+        const sorted = [...this.recent].sort((a, b) => a - b)
+        return sorted[Math.floor(sorted.length * 0.1)]! * 1000
     }
 
     start(step: (dt: number) => void): void {
@@ -33,16 +41,13 @@ export class FrameLoop {
                 this.smoothed = this.smoothed === 0 ? instant : this.smoothed + (instant - this.smoothed) * 0.1
             }
 
-            /* The shortest frame we ever manage approximates the display's vsync
-            interval, which is the real budget. Hardcoding 1/60 would call a 10 ms
-            frame healthy on a 120Hz screen. The lower bound stops one anomalously
-            hort frame from poisoning the estimate for the rest of the session. */
-            if (dt > 0.002 && dt < this.shortest) this.shortest = dt
-
+            // Roughly two seconds of history, which is what budgetMs reads
             this.recent.push(dt)
             if (this.recent.length > 120) this.recent.shift()
 
             step(dt)
+
+            // step() may have called stop(). Re-check before rescheduling, or a scene that halts the loop from inside a frame gets restarted anyway.
             if (this.running) this.handle = requestAnimationFrame(tick)
         }
 
@@ -50,6 +55,7 @@ export class FrameLoop {
     }
 
     stop(): void {
+        this.running = false
         if (this.handle !== 0) cancelAnimationFrame(this.handle)
         this.handle = 0
     }
