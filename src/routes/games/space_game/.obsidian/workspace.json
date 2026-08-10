@@ -203,6 +203,9 @@
   },
   "active": "d5971898faa58106",
   "lastOpenFiles": [
+    "dev/scenes/shape-chart.ts",
+    "render/shapes.test.ts",
+    "render/shapes.ts",
     "_notes/Claude Plans/4 WebGPU 2D render layer — Fonts.md",
     "_notes/Claude Plans/5 WebGPU 2D render layer — Block grid, shapes and hulls.md",
     "dev/scenes/font-preview.ts",
@@ -216,8 +219,6 @@
     "dev/scenes",
     "dev/scenes.ts",
     "dev/DevScene.ts",
-    "render/scene.ts",
-    "settings/settings.ts",
     "assets/fonts/SpaceGameMono_mono_5x7.png",
     "assets/fonts/SpaceGameGalactic_spaced_5x7.png",
     "_notes/Claude Plans/2 WebGPU 2D render layer — camera, batching, scenes, benchmark.md",
