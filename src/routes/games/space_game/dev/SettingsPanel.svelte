@@ -239,4 +239,34 @@
         padding: 3px 5px;
         font: inherit;
     }
+    textarea {
+        /* Reserves the gutter whether or not the bar is showing, so typing past the
+           last visible row does not reflow the text by 10px */
+        scrollbar-gutter: stable;
+        resize: vertical;
+    }
+
+    textarea::-webkit-scrollbar {
+        width: 10px;
+    }
+    textarea::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    textarea::-webkit-scrollbar-thumb {
+        background: #0df3;
+        border-radius: 5px;
+        border: 2px solid transparent;
+        background-clip: content-box;
+    }
+    textarea::-webkit-scrollbar-thumb:hover {
+        background: #0dfa;
+        background-clip: content-box;
+    }
+
+    @supports not selector(::-webkit-scrollbar) {
+        textarea {
+            scrollbar-width: thin;
+            scrollbar-color: #0df6 transparent;
+        }
+    }
 </style>

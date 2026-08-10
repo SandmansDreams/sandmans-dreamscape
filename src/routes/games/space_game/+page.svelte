@@ -207,15 +207,44 @@
         border: 1px solid var(--line);
         border-radius: 4px;
         box-shadow: 0 6px 24px #000a;
-        padding: 10px;
-        width: 350px;
+        padding: 15px;
+        width: 500px;
         max-height: calc(100vh - 48px);
-        overflow-y: auto;
+        overflow-y: none;
         opacity: 25%;
         transition: .25s ease;
     }
     #dev-panel:hover {
         opacity: 100%;
+    }
+    /* Chrome and Safari. These are ignored the moment scrollbar-width or
+       scrollbar-color is set on the same element, which is why the standard
+       properties are quarantined in the @supports block below. */
+    #dev-panel::-webkit-scrollbar {
+        width: 10px;
+    }
+    #dev-panel::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    #dev-panel::-webkit-scrollbar-thumb {
+        background: #0df3;
+        border-radius: 5px;
+        /* Transparent border plus content-box clipping insets the thumb without
+           narrowing the track, so the hit area stays a comfortable 10px */
+        border: 2px solid transparent;
+        background-clip: content-box;
+    }
+    #dev-panel::-webkit-scrollbar-thumb:hover {
+        background: #0dfa;
+        background-clip: content-box;
+    }
+
+    /* Firefox, which has no pseudo-elements to style */
+    @supports not selector(::-webkit-scrollbar) {
+        #dev-panel {
+            scrollbar-width: thin;
+            scrollbar-color: #0df6 transparent;
+        }
     }
 
     .stats {

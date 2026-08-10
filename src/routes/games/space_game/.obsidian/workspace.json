@@ -11,12 +11,14 @@
             "id": "d5971898faa58106",
             "type": "leaf",
             "state": {
-              "type": "image",
+              "type": "markdown",
               "state": {
-                "file": "assets/fonts/SpaceGameStylized_spaced_5x7.png"
+                "file": "_notes/Claude Plans/5 WebGPU 2D render layer — Block grid, shapes and hulls.md",
+                "mode": "source",
+                "source": false
               },
-              "icon": "lucide-image",
-              "title": "SpaceGameStylized_spaced_5x7"
+              "icon": "lucide-file",
+              "title": "5 WebGPU 2D render layer — Block grid, shapes and hulls"
             }
           }
         ]
@@ -199,8 +201,16 @@
       "iconic:Open rulebook": false
     }
   },
-  "active": "c74c92bff4f8041e",
+  "active": "d5971898faa58106",
   "lastOpenFiles": [
+    "_notes/Claude Plans/4 WebGPU 2D render layer — Fonts.md",
+    "_notes/Claude Plans/5 WebGPU 2D render layer — Block grid, shapes and hulls.md",
+    "dev/scenes/font-preview.ts",
+    "render/font.test.ts",
+    "render/font.ts",
+    "_notes/Claude Plans/3 Bitmap fonts.md",
+    "_notes/Claude Plans/3 WebGPU 2D render layer — camera, batching, scenes, benchmark.md",
+    "assets/fonts/SpaceGameStylized_spaced_5x7.png",
     "dev/SettingsPanel.svelte",
     "dev/scenes/instanced-quad-spiral.ts",
     "dev/scenes",
@@ -208,13 +218,8 @@
     "dev/DevScene.ts",
     "render/scene.ts",
     "settings/settings.ts",
-    "render/timing.ts",
-    "render/shaders/instanced2d.ts",
     "assets/fonts/SpaceGameMono_mono_5x7.png",
     "assets/fonts/SpaceGameGalactic_spaced_5x7.png",
-    "+page.svelte",
-    "render/instance.ts",
-    "assets/fonts/SpaceGameStylized_spaced_5x7.png",
     "_notes/Claude Plans/2 WebGPU 2D render layer — camera, batching, scenes, benchmark.md",
     "_notes/Claude Plans/1 WebGPU 2D render layer — foundation milestone.md",
     "_notes/old notes.md",
