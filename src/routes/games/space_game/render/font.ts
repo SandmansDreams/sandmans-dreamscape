@@ -73,14 +73,14 @@ export interface TextOptions {
     align?: TextAlign
     /**
      * Box width in world units to align within. Defaults to the widest line, which
-     * makes centre and right behave as block alignment relative to the text itself.
+     * makes center and right behave as block alignment relative to the text itself.
      * Justify wants a real width - given the default, the widest line is already
      * full and every other line just stretches to match it.
      */
     width?: number
     /**
      * Justify the final line too. Off by default because a short last line stretched
-     * across the full measure is the classic ugly justification artefact.
+     * across the full measure is the classic ugly justification artifact.
      */
     justifyLastLine?: boolean
 }
@@ -333,7 +333,7 @@ export class BitmapFont {
         // A blank cell: space, and anything the sheet leaves empty
         if (!bounds) return { width: this.spaceWidth, runs: [] }
 
-        // Monospace is centred in its cell, so trimming would destroy the very
+        // Monospace is centered in its cell, so trimming would destroy the very
         // alignment that makes it monospace. Spaced sheets are left-aligned, where
         // trimming to the measured ink box is exactly the intent.
         const trimX = this.type === "mono" ? 0 : bounds.left

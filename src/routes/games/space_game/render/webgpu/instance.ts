@@ -1,9 +1,9 @@
 // Draws one mesh many times from a storage buffer of per-instance transforms
 
 import { Buffer } from "./buffer"
-import type { Frame } from "./frame"
+import type { Frame } from "../frame"
 import type { GPU } from "./gpu"
-import type { Mesh, RGB } from "./mesh"
+import type { Mesh, RGB } from "../mesh"
 
 // offset.xy, rotation.xy (cos, sin scaled), color.rgba
 export const FLOATS_PER_INSTANCE = 8
@@ -21,6 +21,7 @@ export class InstanceBatch {
     private buffer: Buffer
     private group: GPUBindGroup
     private count = 0
+    private dirty = true // Identical data flag, true means something is different
 
     get capacity(): number {
         return this.data.length / FLOATS_PER_INSTANCE
@@ -63,6 +64,7 @@ export class InstanceBatch {
     // Discards last frame's instances, call once per frame before adding
     begin(): this {
         this.count = 0
+        this.dirty = true
         return this
     }
 
@@ -94,6 +96,7 @@ export class InstanceBatch {
         data[lastIndex + 7] = a
 
         this.count++
+        this.dirty = true
         return this
     }
 
@@ -103,11 +106,17 @@ export class InstanceBatch {
         return this
     }
 
-    draw(frame: Frame, mesh: Mesh, group = 2): number { // Adds draw calls to buffer
-        if (this.count === 0) return 0
-
-        // Only the filled part of the array is uploaded so spare capacity costs nothing per frame
+    /** Writes the filled prefix to the GPU. Called by draw(); a no-op if nothing changed. */
+    upload(): void {
+        if (!this.dirty || this.count === 0) return
         this.buffer.write(this.data.subarray(0, this.count * FLOATS_PER_INSTANCE))
+        this.dirty = false
+    }
+
+    /** @returns draw calls issued - 0 when there was nothing to draw. */
+    draw(frame: Frame, mesh: Mesh, group = 2): number {
+        if (this.count === 0) return 0
+        this.upload()
 
         frame.setBindGroup(group, this.group)
         frame.setVertex(0, mesh.buffer).draw(mesh.vertexCount, this.count)
@@ -115,6 +124,7 @@ export class InstanceBatch {
     }
 
     private grow(needed: number): void {
+        this.dirty = true
         const capacity = Math.max(needed, Math.ceil(this.capacity * GROWTH_FACTOR))
 
         const data = new Float32Array(capacity * FLOATS_PER_INSTANCE)

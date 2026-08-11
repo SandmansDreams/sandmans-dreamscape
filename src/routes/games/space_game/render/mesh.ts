@@ -1,9 +1,9 @@
 // World-space geometry: a CPU-side triangle accumulator and the GPU buffer it uploads to
 
 import { Assert } from "../dev/assert"
-import { Buffer } from "./buffer"
+import { Buffer } from "./webgpu/buffer"
 import type { Frame } from "./frame"
-import type { GPU } from "./gpu"
+import type { GPU } from "./webgpu/gpu"
 
 export const FLOATS_PER_VERTEX = 5 // x, y, r, g, b
 const STRIDE = FLOATS_PER_VERTEX * 4 // Bytes from one vertex to the next
@@ -16,7 +16,7 @@ export const VERTEX_LAYOUT: GPUVertexBufferLayout = {
     stepMode: "vertex",
     attributes: [
         { shaderLocation: 0, offset: 0, format: "float32x2" }, // position
-        { shaderLocation: 1, offset: 8, format: "float32x3" }, // colour
+        { shaderLocation: 1, offset: 8, format: "float32x3" }, // color
     ],
 }
 

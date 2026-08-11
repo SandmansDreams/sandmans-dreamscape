@@ -1,53 +1,37 @@
-import type { Grid } from "../../render/grid"
-import { loadHull, type HullData } from "../../render/hull"
+import type { Ship } from "../../game/ship"
 
 /**
- * Every hull in this folder, discovered rather than listed.
+ * Every ship in this folder, discovered rather than listed.
  *
- * Dropping a JSON file in here is the whole of "add a ship" — no registration
- * step to forget. `import.meta.glob` is a Vite feature, which covers the app
- * and Vitest but not the `tsx` dev CLIs, so it stays confined to this file.
+ * Dropping a .ts file in here with a default-exported builder is the whole of
+ * "add a ship" - no registration step to forget. Same pattern as dev/DevScene.ts.
+ * index.ts has no default export, so the filter skips it without a special case.
  */
+const modules = import.meta.glob<{ default?: () => Ship }>("./*.ts", { eager: true })
 
-const modules = import.meta.glob("./*.json", { eager: true, import: "default" })
+const builders: readonly (() => Ship)[] = Object.values(modules)
+    .map((module) => module.default)
+    .filter((build): build is () => Ship => build != null)
 
-export interface HullEntry {
-    /** Filename without the extension. */
-    id: string
-    /** Label for the picker: the file's `name`, else the id made readable. */
-    name: string
-    data: HullData
-}
-
-/** "scytheShip" to "Scythe Ship". */
-function labelFromId(id: string): string {
-    return id
-        .replace(/([a-z])([A-Z0-9])/g, "$1 $2")
-        .replace(/^./, first => first.toUpperCase())
-}
-
-export const HULLS: readonly HullEntry[] = Object.entries(modules)
-    .map(([path, data]) => {
-        const id = path.replace(/^\.\//, "").replace(/\.json$/, "")
-        const hull = data as HullData
-
-        return { id, name: hull.name || labelFromId(id), data: hull }
-    })
+/**
+ * One instance per ship, built at load so a picker can list names without
+ * constructing anything itself. Pure CPU - no GPU resources are touched.
+ */
+export const SHIPS: readonly Ship[] = builders
+    .map((build) => build())
     .sort((a, b) => a.name.localeCompare(b.name))
 
-export function findHull(id: string): HullEntry | undefined {
-    return HULLS.find(entry => entry.id === id)
+export function findShip(id: string): Ship | undefined {
+    return SHIPS.find((ship) => ship.id === id)
 }
 
 /**
- * Builds a fresh, independently editable Grid for a hull.
- *
- * Throws on an unknown id — that is a typo in code, not bad user data, and it
- * should not degrade quietly into an empty ship.
+ * A fresh, independently editable Ship - never the listing copy, which callers
+ * would otherwise mutate for everyone.
  */
-export function buildHull(id: string): Grid {
-    const entry = findHull(id)
-    if (!entry) throw new Error(`no hull named "${id}" in engine/hulls`)
+export function buildShip(id: string): Ship {
+    const build = builders.find((make) => make().id === id)
+    if (!build) throw new Error(`no ship named "${id}" in assets/ships`)
 
-    return loadHull(entry.data, id)
+    return build()
 }

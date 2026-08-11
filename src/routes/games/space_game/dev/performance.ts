@@ -39,6 +39,18 @@ export class Stats {
         metric.push(value)
     }
 
+    /**
+     * Forgets every metric.
+     *
+     * Metrics belong to whatever recorded them, so a scene swap has to wipe the
+     * slate - otherwise the old scene's rows sit in the panel forever, frozen at
+     * their last value and looking like live readings.
+     */
+    clear(): void {
+        this.metrics.clear()
+        this.marks.clear()
+    }
+
     begin(name: string): void {
         this.marks.set(name, performance.now())
     }

@@ -3,7 +3,7 @@
 import { Stats } from "../dev/performance"
 import type { SettingsSchema, SettingValues } from "../settings/settings"
 import type { Frame } from "./frame"
-import type { GPU } from "./gpu"
+import type { GPU } from "./webgpu/gpu"
 import { FrameLoop } from "./loop"
 import { GpuTimer } from "./timing"
 
@@ -25,36 +25,7 @@ export interface SceneInstance<V = any> {
     update(dt: number, settings: V): void
     render(frame: Frame): void
     resize?(width: number, height: number): void
-    dispose(): void
-}
-
-/** Static description. Touches no GPU, so scenes can be listed before a device exists. */
-export interface SceneDefinition<V = any> {
-    readonly id: string
-    readonly name: string
-    readonly description: string
-    readonly settings?: SettingsSchema
-    create(context: SceneContext): SceneInstance<V>
-}
-
-/** Everything the runner hands a scene so it can build itself. */
-export interface SceneContext {
-    readonly gpu: GPU
-    readonly canvas: HTMLCanvasElement
-    /** Shared with the dev panel - scenes record their own metrics here. */
-    readonly stats: Stats
-}
-
-/**
- * A live scene. Owns GPU resources, so dispose() is mandatory.
- *
- * `V` defaults to `any` so one list can hold scenes with different schemas. The
- * runner has no use for the types; each scene declares its own alongside its schema.
- */
-export interface SceneInstance<V = any> {
-    update(dt: number, settings: V): void
-    render(frame: Frame): void
-    resize?(width: number, height: number): void
+    readonly actions?: Record<string, () => void>
     dispose(): void
 }
 
@@ -97,6 +68,10 @@ export class SceneRunner {
         this.instance = null
         this.values = values
 
+        // The outgoing scene's metrics would otherwise stay in the panel forever,
+        // frozen at their last value and reading like live numbers
+        this.stats.clear()
+
         this.instance = definition.create({
             gpu: this.gpu,
             canvas: this.gpu.canvas,
@@ -126,6 +101,16 @@ export class SceneRunner {
         this.instance?.dispose()
         this.instance = null
         this.timer.destroy()
+    }
+
+    /** Runs a scene action by name. Unknown names are ignored. */
+    invoke(name: string): void {
+        try {
+            this.instance?.actions?.[name]?.()
+        } catch (error) {
+            // A throwing action should not take the render loop with it - unlike frame(), there is nothing to stop, so just report and carry on
+            console.error(`SceneRunner: action "${name}" threw.`, error)
+        }
     }
 
     private frame(dt: number): void {

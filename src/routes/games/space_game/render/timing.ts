@@ -1,7 +1,7 @@
 // GPU-side pass timing using timestamp queries
 
-import { Buffer } from "./buffer"
-import type { GPU } from "./gpu"
+import { Buffer } from "./webgpu/buffer"
+import type { GPU } from "./webgpu/gpu"
 
 const TIMESTAMPS = 2          // one at the start of the pass, one at the end
 const BYTES = TIMESTAMPS * 8  // each is a uint64 nanosecond counter

@@ -23,7 +23,7 @@ export type SettingSpec =
 
     | { type: "text"; label: string; default: string; placeholder?: string; rows?: number }
 
-    // "#rrggbb". Use hexToRgb() to get the floats a mesh or clear colour wants.
+    // "#rrggbb". Use hexToRgb() to get the floats a mesh or clear color wants.
     | { type: "color"; label: string; default: string }
 
     // Not a value but an event. Its stored number is a click counter: a scene
@@ -52,20 +52,24 @@ export type SettingValues = Record<string, SettingValue>
  */
 export type ValuesOf<S extends SettingsSchema> = {
     // `as never` drops the key entirely - a separator has no value to read
-    [K in keyof S as S[K] extends { type: "separator" } ? never : K]:
-        S[K] extends { type: "range" | "number" | "button" } ? number :
+    [K in keyof S as S[K] extends { type: "separator" | "button" } ? never : K]:
+        S[K] extends { type: "range" | "number" } ? number :
         S[K] extends { type: "checkbox" } ? boolean :
         S[K] extends { type: "selection"; options: readonly (infer O)[] } ? O :
         S[K] extends { type: "text" | "color" } ? string :
         never
 }
 
+/** The button keys of a schema: exactly the names a scene's `actions` must provide. */
+export type ActionsOf<S extends SettingsSchema> = {
+    [K in keyof S]: S[K] extends { type: "button" } ? K : never
+}[keyof S]
+
 export function defaultValues(schema: SettingsSchema): SettingValues {
     const values: SettingValues = {}
 
     for (const [key, spec] of Object.entries(schema)) {
-        if (spec.type === "separator") continue      // contributes no value
-        if (spec.type === "button") values[key] = 0  // click counter starts at zero
+        if (spec.type === "separator" || spec.type === "button") continue      // contributes no value
         else values[key] = spec.default
     }
 
@@ -113,7 +117,7 @@ export function coerceValues(schema: SettingsSchema, stored: unknown): SettingVa
                 break
             case "color":
                 // Anything else would reach an <input type="color"> and be silently
-                // rewritten to #000000, which looks like the scene lost its colour
+                // rewritten to #000000, which looks like the scene lost its color
                 if (typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value)) values[key] = value
                 break
             case "button":
@@ -184,7 +188,7 @@ export function positionToRange(
     return Math.min(max, Math.max(min, value))
 }
 
-/** "#rrggbb" or "#rgb" -> RGB floats 0..1, ready for MeshBuilder or a clear colour. */
+/** "#rrggbb" or "#rgb" -> RGB floats 0..1, ready for MeshBuilder or a clear color. */
 export function hexToRgb(hex: string): [number, number, number] {
     const clean = hex.replace("#", "")
     const full = clean.length === 3 ? clean.replace(/./g, (c) => c + c) : clean

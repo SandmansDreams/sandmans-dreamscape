@@ -2,10 +2,10 @@ import type { Frame } from "../../render/frame"
 import type { SceneContext, SceneInstance } from "../../render/scene"
 import type { DevSceneDefinition } from "../DevScene"
 import { Camera, CameraBinding } from "../../render/camera"
-import { InstanceBatch } from "../../render/instance"
+import { InstanceBatch } from "../../render/webgpu/instance"
 import { Mesh, MeshBuilder, VERTEX_LAYOUT } from "../../render/mesh"
-import { emptyBindGroupLayout, Pipeline } from "../../render/pipeline"
-import { Shader } from "../../render/shader"
+import { emptyBindGroupLayout, Pipeline } from "../../render/webgpu/pipeline"
+import { Shader } from "../../render/webgpu/shader"
 import { INSTANCED_2D } from "../../render/shaders/instanced2d"
 import { defaultValues, type SettingsSchema, type ValuesOf } from "../../settings/settings"
 
@@ -46,8 +46,8 @@ class InstancedQuads implements SceneInstance<QuadValues> {
             vertexBuffers: [VERTEX_LAYOUT],
         })
 
-        // 1x1 white, centred, so the instance transform scales about its middle and
-        // the instance colour comes through unchanged
+        // 1x1 white, centered, so the instance transform scales about its middle and
+        // the instance color comes through unchanged
         this.quad = new MeshBuilder().quad(-0.5, -0.5, 1, 1, [1, 1, 1]).build(gpu, "unit quad")
 
         this.batch = InstanceBatch.create(gpu, instanceLayout, 1024, "quads")

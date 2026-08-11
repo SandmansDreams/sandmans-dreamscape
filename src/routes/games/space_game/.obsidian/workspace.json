@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "_notes/Claude Plans/5 WebGPU 2D render layer — Block grid, shapes and hulls.md",
+                "file": "_notes/Claude Plans/6 Actual Game Design — Ship editor and JSON round-trip.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "5 WebGPU 2D render layer — Block grid, shapes and hulls"
+              "title": "6 Actual Game Design — Ship editor and JSON round-trip"
             }
           }
         ]
@@ -203,22 +203,23 @@
   },
   "active": "d5971898faa58106",
   "lastOpenFiles": [
-    "dev/scenes/shape-chart.ts",
-    "render/shapes.test.ts",
-    "render/shapes.ts",
-    "_notes/Claude Plans/4 WebGPU 2D render layer — Fonts.md",
     "_notes/Claude Plans/5 WebGPU 2D render layer — Block grid, shapes and hulls.md",
-    "dev/scenes/font-preview.ts",
-    "render/font.test.ts",
-    "render/font.ts",
+    "_notes/Claude Plans/6 Actual Game Design — Ship editor and JSON round-trip.md",
+    "_notes/Game Design/Ship Design.md",
+    "game/ship.ts",
+    "assets/ships/shape-test.ts",
+    "render/grid/palette.ts",
+    "render/grid/tmp-diag.test.ts",
+    "dev/scenes/ship-viewer.ts",
+    "assets/ships/scythe.ts",
+    "render/grid/ship.ts",
+    "dev/ship-parser.ts",
+    "game",
+    "render/grid/grid.test.ts",
+    "_notes/Claude Plans/4 WebGPU 2D render layer — Fonts.md",
     "_notes/Claude Plans/3 Bitmap fonts.md",
     "_notes/Claude Plans/3 WebGPU 2D render layer — camera, batching, scenes, benchmark.md",
     "assets/fonts/SpaceGameStylized_spaced_5x7.png",
-    "dev/SettingsPanel.svelte",
-    "dev/scenes/instanced-quad-spiral.ts",
-    "dev/scenes",
-    "dev/scenes.ts",
-    "dev/DevScene.ts",
     "assets/fonts/SpaceGameMono_mono_5x7.png",
     "assets/fonts/SpaceGameGalactic_spaced_5x7.png",
     "_notes/Claude Plans/2 WebGPU 2D render layer — camera, batching, scenes, benchmark.md",
@@ -230,7 +231,7 @@
     "_notes/Vertex Shader.md",
     "_notes/Vectors.md",
     "_notes/SpaceGame Structure.canvas",
-    "_notes/SpaceGame (title tbd).md",
+    "_notes/Game Design/SpaceGame (title tbd).md",
     "_notes/Shaders.md",
     "_notes/Matrices.md",
     "_notes/Fragment Shader.md",

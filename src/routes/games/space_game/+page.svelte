@@ -4,7 +4,7 @@
     import { DEV_SCENES } from "./dev/DevScene"
     import type { StatEntry } from "./dev/performance"
     import SettingsPanel from "./dev/SettingsPanel.svelte"
-    import { GPU } from "./render/gpu"
+    import { GPU } from "./render/webgpu/gpu"
     import { SceneRunner, type SceneDefinition } from "./render/scene"
     import {
         loadSceneId,
@@ -33,9 +33,12 @@
     let gpuTimingSupported = $state(true)
 
     function formatStat(entry: StatEntry): string {
+        // Smoothing is right for milliseconds and wrong for counts: an averaged
+        // draw-call count reports values that never actually happened, like 2
+        // while it crawls between one scene's 1 and the next scene's 4
         return entry.unit === "ms"
             ? `${entry.average.toFixed(2)} ms`
-            : Math.round(entry.average).toLocaleString()
+            : Math.round(entry.latest).toLocaleString()
     }
 
     function healthColor(t: number): string {
@@ -157,7 +160,7 @@
             </div>
 
             {#if scene?.settings}
-                <SettingsPanel schema={scene.settings} bind:values />
+                <SettingsPanel schema={scene.settings} bind:values onAction={(name) => runner?.invoke(name)}/>
             {/if}
 
             <footer>` toggles this panel</footer>
@@ -208,7 +211,7 @@
         border-radius: 4px;
         box-shadow: 0 6px 24px #000a;
         padding: 15px;
-        width: 500px;
+        width: 25vw;
         max-height: calc(100vh - 48px);
         overflow-y: none;
         opacity: 25%;

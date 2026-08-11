@@ -1,7 +1,7 @@
 // 2d camera, world space and follow code (eventually)
 
-import { Buffer } from "./buffer"
-import type { GPU } from "./gpu"
+import { Buffer } from "./webgpu/buffer"
+import type { GPU } from "./webgpu/gpu"
 
 export interface Vec2 { // Position in world units
     x: number

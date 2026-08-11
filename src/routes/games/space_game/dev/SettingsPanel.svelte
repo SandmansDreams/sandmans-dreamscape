@@ -1,9 +1,10 @@
 <script lang="ts">
     import { positionToRange, rangeToPosition, type SettingsSchema, type SettingValue, type SettingValues, type SettingSpec } from "../settings/settings"
 
-    let { schema, values = $bindable() }: {
+    let { schema, values = $bindable(), onAction}: {
         schema: SettingsSchema
         values: SettingValues
+        onAction?: (name: string) => void
     } = $props()
 
     // Object key order is insertion order for string keys, so rows appear in the
@@ -14,11 +15,6 @@
     // $effect(() => runner.setValues(values)) only re-runs on reassignment
     function set(key: string, value: SettingValue) {
         values = { ...values, [key]: value }
-    }
-
-    function press(key: string) {
-        // Monotonic, so a scene sees a change even on the second click
-        set(key, Number(values[key] ?? 0) + 1)
     }
 
     // Match the readout's precision to the step, so 0.1 + 0.2 does not show its seams
@@ -85,7 +81,7 @@
             <span class="readout">{String(values[key] ?? spec.default)}</span>
 
         {:else if spec.type === "button"}
-            <button class="action full" type="button" onclick={() => press(key)}>{spec.label}</button>
+            <button class="action full" type="button" onclick={() => onAction?.(key)}>{spec.label}</button>
 
         {:else if spec.type === "separator"}
             <span class="separator full">{spec.label}</span>

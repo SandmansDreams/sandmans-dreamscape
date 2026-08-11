@@ -2,11 +2,12 @@ import { Camera, CameraBinding } from "../../render/camera"
 import { DEFAULT_FONT } from "../../render/font"
 import type { Frame } from "../../render/frame"
 import { Mesh, MeshBuilder, VERTEX_LAYOUT, type RGB } from "../../render/mesh"
-import { Pipeline } from "../../render/pipeline"
+import { Pipeline } from "../../render/webgpu/pipeline"
 import type { SceneContext, SceneInstance } from "../../render/scene"
-import { Shader } from "../../render/shader"
+import { Shader } from "../../render/webgpu/shader"
 import { MESH_2D } from "../../render/shaders/mesh2d"
-import { appendShape, BLOCK_SHAPES, MIRRORABLE_SHAPES, type BlockShape } from "../../render/shapes"
+import { appendShape, MIRRORABLE_SHAPES, turnCount, type BlockShape } from "../../render/grid/shapes"
+import { DRAWN_SHAPES, shapeColor } from "../../render/grid/palette"
 import { hexToRgb, type SettingsSchema, type ValuesOf } from "../../settings/settings"
 import type { DevSceneDefinition } from "../DevScene"
 
@@ -14,74 +15,57 @@ const SETTINGS = {
     mode:    { type: "selection", label: "Turns", default: "squares",
                options: ["squares", "lines"], display: "segmented" },
     gap:     { type: "range", label: "Gap", default: 5, min: 0, max: 5, step: 0.05 },
-    palette: { type: "checkbox", label: "Per-shape colour", default: false },
-    color:   { type: "color", label: "Colour", default: "#7fd4ff" },
+    palette: { type: "checkbox", label: "Per-shape color", default: false },
+    color:   { type: "color", label: "Color", default: "#7fd4ff" },
 } as const satisfies SettingsSchema
 
 type ChartValues = ValuesOf<typeof SETTINGS>
 // Inferred from the schema's options - adding a layout there is a compile error
-// here until TURN_LAYOUTS has an entry for it
+// in arrangementFor until it handles the new mode
 type ChartMode = ChartValues["mode"]
 
 const BACKDROP_COLOR: RGB = [0.10, 0.10, 0.10]
 const LABEL_COLOR: RGB = [0.60, 0.60, 0.60]
 
-const SHAPE_COLORS: readonly RGB[] = [
-    [0.35, 0.65, 1.00], // blue
-    [1.00, 0.55, 0.25], // orange
-    [0.45, 0.85, 0.45], // green
-    [1.00, 0.45, 0.70], // pink
-    [0.95, 0.85, 0.35], // yellow
-    [0.35, 0.90, 0.90], // cyan
-    [0.70, 0.50, 1.00], // purple
-    [1.00, 0.40, 0.40], // red
-    [0.30, 0.75, 0.65], // teal
-    [0.75, 0.95, 0.35], // lime
-    [0.85, 0.65, 0.45], // tan
-    [0.60, 0.75, 1.00], // periwinkle
-    [0.95, 0.60, 0.85], // magenta
-    [0.55, 0.90, 0.70], // mint
-]
+// Shared with the shape-test ship, so a block here and the same block there are
+// always the same color
+const DRAWN = DRAWN_SHAPES
 
-// "empty" draws nothing, so it would only contribute a blank row
-const DRAWN = BLOCK_SHAPES.filter((shape) => shape !== "empty")
+/** One turn's position inside a block, as rows of turn numbers. */
+type Arrangement = readonly (readonly number[])[]
 
 /**
- * Where each turn sits inside a block, as rows of cells.
+ * Where each turn sits inside a block, given how many turns the shape has.
  *
  * "squares" runs clockwise from the top-left starting at turn 2, which points
  * every variant's mass toward the middle - the four turns then close up into a
- * single symmetric figure, so a broken rotation is obvious at a glance.
- * "lines" is the plain left-to-right ordering, easier to compare turn by turn.
- *
- * Adding an arrangement here is the whole change: appendTurnBlock walks whatever
- * grid it is given, ragged rows included.
+ * single symmetric figure, so a broken rotation is obvious at a glance. With
+ * fewer than four turns there is no square to make, so it falls back to a line.
  */
-const TURN_LAYOUTS: Record<ChartMode, readonly (readonly number[])[]> = {
-    squares: [
-        [2, 3], // top-left,    top-right
-        [1, 0], // bottom-left, bottom-right
-    ],
-    lines: [
-        [0, 1, 2, 3],
-    ],
+function arrangementFor(mode: ChartMode, count: number): Arrangement {
+    if (mode === "squares" && count === 4) {
+        return [
+            [2, 3], // top-left,    top-right
+            [1, 0], // bottom-left, bottom-right
+        ]
+    }
+    return [Array.from({ length: count }, (_, turns) => turns)]
 }
 
 /**
  * Every measurement the chart needs, in abstract units.
  *
  * Not pixels: the camera fits the finished bounds to the viewport, so only the
- * ratios matter. Deriving the font sizes from `cell` keeps labels proportionate
- * as the cell slider moves.
+ * ratios matter.
  */
 interface ChartLayout {
     cell: number
     gap: number       // between cells inside a block
+    blockGap: number  // between the plain and mirrored blocks
     columnGap: number // between the label column and the blocks
     rowGap: number    // between shape rows
     fontPixel: number
     headerPixel: number
-    turns: readonly (readonly number[])[]
 }
 
 function makeLayout(values: ChartValues): ChartLayout {
@@ -90,11 +74,11 @@ function makeLayout(values: ChartValues): ChartLayout {
     return {
         cell,
         gap: values.gap,
+        blockGap: cell * 0.6,
         columnGap: cell * 0.4,
         rowGap: values.gap * 2,
         fontPixel: cell / 20,
         headerPixel: cell / 12,
-        turns: TURN_LAYOUTS[values.mode],
     }
 }
 
@@ -104,20 +88,27 @@ function isMirrorable(shape: BlockShape): boolean {
     return MIRRORABLE_SHAPES.includes(shape)
 }
 
-/** Cells across the widest row of the arrangement. */
-function blockColumns(layout: ChartLayout): number {
-    let widest = 0
-    for (const row of layout.turns) widest = Math.max(widest, row.length)
-    return widest
+/**
+ * The block footprint is sized for a four-turn shape whatever the row holds.
+ *
+ * Shapes with fewer turns draw fewer cells into the same box, so turn 0 stays at
+ * the same x on every row and the columns can be read straight down.
+ */
+function maxBlockColumns(mode: ChartMode): number {
+    return mode === "squares" ? 2 : 4
 }
 
-function blockWidth(layout: ChartLayout): number {
-    const columns = blockColumns(layout)
+function maxBlockRows(mode: ChartMode): number {
+    return mode === "squares" ? 2 : 1
+}
+
+function blockWidth(layout: ChartLayout, mode: ChartMode): number {
+    const columns = maxBlockColumns(mode)
     return columns * layout.cell + (columns - 1) * layout.gap
 }
 
-function blockHeight(layout: ChartLayout): number {
-    const rows = layout.turns.length
+function blockHeight(layout: ChartLayout, mode: ChartMode): number {
+    const rows = maxBlockRows(mode)
     return rows * layout.cell + (rows - 1) * layout.gap
 }
 
@@ -125,7 +116,7 @@ function textHeight(pixel: number): number {
     return DEFAULT_FONT.glyphHeight * pixel
 }
 
-/** Widest shape name, so the label column fits the longest one at any cell size. */
+/** Widest shape name, so the label column fits the longest one. */
 function labelColumnWidth(layout: ChartLayout): number {
     let widest = 0
     for (const shape of DRAWN) {
@@ -152,7 +143,12 @@ function appendCell(
     appendShape(builder, shape, turns, mirrored, x, y, layout.cell, color)
 }
 
-/** All four turns, positioned by whichever arrangement the layout carries. */
+/**
+ * One block of turns, laid out by `arrangement`.
+ *
+ * Vertically centered in the row's full block height, so a one-turn shape sits
+ * on the same line as its neighbours instead of floating at the top.
+ */
 function appendTurnBlock(
     builder: MeshBuilder,
     shape: BlockShape,
@@ -160,16 +156,20 @@ function appendTurnBlock(
     x: number,
     y: number,
     layout: ChartLayout,
+    mode: ChartMode,
+    arrangement: Arrangement,
     color: RGB,
 ): void {
     const step = layout.cell + layout.gap
+    const ownHeight = arrangement.length * layout.cell + (arrangement.length - 1) * layout.gap
+    const offsetY = (blockHeight(layout, mode) - ownHeight) / 2
 
-    for (let row = 0; row < layout.turns.length; row++) {
-        const cells = layout.turns[row]!
+    for (let row = 0; row < arrangement.length; row++) {
+        const cells = arrangement[row]!
         for (let column = 0; column < cells.length; column++) {
             appendCell(
                 builder, shape, cells[column]!, mirrored,
-                x + column * step, y + row * step,
+                x + column * step, y + offsetY + row * step,
                 layout, color,
             )
         }
@@ -181,14 +181,22 @@ function appendTurnBlock(
  *
  * One legend for the whole chart rather than a number on every cell: in "lines"
  * the order is obvious, but "squares" is 2,3 over 1,0 and would otherwise be
- * something you have to remember.
+ * something you have to remember. Always drawn at the full four turns, since it
+ * is documenting the scheme rather than any one shape.
  */
-function appendKeyBlock(builder: MeshBuilder, x: number, y: number, layout: ChartLayout): void {
+function appendKeyBlock(
+    builder: MeshBuilder,
+    x: number,
+    y: number,
+    layout: ChartLayout,
+    mode: ChartMode,
+): void {
     const step = layout.cell + layout.gap
     const pixel = layout.headerPixel
+    const arrangement = arrangementFor(mode, 4)
 
-    for (let row = 0; row < layout.turns.length; row++) {
-        const cells = layout.turns[row]!
+    for (let row = 0; row < arrangement.length; row++) {
+        const cells = arrangement[row]!
         for (let column = 0; column < cells.length; column++) {
             const cellX = x + column * step
             const cellY = y + row * step
@@ -259,15 +267,16 @@ class ShapeChart implements SceneInstance<ChartValues> {
 
     private rebuild(settings: ChartValues): void {
         const layout = makeLayout(settings)
+        const mode = settings.mode
         const builder = new MeshBuilder()
 
         const labelWidth = labelColumnWidth(layout)
-        const blockW = blockWidth(layout)
-        const blockH = blockHeight(layout)
-        const mirroredX = labelWidth + blockW + layout.gap
+        const blockW = blockWidth(layout, mode)
+        const blockH = blockHeight(layout, mode)
+        const mirroredX = labelWidth + blockW + layout.blockGap
 
         // Header: the turn key, plus a caption over the mirrored column
-        appendKeyBlock(builder, labelWidth, 0, layout)
+        appendKeyBlock(builder, labelWidth, 0, layout, mode)
         DEFAULT_FONT.appendText(
             builder, "mirrored", mirroredX,
             (blockH - textHeight(layout.headerPixel)) / 2,
@@ -279,23 +288,25 @@ class ShapeChart implements SceneInstance<ChartValues> {
 
         DRAWN.forEach((shape, index) => {
             const y = firstRowY + index * rowStep
-            const color = settings.palette
-                ? SHAPE_COLORS[index % SHAPE_COLORS.length]!
-                : hexToRgb(settings.color)
+            const color = settings.palette ? shapeColor(shape) : hexToRgb(settings.color)
 
-            // Label sits on the block's vertical centre rather than its top edge
+            // Only the turns this shape actually has: a `full` block is identical
+            // at every turn, so drawing four of it would claim four variants exist
+            const arrangement = arrangementFor(mode, turnCount(shape))
+
+            // Label sits on the block's vertical center rather than its top edge
             DEFAULT_FONT.appendText(
                 builder, shape, 0,
                 y + (blockH - textHeight(layout.fontPixel)) / 2,
                 layout.fontPixel, LABEL_COLOR,
             )
 
-            appendTurnBlock(builder, shape, false, labelWidth, y, layout, color)
+            appendTurnBlock(builder, shape, false, labelWidth, y, layout, mode, arrangement, color)
 
-            // A full second block of all four turns - mirroring composes with
-            // rotation, so showing one variant would hide three of the four states
+            // A full second block - mirroring composes with rotation, so showing one
+            // variant would hide the rest of the states
             if (isMirrorable(shape)) {
-                appendTurnBlock(builder, shape, true, mirroredX, y, layout, color)
+                appendTurnBlock(builder, shape, true, mirroredX, y, layout, mode, arrangement, color)
             }
         })
 
@@ -323,9 +334,9 @@ const scene: DevSceneDefinition<ChartValues> = {
     id: "shape-chart",
     name: "Shape Chart",
     description:
-        "Every block shape at all four turns, with a second four-turn block for the three " +
-        "shapes where mirroring is not just another rotation. The key block at the top says " +
-        "which cell is which turn.",
+        "Every block shape at the turns it actually has - a full block gets one cell, a " +
+        "hexagon two, most four - with a second block for the three shapes where mirroring " +
+        "is not just another rotation. The key at the top says which cell is which turn.",
     settings: SETTINGS,
     create: (context) => new ShapeChart(context),
 }

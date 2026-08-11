@@ -88,7 +88,7 @@ describe("Camera coordinate conversion", () => {
         expect(screen.y).toBeCloseTo(190)
     })
 
-    it("maps the viewport centre to the camera position", () => {
+    it("maps the viewport center to the camera position", () => {
         const camera = new Camera({ x: 120, y: -40 }, 2.5, 0.7)
         camera.pack(800, 600)
 

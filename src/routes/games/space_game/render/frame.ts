@@ -1,14 +1,14 @@
 // Create command encoder and bring it all together per-frame?
 
 import { Assert } from "../dev/assert"
-import type { Buffer } from "./buffer"
-import type { GPU } from "./gpu"
-import type { Pipeline } from "./pipeline"
+import type { Buffer } from "./webgpu/buffer"
+import type { GPU } from "./webgpu/gpu"
+import type { Pipeline } from "./webgpu/pipeline"
 import type { GpuTimer } from "./timing"
 
 export const COLOR_BLACK: GPUColor = [0, 0, 0, 1]
 export const COLOR_WHITE: GPUColor = [1, 1, 1, 1]
-export const COLOR_GREY: GPUColor = [0.5, 0.5, 0.5, 1]
+export const COLOR_GRAY: GPUColor = [0.5, 0.5, 0.5, 1]
 
 export class Frame {
     private readonly device: GPUDevice

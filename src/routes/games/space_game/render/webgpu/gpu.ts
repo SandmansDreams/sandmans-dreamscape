@@ -1,9 +1,9 @@
 // Provides information for rendering including device information and canvas context
 
 import { devicePixelRatio } from "svelte/reactivity/window" // Svelte reactive version of the built-in dpr
-import { Assert } from "../dev/assert"
-import { COLOR_BLACK, Frame } from "./frame"
-import type { GpuTimer } from "./timing"
+import { Assert } from "../../dev/assert"
+import { COLOR_BLACK, Frame } from "../frame"
+import type { GpuTimer } from "../timing"
 
 export class GPU {
     readonly canvas: HTMLCanvasElement

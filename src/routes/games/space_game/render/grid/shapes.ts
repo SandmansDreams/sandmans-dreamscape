@@ -1,6 +1,6 @@
 // The geometry for every block shape, each defined once in a canonical orientation
 
-import type { MeshBuilder, RGB } from "./mesh"
+import type { MeshBuilder, RGB } from "../mesh"
 
 export const BLOCK_SHAPES = [
     "empty",
@@ -65,11 +65,31 @@ const HEX_SEGMENTS = 6
 const ARC_SEGMENTS = 20
 const CIRCLE_SEGMENTS = 40
 
+/**
+ * Shapes whose orientation count is not the usual four.
+ *
+ * Most blocks have four distinct turns; only the rotationally symmetric ones
+ * and the half-turn ones differ. Listing just the exceptions keeps each reason
+ * next to its number instead of burying them in a column of 4s.
+ */
+const TURN_EXCEPTIONS: Partial<Record<BlockShape, number>> = {
+    empty: 1,
+    full: 1,       // square, identical under every quarter turn
+    octagon: 1,    // 45 degree symmetry divides 90 exactly
+    diamond: 1,    // corners at the edge midpoints
+    circle: 1,
+    hexagon: 2,    // 60 degree symmetry, so a quarter turn only repeats at 180
+    band: 2,       // symmetric under a half turn
+    centerLine: 2, // centered, so it has no top and bottom to tell apart
+}
+
+export const DEFAULT_TURNS = 4
+
 interface CellFrame {
     x: number
     y: number
     size: number
-    turns: number // 0-3, already normalised
+    turns: number // 0-3, already normalized
     mirrored: boolean
 }
 
@@ -151,12 +171,12 @@ function buildShape(out: number[], frame: CellFrame, shape: BlockShape): void {
             return
 
         case "hexagon":
-            // Centred. Two distinct orientations.
+            // Centered. Two distinct orientations.
             pushFan(out, frame, half, half, half, half, 0, Math.PI * 2, HEX_SEGMENTS)
             return
 
         case "octagon":
-            // Centred. Identical at every turn.
+            // Centered. Identical at every turn.
             pushFan(out, frame, half, half, half, half, 0, Math.PI * 2, OCT_SEGMENTS)
             return
 
@@ -171,19 +191,19 @@ function buildShape(out: number[], frame: CellFrame, shape: BlockShape): void {
             return
 
         case "band":
-            // Half height, centred rather than pinned to an edge. Symmetric under a
+            // Half height, centered rather than pinned to an edge. Symmetric under a
             // half turn, so it has only two distinct orientations.
             pushQuad(out, frame, 0, quarter, size, size - quarter)
             return
 
         case "centerLine":
-            // An eighth of the cell thick, centred. Two distinct orientations.
+            // An eighth of the cell thick, centered. Two distinct orientations.
             pushQuad(out, frame, 0, half - size / 16, size, half + size / 16)
             return
 
         case "edgeLine":
-            // The same thickness flush against the north edge. Being off-centre gives
-            // it all four orientations, unlike the centred line.
+            // The same thickness flush against the north edge. Being off-center gives
+            // it all four orientations, unlike the centered line.
             pushQuad(out, frame, 0, 0, size, size / 8)
             return
 
@@ -211,7 +231,7 @@ function pushVertex(out: number[], frame: CellFrame, lx: number, ly: number): vo
     if (frame.mirrored) dx = -dx
 
     // Clockwise quarter turns in y-down. Exact, no trig: vertices sitting on a cell
-    // boundary stay bit-identical across rotations, so neighbouring blocks never crack.
+    // boundary stay bit-identical across rotations, so neighboring blocks never crack.
     for (let i = 0; i < frame.turns; i++) {
         const swap = dx
         dx = -dy
@@ -253,7 +273,7 @@ function pushQuad(
 function pushFan(
     out: number[],
     frame: CellFrame,
-    centreX: number, centreY: number,
+    centerX: number, centerY: number,
     radiusX: number, radiusY: number,
     startAngle: number, sweep: number,
     segments: number,
@@ -264,9 +284,24 @@ function pushFan(
 
         pushTriangle(
             out, frame,
-            centreX, centreY,
-            centreX + Math.cos(a0) * radiusX, centreY + Math.sin(a0) * radiusY,
-            centreX + Math.cos(a1) * radiusX, centreY + Math.sin(a1) * radiusY,
+            centerX, centerY,
+            centerX + Math.cos(a0) * radiusX, centerY + Math.sin(a0) * radiusY,
+            centerX + Math.cos(a1) * radiusX, centerY + Math.sin(a1) * radiusY,
         )
     }
+}
+
+export function turnCount(shape: BlockShape): number {
+    return TURN_EXCEPTIONS[shape] ?? DEFAULT_TURNS
+}
+
+/** Total distinct states, mirroring included. */
+export function variantCount(shape: BlockShape): number {
+    return turnCount(shape) * (MIRRORABLE_SHAPES.includes(shape) ? 2 : 1)
+}
+
+/** Folds any integer onto the turns this shape actually has. */
+export function normalizeTurns(shape: BlockShape, turns: number): number {
+    const count = turnCount(shape)
+    return ((turns % count) + count) % count
 }
