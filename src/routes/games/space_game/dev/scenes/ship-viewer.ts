@@ -16,7 +16,8 @@ import type { DevSceneDefinition } from "../DevScene"
 import type { ComponentKind } from "../../render/grid/components"
 import type { Grid } from "../../render/grid/grid"
 import { appendShape } from "../../render/grid/shapes"
-import { shipToJSON } from "../ship-parser"
+import { downloadText } from "../download"
+import { shipToText } from "../../game/shipJson"
 
 /** Placeholder marks until functional blocks have real art. */
 const KIND_LETTER: Record<ComponentKind, string> = {
@@ -314,7 +315,7 @@ class ShipViewer implements SceneInstance<ViewerValues> {
 
     private download(): void {
         if (!this.ship) return
-        shipToJSON(this.ship.layers)
+        downloadText(`${this.ship.id}.json`, shipToText(this.ship))
     }
 }
 

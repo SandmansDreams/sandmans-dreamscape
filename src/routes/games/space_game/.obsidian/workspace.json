@@ -203,6 +203,9 @@
   },
   "active": "d5971898faa58106",
   "lastOpenFiles": [
+    "game/shipJson.test.ts",
+    "dev/download.ts",
+    "game/shipJson.ts",
     "_notes/Claude Plans/5 WebGPU 2D render layer — Block grid, shapes and hulls.md",
     "_notes/Claude Plans/6 Actual Game Design — Ship editor and JSON round-trip.md",
     "_notes/Game Design/Ship Design.md",
@@ -214,8 +217,6 @@
     "assets/ships/scythe.ts",
     "render/grid/ship.ts",
     "dev/ship-parser.ts",
-    "game",
-    "render/grid/grid.test.ts",
     "_notes/Claude Plans/4 WebGPU 2D render layer — Fonts.md",
     "_notes/Claude Plans/3 Bitmap fonts.md",
     "_notes/Claude Plans/3 WebGPU 2D render layer — camera, batching, scenes, benchmark.md",
