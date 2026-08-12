@@ -1,8 +1,25 @@
 // Declarative scene settings. One schema drives both the dev UI and the value types.
 
+import type { Color } from "../render/color";
 import { loadStore, saveStore } from "./storage"
 
 const SCENE_KEY = "space-game-scene"
+
+/**
+ * One column of a search result table.
+ *
+ * Header and cell travel together rather than as two parallel arrays, so a
+ * column can never end up labelled with its neighbor's heading. `cell` is a
+ * function because the panel only knows option ids - whatever those identify
+ * (a ship, a font) lives in the scene that declared the setting.
+ *
+ * Every cell is searched along with the option id, so a query can name a
+ * creator or a size and still find the row.
+ */
+export interface SearchColumn {
+    header: string
+    cell(option: string): string
+}
 
 export type SettingSpec =
     // A slider. `scale: "log"` is what makes a 100..200000 range usable - on a linear
@@ -20,6 +37,12 @@ export type SettingSpec =
     // options you switch between constantly, like a draw mode
     | { type: "selection"; label: string; default: string; options: readonly string[]
         display?: "dropdown" | "segmented" }
+
+    // A selection too big for a dropdown: a query box over a short result list.
+    // `limit` caps how many matches are offered at once, `columns` turns the
+    // results into a table - see SearchColumn.
+    | { type: "search"; label: string; default: string; options: readonly string[]
+        placeholder?: string; limit?: number; columns?: readonly SearchColumn[] }
 
     | { type: "text"; label: string; default: string; placeholder?: string; rows?: number }
 
@@ -55,7 +78,7 @@ export type ValuesOf<S extends SettingsSchema> = {
     [K in keyof S as S[K] extends { type: "separator" | "button" } ? never : K]:
         S[K] extends { type: "range" | "number" } ? number :
         S[K] extends { type: "checkbox" } ? boolean :
-        S[K] extends { type: "selection"; options: readonly (infer O)[] } ? O :
+        S[K] extends { type: "selection" | "search"; options: readonly (infer O)[] } ? O :
         S[K] extends { type: "text" | "color" } ? string :
         never
 }
@@ -69,7 +92,8 @@ export function defaultValues(schema: SettingsSchema): SettingValues {
     const values: SettingValues = {}
 
     for (const [key, spec] of Object.entries(schema)) {
-        if (spec.type === "separator" || spec.type === "button") continue      // contributes no value
+        if (spec.type === "separator" || spec.type === "button") continue // contributes no value
+        else if (spec.type === "color") values[key] = spec.default // The schema is authoring-facing and takes a Color; the values bag is storage-facing and must stay JSON-safe, so the conversion happens here
         else values[key] = spec.default
     }
 
@@ -103,6 +127,9 @@ export function coerceValues(schema: SettingsSchema, stored: unknown): SettingVa
                 if (typeof value === "boolean") values[key] = value
                 break
             case "selection":
+            case "search":
+                // Both store one of their options, so a stale id from a renamed
+                // ship falls back to the default rather than reaching a scene
                 if (typeof value === "string" && spec.options.includes(value)) values[key] = value
                 break
             case "text":

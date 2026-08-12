@@ -42,6 +42,8 @@ export const COMPONENTS: Record<ComponentKind, ComponentDefinition> = {
         layers: ["hull", "cosmetic"],
         levels: [
             { hitPoints: 10, mass: 1 },
+            { hitPoints: 15, mass: 2 },
+            { hitPoints: 30, mass: 4 },
         ],
     },
     thruster: {

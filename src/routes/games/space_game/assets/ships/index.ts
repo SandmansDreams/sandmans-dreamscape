@@ -1,24 +1,32 @@
 import type { Ship } from "../../game/ship"
+import { readShip } from "../../game/shipJson"
 
 /**
  * Every ship in this folder, discovered rather than listed.
  *
- * Dropping a .ts file in here with a default-exported builder is the whole of
- * "add a ship" - no registration step to forget. Same pattern as dev/DevScene.ts.
- * index.ts has no default export, so the filter skips it without a special case.
+ * Dropping a .json file in here is the whole of "add a ship" - no registration
+ * step to forget, and the same file the editor downloads is the one that loads.
  */
-const modules = import.meta.glob<{ default?: () => Ship }>("./*.ts", { eager: true })
+const files = import.meta.glob<unknown>("./*.json", { eager: true, import: "default" })
 
-const builders: readonly (() => Ship)[] = Object.values(modules)
-    .map((module) => module.default)
-    .filter((build): build is () => Ship => build != null)
+/** Raw file contents by id, so buildShip can re-read rather than deep-copy. */
+const byId = new Map<string, unknown>()
 
 /**
- * One instance per ship, built at load so a picker can list names without
- * constructing anything itself. Pure CPU - no GPU resources are touched.
+ * One parsed instance per ship, for the picker to list without constructing
+ * anything itself. Pure CPU - no GPU resources are touched.
  */
-export const SHIPS: readonly Ship[] = builders
-    .map((build) => build())
+export const SHIPS: readonly Ship[] = Object.entries(files)
+    .map(([path, data]) => {
+        const { ship, warnings } = readShip(data)
+
+        // Reported once at load rather than silently: a malformed ship should be
+        // visible before someone wonders where their blocks went
+        for (const warning of warnings) console.warn(`${path}: ${warning}`)
+
+        byId.set(ship.id, data)
+        return ship
+    })
     .sort((a, b) => a.name.localeCompare(b.name))
 
 export function findShip(id: string): Ship | undefined {
@@ -28,10 +36,13 @@ export function findShip(id: string): Ship | undefined {
 /**
  * A fresh, independently editable Ship - never the listing copy, which callers
  * would otherwise mutate for everyone.
+ *
+ * Throws on an unknown id: that is a typo in code rather than bad user data, and
+ * it should not degrade quietly into an empty ship.
  */
 export function buildShip(id: string): Ship {
-    const build = builders.find((make) => make().id === id)
-    if (!build) throw new Error(`no ship named "${id}" in assets/ships`)
+    const data = byId.get(id)
+    if (!data) throw new Error(`no ship named "${id}" in assets/ships`)
 
-    return build()
+    return readShip(data).ship
 }

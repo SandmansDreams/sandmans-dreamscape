@@ -1,14 +1,15 @@
 import { Camera, CameraBinding } from "../../render/camera"
 import { DEFAULT_FONT } from "../../render/font"
 import type { Frame } from "../../render/frame"
-import { Mesh, MeshBuilder, VERTEX_LAYOUT, type RGB } from "../../render/mesh"
+import { Mesh, MeshBuilder, VERTEX_LAYOUT } from "../../render/mesh"
+import { Color } from "../../render/color"
 import { Pipeline } from "../../render/webgpu/pipeline"
 import type { SceneContext, SceneInstance } from "../../render/scene"
 import { Shader } from "../../render/webgpu/shader"
 import { MESH_2D } from "../../render/shaders/mesh2d"
 import { appendShape, MIRRORABLE_SHAPES, turnCount, type BlockShape } from "../../render/grid/shapes"
 import { DRAWN_SHAPES, shapeColor } from "../../render/grid/palette"
-import { hexToRgb, type SettingsSchema, type ValuesOf } from "../../settings/settings"
+import type { SettingsSchema, ValuesOf } from "../../settings/settings"
 import type { DevSceneDefinition } from "../DevScene"
 
 const SETTINGS = {
@@ -24,8 +25,8 @@ type ChartValues = ValuesOf<typeof SETTINGS>
 // in arrangementFor until it handles the new mode
 type ChartMode = ChartValues["mode"]
 
-const BACKDROP_COLOR: RGB = [0.10, 0.10, 0.10]
-const LABEL_COLOR: RGB = [0.60, 0.60, 0.60]
+const BACKDROP_COLOR = Color.rgb(0.10, 0.10, 0.10)
+const LABEL_COLOR = Color.rgb(0.60, 0.60, 0.60)
 
 // Shared with the shape-test ship, so a block here and the same block there are
 // always the same color
@@ -135,7 +136,7 @@ function appendCell(
     x: number,
     y: number,
     layout: ChartLayout,
-    color: RGB,
+    color: Color,
 ): void {
     // Backdrop first so the shape lands on top - there is no depth test, so draw
     // order is the only thing deciding this
@@ -158,7 +159,7 @@ function appendTurnBlock(
     layout: ChartLayout,
     mode: ChartMode,
     arrangement: Arrangement,
-    color: RGB,
+    color: Color,
 ): void {
     const step = layout.cell + layout.gap
     const ownHeight = arrangement.length * layout.cell + (arrangement.length - 1) * layout.gap
@@ -288,7 +289,7 @@ class ShapeChart implements SceneInstance<ChartValues> {
 
         DRAWN.forEach((shape, index) => {
             const y = firstRowY + index * rowStep
-            const color = settings.palette ? shapeColor(shape) : hexToRgb(settings.color)
+            const color = settings.palette ? shapeColor(shape) : Color.from(settings.color)
 
             // Only the turns this shape actually has: a `full` block is identical
             // at every turn, so drawing four of it would claim four variants exist

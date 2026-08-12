@@ -1,20 +1,21 @@
 import { describe, expect, it } from "vitest"
+import { Color } from "../render/color"
 import { Ship } from "./ship"
 import { readShip, shipFromText, shipToJson, shipToText, SHIP_FORMAT_VERSION } from "./shipJson"
 
 function sample(): Ship {
     const ship = new Ship("test", "Test Ship")
 
-    ship.layers.hull.set(0, 0, "full", { color: [0.58, 0.63, 0.7] })
-    ship.layers.hull.set(1, 0, "wedge", { turns: 2, color: [0.58, 0.63, 0.7] })
-    ship.layers.hull.set(-1, 0, "halfWedge", { mirrored: true, color: [0.26, 0.29, 0.34] })
+    ship.layers.hull.set(0, 0, "full", { color: Color.rgb(0.58, 0.63, 0.7) })
+    ship.layers.hull.set(1, 0, "wedge", { turns: 2, color: Color.rgb(0.58, 0.63, 0.7) })
+    ship.layers.hull.set(-1, 0, "halfWedge", { mirrored: true, color: Color.rgb(0.26, 0.29, 0.34) })
     ship.layers.coverable.set(0, 1, "full", {
         kind: "thruster",
         facing: 2,
         emission: 0.8,
-        color: [0.26, 0.29, 0.34],
+        color: Color.rgb(0.26, 0.29, 0.34),
     })
-    ship.layers.cosmetic.set(0, -1, "centerLine", { color: [0.35, 0.85, 1] })
+    ship.layers.cosmetic.set(0, -1, "centerLine", { color: Color.rgb(0.35, 0.85, 1) })
 
     return ship
 }
@@ -22,7 +23,7 @@ function sample(): Ship {
 describe("shipToJson()", () => {
     it("omits every default", () => {
         const ship = new Ship("t", "T")
-        ship.layers.hull.set(0, 0, "full", { color: [1, 1, 1] })
+        ship.layers.hull.set(0, 0, "full", { color: Color.rgb(1, 1, 1) })
 
         const cell = shipToJson(ship).layers.hull![0]!
         // c, r, s and the palette key - nothing else
@@ -31,7 +32,7 @@ describe("shipToJson()", () => {
 
     it("writes only the fields that differ from the defaults", () => {
         const ship = new Ship("t", "T")
-        ship.layers.hull.set(2, 3, "wedge", { turns: 1, mirrored: true, hitPoints: 99, color: [1, 1, 1] })
+        ship.layers.hull.set(2, 3, "wedge", { turns: 1, mirrored: true, hitPoints: 99, color: Color.rgb(1, 1, 1) })
 
         const cell = shipToJson(ship).layers.hull![0]!
         expect(cell).toMatchObject({ c: 2, r: 3, s: "wedge", t: 1, m: true, hp: 99 })
@@ -41,7 +42,7 @@ describe("shipToJson()", () => {
 
     it("names palette entries by their hex digits", () => {
         const ship = new Ship("t", "T")
-        ship.layers.hull.set(0, 0, "full", { color: [0.58, 0.63, 0.7] })
+        ship.layers.hull.set(0, 0, "full", { color: Color.rgb(0.58, 0.63, 0.7) })
 
         expect(Object.keys(shipToJson(ship).palette)).toEqual(["94a1b3"])
     })
@@ -49,15 +50,15 @@ describe("shipToJson()", () => {
     it("keeps two near-identical colors apart", () => {
         const ship = new Ship("t", "T")
         // Both round to the same hex, so a naive writer would merge them
-        ship.layers.hull.set(0, 0, "full", { color: [0.58, 0.63, 0.7] })
-        ship.layers.hull.set(1, 0, "full", { color: [0.5801, 0.63, 0.7] })
+        ship.layers.hull.set(0, 0, "full", { color: Color.rgb(0.58, 0.63, 0.7) })
+        ship.layers.hull.set(1, 0, "full", { color: Color.rgb(0.5801, 0.63, 0.7) })
 
         expect(Object.keys(shipToJson(ship).palette)).toHaveLength(2)
     })
 
     it("does not write cosmetic mass, which is forced to zero on the way back", () => {
         const ship = new Ship("t", "T")
-        ship.layers.cosmetic.set(0, 0, "full", { color: [1, 1, 1] })
+        ship.layers.cosmetic.set(0, 0, "full", { color: Color.rgb(1, 1, 1) })
 
         expect(shipToJson(ship).layers.cosmetic![0]!.ma).toBeUndefined()
     })

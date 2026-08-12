@@ -1,3 +1,4 @@
+import { Color } from "../../render/color"
 import { Camera, CameraBinding } from "../../render/camera"
 import { DEFAULT_FONT, FONT_NAMES, fontByName, type BitmapFont } from "../../render/font"
 import type { Frame } from "../../render/frame"
@@ -6,7 +7,7 @@ import { Pipeline } from "../../render/webgpu/pipeline"
 import type { SceneContext, SceneInstance } from "../../render/scene"
 import { Shader } from "../../render/webgpu/shader"
 import { MESH_2D } from "../../render/shaders/mesh2d"
-import { defaultValues, hexToRgb, type SettingsSchema, type ValuesOf } from "../../settings/settings"
+import { defaultValues, type SettingsSchema, type ValuesOf } from "../../settings/settings"
 import type { DevSceneDefinition } from "../DevScene"
 
 const DEFAULT_TEXT = [
@@ -98,7 +99,7 @@ class FontTest implements SceneInstance<FontValues> {
         const wrapped = font.wrap(settings.text, settings.wrap, pixel)
 
         const builder = new MeshBuilder()
-        const width = font.appendText(builder, wrapped, 0, 0, pixel, hexToRgb(settings.color), {
+        const width = font.appendText(builder, wrapped, 0, 0, pixel, Color.from(settings.color), {
             align: settings.align,
             // The same width the text was wrapped to, so justify fills exactly the
             // measure the line breaks were chosen for

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { Color } from "../color"
 import { appendShape, BLOCK_SHAPES, MIRRORABLE_SHAPES, turnCount, type BlockShape } from "./shapes"
 import { FLOATS_PER_VERTEX, MeshBuilder } from "../mesh"
 
@@ -20,7 +21,7 @@ const OFFSET_Y = 0.5171
 /** The vertex positions a shape emits, as [x, y] pairs. */
 function positionsOf(shape: BlockShape, turns: number, mirrored = false, size = 40): number[][] {
     const builder = new MeshBuilder()
-    appendShape(builder, shape, turns, mirrored, 0, 0, size, [1, 1, 1])
+    appendShape(builder, shape, turns, mirrored, 0, 0, size, Color.WHITE)
 
     const data = builder.toArray()
     const points: number[][] = []

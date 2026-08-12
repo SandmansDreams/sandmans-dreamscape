@@ -1,47 +1,80 @@
-import { buildShip, SHIPS } from "../../assets/ships"
+import { buildShip, findShip, SHIPS } from "../../assets/ships"
 import { Camera, CameraBinding, type Vec2 } from "../../render/camera"
 import { DEFAULT_FONT } from "../../render/font"
 import type { Frame } from "../../render/frame"
 import { SHIP_LAYERS, type ShipLayer } from "../../render/grid/layers"
 import type { Ship } from "../../game/ship"
 import { InstanceBatch } from "../../render/webgpu/instance"
-import { Mesh, MeshBuilder, VERTEX_LAYOUT, type RGB } from "../../render/mesh"
+import { Mesh, MeshBuilder, VERTEX_LAYOUT } from "../../render/mesh"
 import { emptyBindGroupLayout, Pipeline } from "../../render/webgpu/pipeline"
 import type { SceneContext, SceneInstance } from "../../render/scene"
 import { Shader } from "../../render/webgpu/shader"
 import { INSTANCED_2D } from "../../render/shaders/instanced2d"
 import { MESH_2D } from "../../render/shaders/mesh2d"
-import { type ActionsOf, type SettingsSchema, type ValuesOf } from "../../settings/settings"
+import { type ActionsOf, type SearchColumn, type SettingsSchema, type ValuesOf } from "../../settings/settings"
 import type { DevSceneDefinition } from "../DevScene"
-import type { ComponentKind } from "../../render/grid/components"
-import type { Grid } from "../../render/grid/grid"
-import { appendShape } from "../../render/grid/shapes"
 import { downloadText } from "../download"
 import { shipToText } from "../../game/shipJson"
+import { appendGridOutline } from "../../render/grid/gridOutline"
+import { Color } from "../../render/color"
+import { appendComponentGlyphOutlines, appendLayer, displayBlock } from "../blockDraw"
+import { PointerInput } from "../input"
 
-/** Placeholder marks until functional blocks have real art. */
-const KIND_LETTER: Record<ComponentKind, string> = {
-    hull: "",
-    thruster: "T",
-    battery: "B",
-    storage: "S",
-    generator: "G",
-    projector: "P",
-    weapon: "W",
+const DEFAULT_WIREFRAME_COLOR = Color.from("#00fbff")
+const LABEL_COLOR = Color.from("#797979")
+const MASS_COLOR = Color.from("#00aaff")
+const BOUNDS_COLOR = Color.from("#ff6a00")
+const HOVER_COLOR = Color.from("#fff700")
+
+const CELL = 24
+
+/** Text height as a fraction of the framed area, so the name scales with the view. */
+const LABEL_SCALE = 0.04
+
+/** A ship's footprint as "columns x rows", or "-" for one with no blocks at all. */
+function sizeLabel(ship: Ship | undefined): string {
+    const bounds = ship?.bounds
+    if (!bounds) return "-"
+
+    return `${bounds.maxCol - bounds.minCol + 1}x${bounds.maxRow - bounds.minRow + 1}`
 }
 
-const LETTER_COLOR: RGB = [0.05, 0.06, 0.08]
+/**
+ * What the ship picker shows per row. Options are ids, so each cell looks its
+ * ship back up - the panel knows nothing about ships.
+ */
+const SHIP_COLUMNS: readonly SearchColumn[] = [
+    { header: "Ship", cell: (id) => findShip(id)?.name ?? id },
+    { header: "Size", cell: (id) => sizeLabel(findShip(id)) },
+    { header: "Creator", cell: (id) => findShip(id)?.creator ?? "" },
+]
 
 const SETTINGS = {
-    ship:      { type: "selection", label: "Ship", default: SHIPS[0]?.id ?? "",
-                 options: SHIPS.map((ship) => ship.id) },
+    ship: {
+        type: "search",
+        label: "Ship",
+        default: SHIPS[0]?.id ?? "",
+        options: SHIPS.map((ship) => ship.id),
+        placeholder: "Find a ship...",
+        columns: SHIP_COLUMNS,
+    },
     getShip:   { type: "button", label: "Download Ship" },
-    zoom:      { type: "range", label: "Zoom", default: 1, min: 0.2, max: 4, step: 0.05 },
-    count:     { type: "range", label: "Fleet", default: 1, min: 1, max: 4000, step: 1, scale: "log" },
-    spacing:   { type: "range", label: "Spacing", default: 2.5, min: 1.1, max: 8, step: 0.1 },
-    spin:      { type: "range", label: "Spin", default: 0, min: 0, max: 2, step: 0.05 },
-    origin:    { type: "selection", label: "Origin", default: "mass",
-                 options: ["mass", "bounds"], display: "segmented" },
+
+    viewSeparator: { type: "separator", label: "Views"},
+
+    flat:      { type: "checkbox", label: "Flat", default: true },
+    lit:       { type: "checkbox", label: "Lit", default: true },
+    wire:      { type: "checkbox", label: "Wireframe", default: true },
+
+    pickerSeparator: { type: "separator", label: "Settings"},
+
+    spacing:   { type: "range", label: "Spacing", default: 1.0, min: 0, max: 3.0, step: 0.1 },
+    origin:    { type: "selection", label: "Origin", default: "mass", options: ["mass", "bounds"], display: "segmented" },
+    spin:      { type: "range", label: "Spin", default: 0.2, min: 0, max: 2, step: 0.05 },
+    wireColor: { type: "color", label: "Wireframe Color", default: DEFAULT_WIREFRAME_COLOR.hex},
+
+    layersSeperator: { type: "separator", label: "Render Layers"},
+
     hull:      { type: "checkbox", label: "Hull", default: true },
     coverable: { type: "checkbox", label: "Coverable", default: true },
     cosmetic:  { type: "checkbox", label: "Cosmetic", default: true },
@@ -51,14 +84,26 @@ const SETTINGS = {
 
 type ViewerValues = ValuesOf<typeof SETTINGS>
 
-const LABEL_COLOR: RGB = [0.6, 0.66, 0.72]
-const MASS_COLOR: RGB = [1.0, 0.45, 0.35]
-const BOUNDS_COLOR: RGB = [0.35, 0.7, 1.0]
+/** The three ways one ship is drawn. Order here is the order around the circle. */
+const VIEW_KINDS = ["flat", "lit", "wire"] as const
+type ViewKind = (typeof VIEW_KINDS)[number]
 
-const CELL = 24 // World units per cell. Fixed here: the camera refits, so varying it is invisible.
+interface Size {
+    width: number
+    height: number
+}
+
+/** Which view the cursor is over, and the cell under it in that view's ship. */
+interface HoverTarget {
+    view: number
+    col: number
+    row: number
+}
+
+/*~~~ Pure helpers ~~~*/
 
 /** A plus sign, so a center is visible against the hull behind it. */
-function appendCross(builder: MeshBuilder, x: number, y: number, size: number, color: RGB): void {
+function appendCross(builder: MeshBuilder, x: number, y: number, size: number, color: Color): void {
     const arm = size / 2
     const thick = Math.max(size / 8, 0.5)
 
@@ -67,64 +112,104 @@ function appendCross(builder: MeshBuilder, x: number, y: number, size: number, c
 }
 
 /**
- * Like appendGridMesh, but draws non-hull components as a hexagon with their
- * initial in it.
+ * `splits` points spaced evenly around a circle.
  *
- * Temporary: functional blocks have no art yet, and a hexagon reads as "this is
- * a machine, not structure" at any zoom.
+ * @param radius distance from the center, in WORLD units - not a multiplier
+ * @param offset where the first point sits, in degrees. The world is y-down, so
+ *        angles run clockwise on screen and -90 puts the first point at the top.
  */
-function appendLayer(
-    builder: MeshBuilder,
-    grid: Grid,
-    cellSize: number,
-    origin: Vec2,
-): void {
-    const originX = origin.x * cellSize
-    const originY = origin.y * cellSize
+function getPointsOnCircle(centerPos: Vec2, radius: number, splits: number, offset = 0): Vec2[] {
+    const circleSplit = 360 / splits
+    const out: Vec2[] = []
 
-    for (const cell of grid.list) {
-        const x = cell.col * cellSize - originX
-        const y = cell.row * cellSize - originY
-        const letter = KIND_LETTER[cell.kind]
-
-        if (!letter) {
-            appendShape(builder, cell.shape, cell.turns, cell.mirrored, x, y, cellSize, cell.color)
-            continue
-        }
-
-        appendShape(builder, "hexagon", 0, false, x, y, cellSize, cell.color)
-
-        // edgeLine is a thin bar flush against the north edge with four
-        // orientations, so rotating it by `facing` is exactly a direction marker
-        appendShape(builder, "edgeLine", cell.facing, false, x, y, cellSize, LETTER_COLOR)
-
-        const pixel = cellSize / 12
-        DEFAULT_FONT.appendText(
-            builder,
-            letter,
-            x + (cellSize - DEFAULT_FONT.measureText(letter, pixel)) / 2,
-            y + (cellSize - DEFAULT_FONT.glyphHeight * pixel) / 2,
-            pixel,
-            LETTER_COLOR,
-        )
+    for (let s = 0; s < splits; s++) {
+        const radians = ((circleSplit * s) + offset) * Math.PI / 180
+        out.push({
+            x: centerPos.x + radius * Math.cos(radians),
+            y: centerPos.y + radius * Math.sin(radians)
+        })
     }
+
+    return out
+}
+
+/** A ship's bounding box in world units, never smaller than one unit. */
+function shipWorldSize(ship: Ship, cellSize: number): Size {
+    const bounds = ship.bounds
+    if (!bounds) return { width: 1, height: 1 }
+
+    return {
+        width: Math.max((bounds.maxCol - bounds.minCol + 1) * cellSize, 1),
+        height: Math.max((bounds.maxRow - bounds.minRow + 1) * cellSize, 1),
+    }
+}
+
+/**
+ * How far a ship reaches from its own origin, in world units.
+ *
+ * The worse side of each axis, not half the bounding box: the origin is usually
+ * the center of mass, which is nowhere near the middle of the box, so half the
+ * box under-measures the long side and lets the hull run out under the label.
+ */
+function shipHalfReach(ship: Ship, origin: Vec2, cellSize: number): Size {
+    const bounds = ship.bounds
+    if (!bounds) return { width: 0.5, height: 0.5 }
+
+    // Cell (col, row) covers [col, col + 1) x [row, row + 1), so the far edges
+    // are one cell past the last filled index
+    const left = (origin.x - bounds.minCol) * cellSize
+    const right = (bounds.maxCol + 1 - origin.x) * cellSize
+    const up = (origin.y - bounds.minRow) * cellSize
+    const down = (bounds.maxRow + 1 - origin.y) * cellSize
+
+    return {
+        width: Math.max(left, right, 0.5),
+        height: Math.max(up, down, 0.5),
+    }
+}
+
+/** The point every layer is drawn around, and which the ships spin about. */
+function originFor(ship: Ship, mode: ViewerValues["origin"]): Vec2 {
+    return mode === "mass" ? ship.centerOfMass : ship.center
+}
+
+/** The views the settings have switched on, in circle order. */
+function enabledViews(settings: ViewerValues): ViewKind[] {
+    return VIEW_KINDS.filter((kind) => settings[kind])
 }
 
 class ShipViewer implements SceneInstance<ViewerValues> {
     private readonly context: SceneContext
+    private readonly input: PointerInput
+    private settings: ViewerValues | null = null
     private readonly camera = new Camera()
     private readonly cameraBinding: CameraBinding
-    private readonly instanced: Pipeline
-    private readonly flat: Pipeline
+    private readonly instanced: Pipeline // Filled geometry, instanced
+    private readonly onTop: Pipeline     // Filled geometry, one copy (the overlay)
+    private readonly lines: Pipeline     // Line geometry, instanced
     private readonly batch: InstanceBatch
+    private readonly wireBatch: InstanceBatch
+    private readonly hoverBatch: InstanceBatch
 
     private readonly meshes = new Map<ShipLayer, Mesh>()
+    private wireMesh: Mesh | null = null
     private overlay: Mesh | null = null
+    private hover: Mesh | null = null
+    private hoverKey = ""
 
     private ship: Ship | null = null
-    private shipSize = { width: 1, height: 1 }
-    private builtKey = ""
+    private shipSize: Size = { width: 1, height: 1 }
+    /** Reach from the origin, which is what frames a view. See shipHalfReach. */
+    private shipReach: Size = { width: 0.5, height: 0.5 }
+    private origin: Vec2 = { x: 0, y: 0 }
+
+    /** Which views are on, and where each one sits. Same length, same order. */
+    private views: ViewKind[] = []
+    private viewPoints: Vec2[] = []
+
+    private builtKey = "" // The settings key, used to rebuild only on change
     private elapsed = 0
+    private labelSpace = 0
 
     readonly actions: Record<ActionsOf<typeof SETTINGS>, () => void> = {
         getShip: () => this.download(),
@@ -134,6 +219,7 @@ class ShipViewer implements SceneInstance<ViewerValues> {
         this.context = context
         const gpu = context.gpu
 
+        this.input = new PointerInput(context.canvas)
         this.cameraBinding = CameraBinding.create(gpu)
         const instanceLayout = InstanceBatch.layout(gpu)
 
@@ -144,18 +230,38 @@ class ShipViewer implements SceneInstance<ViewerValues> {
             vertexBuffers: [VERTEX_LAYOUT],
         })
 
-        this.flat = Pipeline.create(gpu, {
+        this.onTop = Pipeline.create(gpu, {
             label: "ship overlay",
             shader: Shader.createNow(gpu, MESH_2D, "mesh 2d"),
             layouts: [this.cameraBinding.layout],
             vertexBuffers: [VERTEX_LAYOUT],
         })
 
-        this.batch = InstanceBatch.create(gpu, instanceLayout, 1024, "fleet")
+        this.lines = Pipeline.create(gpu, {
+            label: "ship wireframe",
+            shader: Shader.createNow(gpu, INSTANCED_2D, "instanced 2d"),
+            layouts: [this.cameraBinding.layout, emptyBindGroupLayout(gpu), instanceLayout],
+            vertexBuffers: [VERTEX_LAYOUT],
+            topology: "line-list",
+        })
+
+        this.batch = InstanceBatch.create(gpu, instanceLayout, 1024, "ship-viewer")
+
+        // Separate batches rather than refilling one: queue.writeBuffer is ordered
+        // against submit, not against recorded draws, so writing one buffer twice
+        // in a frame makes both draws read the second write
+        this.wireBatch = InstanceBatch.create(gpu, instanceLayout, 8, "wireframe")
+        this.hoverBatch = InstanceBatch.create(gpu, instanceLayout, 8, "hover")
     }
 
     update(dt: number, settings: ViewerValues): void {
         this.elapsed += dt
+        this.settings = settings
+
+        // Before the rebuild guard: that returns early on an unchanged settings
+        // key, which would skip every per-frame input read below it
+        this.updateHover(settings)
+        this.input.endFrame()
 
         const key = `${DEFAULT_FONT.loaded}|${JSON.stringify(settings)}`
         if (key === this.builtKey) return
@@ -165,152 +271,433 @@ class ShipViewer implements SceneInstance<ViewerValues> {
     }
 
     render(frame: Frame): void {
-        const gpu = this.context.gpu
         const settings = this.settings
         if (!this.ship || !settings) return
 
-        const { columns, rows, stepX, stepY, halfW, halfH } = this.formation(settings)
+        this.fitCamera()
+        this.fillBatches(settings)
 
-        // The label sits above the formation, so the fitted rect has to reach up
-        // far enough to include it or it is cropped off the top of the viewport
-        this.camera.fit(-halfW, -halfH - this.labelSpace, halfW, halfH, gpu.width, gpu.height)
-        this.camera.zoom *= settings.zoom
-        this.cameraBinding.upload(this.camera, gpu.width, gpu.height)
+        this.drawShipLayers(frame, settings)
+        this.drawWireframe(frame)
+        this.drawHover(frame)
+        this.drawOverlay(frame)
 
-        this.batch.begin().reserve(settings.count)
-        for (let i = 0; i < settings.count; i++) {
-            const column = i % columns
-            const row = Math.floor(i / columns)
-
-            this.batch.add(
-                (column - (columns - 1) / 2) * stepX,
-                (row - (rows - 1) / 2) * stepY,
-                this.elapsed * settings.spin,
-                1,
-                // White, so the hull's own per-cell colors pass through unchanged
-                1, 1, 1,
-            )
-        }
-
-        frame.setPipeline(this.instanced).setBindGroup(0, this.cameraBinding.group)
-
-        // One draw per layer, in render order, all sharing the same instances -
-        // the batch uploads once and the layers reuse it
-        for (const layer of SHIP_LAYERS) {
-            if (!settings[layer]) continue
-            const mesh = this.meshes.get(layer)
-            if (mesh) this.batch.draw(frame, mesh)
-        }
-
-        if (this.overlay) {
-            // Group 0 is re-bound because switching to a pipeline with a different
-            // layout is allowed to invalidate what was bound
-            frame.setPipeline(this.flat).setBindGroup(0, this.cameraBinding.group)
-            this.overlay.draw(frame)
-        }
-
-        this.context.stats.set("ships", settings.count)
+        this.context.stats.set("ships", this.views.length)
     }
 
     dispose(): void {
-        for (const mesh of this.meshes.values()) mesh.destroy()
-        this.meshes.clear()
+        this.input.destroy()
+
+        this.disposeMeshes()
         this.overlay?.destroy()
+        this.overlay = null
+
         this.batch.destroy()
+        this.wireBatch.destroy()
+        this.hoverBatch.destroy()
         this.cameraBinding.destroy()
     }
 
-    private settings: ViewerValues | null = null
-    private labelSpace = 0
+    /*~~~ Measuring ~~~*/
 
-    /** Formation geometry, shared by the fit, the instances and the label. */
-    private formation(settings: ViewerValues) {
-        const columns = Math.ceil(Math.sqrt(settings.count))
-        const rows = Math.ceil(settings.count / columns)
-        const stepX = this.shipSize.width * settings.spacing
-        const stepY = this.shipSize.height * settings.spacing
+    /**
+     * How far each view sits from the middle, in world units.
+     *
+     * `spacing` is a multiplier, not a distance - one ship's longest side times
+     * that. Passing the multiplier straight through as a radius would stack every
+     * view on the origin, since a ship is a couple of hundred world units across.
+     */
+    private orbitRadius(spacing: number): number {
+        return Math.max(this.shipSize.width, this.shipSize.height) * spacing
+    }
+
+    /**
+     * Half-extents of the views themselves, before the label above them.
+     *
+     * Measured from where the views actually are rather than from the orbit
+     * radius, so a single centered view frames tightly instead of leaving a ring
+     * of empty space around it.
+     */
+    private framedHalfSize(): Size {
+        let width = this.shipReach.width
+        let height = this.shipReach.height
+
+        for (const point of this.viewPoints) {
+            width = Math.max(width, Math.abs(point.x) + this.shipReach.width)
+            height = Math.max(height, Math.abs(point.y) + this.shipReach.height)
+        }
+
+        return { width, height }
+    }
+
+    /**
+     * Where the name and creator sit, and how much room they need above the views.
+     *
+     * One place computes the whole stack, so the camera fit reaches exactly as far
+     * as the text does. Deriving the two separately is what let the name hang off
+     * the top of the screen.
+     */
+    private labelLayout(): {
+        namePixel: number
+        creatorPixel: number
+        nameY: number
+        creatorY: number
+        height: number
+    } {
+        const half = this.framedHalfSize()
+        const halfHeight = half.height
+
+        // Sized against the larger extent, not the height: two views side by side
+        // make a wide, short frame, and keying off the height alone shrinks the
+        // name to a few unreadable pixels
+        const span = Math.max(half.width, half.height) * 2
+        const namePixel = (span * LABEL_SCALE) / DEFAULT_FONT.glyphHeight
+        const creatorPixel = namePixel / 2
+
+        const nameHeight = DEFAULT_FONT.glyphHeight * namePixel
+        const creatorHeight = DEFAULT_FONT.glyphHeight * creatorPixel
+        const gap = nameHeight * 0.3
+
+        // Stacked upward from the top of the views: creator just above them, name
+        // above that. `height` is the whole block, which is what the fit needs.
+        const height = gap + creatorHeight + gap + nameHeight
 
         return {
-            columns,
-            rows,
-            stepX,
-            stepY,
-            // One ship of margin so nothing clips at the edges
-            halfW: (columns * stepX + this.shipSize.width) / 2,
-            halfH: (rows * stepY + this.shipSize.height) / 2,
+            namePixel,
+            creatorPixel,
+            nameY: -halfHeight - height,
+            creatorY: -halfHeight - gap - creatorHeight,
+            height,
         }
     }
 
-    private rebuild(settings: ViewerValues): void {
-        this.settings = settings
+    /** Only the lit view turns; the others hold still so they can be read. */
+    private viewRotation(kind: ViewKind, settings: ViewerValues): number {
+        return kind === "lit" ? this.elapsed * settings.spin : 0
+    }
 
+    /**
+     * Recomputes which views are on and where they sit.
+     *
+     * The two arrays are built together and indexed together, so a disabled view
+     * can never leave a hole that the fill loop walks off the end of.
+     */
+    private layOutViews(settings: ViewerValues): void {
+        this.views = enabledViews(settings)
+
+        if (this.views.length === 0) {
+            this.viewPoints = []
+            return
+        }
+
+        // One view has nothing to be arranged around, so it takes the middle
+        // rather than sitting out on the orbit with empty space opposite it
+        if (this.views.length === 1) {
+            this.viewPoints = [{ x: 0, y: 0 }]
+            return
+        }
+
+        // Two views read better opposite each other; three want a nudge so none
+        // sits flat on top of the middle
+        const offset = this.views.length > 2 ? -30 : 0
+        this.viewPoints = getPointsOnCircle(
+            { x: 0, y: 0 },
+            this.orbitRadius(settings.spacing),
+            this.views.length,
+            offset,
+        )
+    }
+
+    /*~~~ Hover ~~~*/
+
+    /**
+     * The cell under the cursor, in whichever view it is over.
+     *
+     * Each view is the same ship at a different transform, so this undoes that
+     * transform - translation first, then the spin - and asks the ship's own grid.
+     */
+    private hoverTarget(settings: ViewerValues): HoverTarget | null {
+        const ship = this.ship
+        if (!ship || !this.input.over) return null
+
+        const world = this.camera.screenToWorld(this.input.x, this.input.y)
+        ;(globalThis as any).__hoverDebug = { over: this.input.over, px: this.input.x, py: this.input.y, wx: world.x, wy: world.y, ox: this.origin.x, oy: this.origin.y, views: this.views.length }
+
+        for (let index = 0; index < this.views.length; index++) {
+            const at = this.viewPoints[index]!
+            const angle = this.viewRotation(this.views[index]!, settings)
+
+            // The shader does world = offset + R(angle) * local, so this is its
+            // inverse: subtract the offset, then rotate back by -angle
+            const dx = world.x - at.x
+            const dy = world.y - at.y
+            const cos = Math.cos(angle)
+            const sin = Math.sin(angle)
+
+            const localX = dx * cos + dy * sin
+            const localY = -dx * sin + dy * cos
+
+            const col = Math.floor(localX / CELL + this.origin.x)
+            const row = Math.floor(localY / CELL + this.origin.y)
+
+            // Occupancy rather than the bounding box: a concave hull has gaps
+            // inside its bounds, and "empty" is a cell that draws nothing
+            const filled = SHIP_LAYERS.some((layer) => {
+                const cell = ship.layers[layer].get(col, row)
+                return cell !== undefined && cell.shape !== "empty"
+            })
+
+            if (filled) return { view: index, col, row }
+        }
+
+        return null
+    }
+
+    private updateHover(settings: ViewerValues): void {
+        const target = this.hoverTarget(settings)
+
+        // The box lives in the ship's own space and is placed by an instance, so
+        // it only needs rebuilding when the cell changes - not when a spinning
+        // view moves it, which would be a new mesh every frame
+        const key = target ? `${target.col},${target.row}` : ""
+        if (key === this.hoverKey) {
+            this.hoverView = target?.view ?? -1
+            return
+        }
+
+        this.hoverKey = key
+        this.hoverView = target?.view ?? -1
+
+        this.hover?.destroy()
+        this.hover = target ? this.buildHoverMesh(target) : null
+    }
+
+    private hoverView = -1
+
+    private buildHoverMesh(target: HoverTarget): Mesh {
+        const x = (target.col - this.origin.x) * CELL
+        const y = (target.row - this.origin.y) * CELL
+        const { r, g, b } = HOVER_COLOR
+
+        const corners = [
+            x, y, x + CELL, y,
+            x + CELL, y, x + CELL, y + CELL,
+            x + CELL, y + CELL, x, y + CELL,
+            x, y + CELL, x, y,
+        ]
+
+        const out: number[] = []
+        for (let i = 0; i < corners.length; i += 2) out.push(corners[i]!, corners[i + 1]!, r, g, b)
+
+        return Mesh.create(this.context.gpu, new Float32Array(out), "hover")
+    }
+
+    /*~~~ Per-frame ~~~*/
+
+    private fitCamera(): void {
         const gpu = this.context.gpu
+        const half = this.framedHalfSize()
+
+        // The label sits above the views, so the fitted rect reaches up for it
+        this.camera.fit(
+            -half.width, -half.height - this.labelSpace,
+            half.width, half.height,
+            gpu.width, gpu.height,
+        )
+        this.cameraBinding.upload(this.camera, gpu.width, gpu.height)
+    }
+
+    private fillBatches(settings: ViewerValues): void {
+        this.batch.begin()
+        this.wireBatch.begin()
+        this.hoverBatch.begin()
+
+        this.views.forEach((kind, index) => {
+            const at = this.viewPoints[index]!
+            const rotation = this.viewRotation(kind, settings)
+
+            // White tint, so each hull's own per-cell colors pass through unchanged
+            const target = kind === "wire" ? this.wireBatch : this.batch
+            target.add(at.x, at.y, rotation, 1, 1, 1, 1)
+
+            // The hover box rides the same transform as the view it belongs to,
+            // so it stays glued to its cell even while that view spins
+            if (index === this.hoverView) this.hoverBatch.add(at.x, at.y, rotation, 1, 1, 1, 1)
+        })
+    }
+
+    private drawShipLayers(frame: Frame, settings: ViewerValues): void {
+        frame.setPipeline(this.instanced).setBindGroup(0, this.cameraBinding.group)
+
+        for (const layer of SHIP_LAYERS) {
+            if (!settings[layer]) continue
+
+            const mesh = this.meshes.get(layer)
+            if (mesh) this.batch.draw(frame, mesh)
+        }
+    }
+
+    private drawWireframe(frame: Frame): void {
+        if (!this.wireMesh) return
+
+        frame.setPipeline(this.lines).setBindGroup(0, this.cameraBinding.group)
+        this.wireBatch.draw(frame, this.wireMesh)
+    }
+
+    private drawHover(frame: Frame): void {
+        if (!this.hover) return
+
+        frame.setPipeline(this.lines).setBindGroup(0, this.cameraBinding.group)
+        this.hoverBatch.draw(frame, this.hover)
+    }
+
+    private drawOverlay(frame: Frame): void {
+        if (!this.overlay) return
+
+        // Group 0 is re-bound because switching to a pipeline with a different
+        // layout is allowed to invalidate what was bound
+        frame.setPipeline(this.onTop).setBindGroup(0, this.cameraBinding.group)
+        this.overlay.draw(frame)
+    }
+
+    /*~~~ Building ~~~*/
+
+    /** Rebuild everything the settings describe. */
+    private rebuild(settings: ViewerValues): void {
         const ship = buildShip(settings.ship)
         this.ship = ship
+        this.shipSize = shipWorldSize(ship, CELL)
+        this.origin = originFor(ship, settings.origin)
+        this.shipReach = shipHalfReach(ship, this.origin, CELL)
 
-        const origin: Vec2 = settings.origin === "mass" ? ship.centerOfMass : ship.center
+        // After shipSize, since the radius is derived from it
+        this.layOutViews(settings)
 
+        this.labelSpace = this.labelLayout().height
+
+        this.disposeMeshes()
+        this.buildFlatMesh(ship, this.origin)
+        this.wireMesh = this.buildWireMesh(ship, this.origin, Color.from(settings.wireColor))
+        this.overlay = this.buildOverlayMesh(settings, ship)
+
+        // The cell it pointed at belongs to the ship that just went away
+        this.hoverKey = ""
+        this.hover?.destroy()
+        this.hover = null
+
+        this.context.stats.set("ship mass", ship.mass)
+    }
+
+    private disposeMeshes(): void {
         for (const mesh of this.meshes.values()) mesh.destroy()
         this.meshes.clear()
 
+        // Nulled as well as destroyed, or the field holds a dead handle
+        this.wireMesh?.destroy()
+        this.wireMesh = null
+        this.hover?.destroy()
+        this.hover = null
+    }
+
+    private buildFlatMesh(ship: Ship, origin: Vec2): void {
+        const gpu = this.context.gpu
+
         for (const layer of SHIP_LAYERS) {
             const builder = new MeshBuilder()
+
             // Every layer gets the SAME origin, or they drift apart
             appendLayer(builder, ship.layers[layer], CELL, origin)
 
             if (builder.vertexCount > 0) this.meshes.set(layer, builder.build(gpu, layer))
         }
-
-        const extent = ship.bounds
-        this.shipSize = {
-            width: Math.max((extent ? extent.maxCol - extent.minCol + 1 : 1) * CELL, 1),
-            height: Math.max((extent ? extent.maxRow - extent.minRow + 1 : 1) * CELL, 1),
-        }
-
-        this.buildOverlay(settings, ship, origin, CELL)
-        this.context.stats.set("ship mass", ship.mass)
     }
 
-    private buildOverlay(settings: ViewerValues, ship: Ship, origin: Vec2, cell: number): void {
-        const builder = new MeshBuilder()
-        const { halfH } = this.formation(settings)
+    private buildWireMesh(ship: Ship, origin: Vec2, color: Color): Mesh | null {
+        const outline: number[] = []
 
-        // Sized against the formation rather than the cell, so the name stays
-        // legible whether there is one ship on screen or four thousand
-        const pixel = (halfH * 2 * 0.04) / DEFAULT_FONT.glyphHeight
-        const textHeight = DEFAULT_FONT.glyphHeight * pixel
-        const gap = textHeight * 0.6
+        for (const layer of SHIP_LAYERS) {
+            // displayBlock is what the solid mesh uses too, so a component
+            // outlines as the hexagon it is drawn as rather than its own shape
+            appendGridOutline(outline, ship.layers[layer], CELL, origin, color, displayBlock)
 
-        // Above the whole formation, not above one ship - with a fleet the single
-        // ship's top edge is buried somewhere in the middle of the block
-        this.labelSpace = textHeight + gap
+            // Letters and facing bars outline the same way, so they ride in this
+            // mesh rather than needing a filled pass of their own
+            appendComponentGlyphOutlines(outline, ship.layers[layer], CELL, origin, color)
+        }
 
-        const text = ship.name
+        return outline.length === 0
+            ? null
+            : Mesh.create(this.context.gpu, new Float32Array(outline), "ship wireframe")
+    }
+
+    private appendHeaderLabel(builder: MeshBuilder, ship: Ship): void {
+        const { namePixel, creatorPixel, nameY, creatorY } = this.labelLayout()
+
         DEFAULT_FONT.appendText(
             builder,
-            text,
-            -DEFAULT_FONT.measureText(text, pixel) / 2,
-            -halfH - this.labelSpace,
-            pixel,
+            ship.name,
+            -DEFAULT_FONT.measureText(ship.name, namePixel) / 2,
+            nameY,
+            namePixel,
             LABEL_COLOR,
         )
 
-        if (settings.markers) {
-            const size = cell * 0.8
+        // Half size, on the line below the name
+        DEFAULT_FONT.appendText(
+            builder,
+            ship.creator,
+            -DEFAULT_FONT.measureText(ship.creator, creatorPixel) / 2,
+            creatorY,
+            creatorPixel,
+            LABEL_COLOR,
+        )
+    }
 
-            // The chosen origin sits at (0,0) by construction; the other center is
-            // offset by however far the two disagree. Seeing that gap is the point -
-            // a ship with heavy engines aft rotates well behind its geometric middle.
-            const other = settings.origin === "mass" ? ship.center : ship.centerOfMass
-            const otherColor = settings.origin === "mass" ? BOUNDS_COLOR : MASS_COLOR
-            const originColor = settings.origin === "mass" ? MASS_COLOR : BOUNDS_COLOR
+    /**
+     * The two center markers.
+     *
+     * The chosen origin sits at (0,0) by construction; the other center is offset
+     * by however far the two disagree. Seeing that gap is the point - a ship with
+     * heavy engines aft rotates well behind its geometric middle.
+     */
+    private appendCenterMarkers(
+        builder: MeshBuilder,
+        ship: Ship,
+        mode: ViewerValues["origin"],
+        at: Vec2,
+    ): void {
+        const size = CELL * 0.8
+        const byMass = mode === "mass"
 
-            appendCross(builder, 0, 0, size, originColor)
-            appendCross(builder, (other.x - origin.x) * cell, (other.y - origin.y) * cell, size, otherColor)
+        const other = byMass ? ship.center : ship.centerOfMass
+        const originColor = byMass ? MASS_COLOR : BOUNDS_COLOR
+        const otherColor = byMass ? BOUNDS_COLOR : MASS_COLOR
+
+        appendCross(builder, at.x, at.y, size, originColor)
+        appendCross(
+            builder,
+            at.x + (other.x - this.origin.x) * CELL,
+            at.y + (other.y - this.origin.y) * CELL,
+            size,
+            otherColor,
+        )
+    }
+
+    /** Labels and markers, in one mesh drawn once rather than per instance. */
+    private buildOverlayMesh(settings: ViewerValues, ship: Ship): Mesh | null {
+        const builder = new MeshBuilder()
+
+        this.appendHeaderLabel(builder, ship)
+
+        // On a view that holds still: the overlay is world-space, so markers on a
+        // spinning view would sit where it started rather than following it
+        const still = this.views.findIndex((kind) => kind !== "lit")
+        if (settings.markers && still >= 0) {
+            this.appendCenterMarkers(builder, ship, settings.origin, this.viewPoints[still]!)
         }
 
         this.overlay?.destroy()
-        this.overlay = builder.vertexCount === 0 ? null : builder.build(this.context.gpu, "ship overlay")
+        return builder.vertexCount === 0 ? null : builder.build(this.context.gpu, "ship overlay")
     }
 
     private download(): void {
@@ -323,9 +710,9 @@ const scene: DevSceneDefinition<ViewerValues> = {
     id: "ship-viewer",
     name: "Ship Viewer",
     description:
-        "Every layer of a ship, drawn through one instance batch so a fleet costs four " +
-        "draw calls whatever its size. Orange marks the center of mass, blue the center " +
-        "of the bounding box - spin the ships to see which one they turn about.",
+        "One ship drawn up to three ways - flat, spinning, and as a wireframe - arranged " +
+        "on a circle. Orange marks the center of mass, blue the center of the bounding " +
+        "box. Hover a ship to highlight the cell under the cursor.",
     settings: SETTINGS,
     create: (context) => new ShipViewer(context),
 }

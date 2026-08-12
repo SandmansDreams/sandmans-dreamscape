@@ -4,11 +4,10 @@ import { Assert } from "../dev/assert"
 import { Buffer } from "./webgpu/buffer"
 import type { Frame } from "./frame"
 import type { GPU } from "./webgpu/gpu"
+import type { Color } from "./color"
 
 export const FLOATS_PER_VERTEX = 5 // x, y, r, g, b
 const STRIDE = FLOATS_PER_VERTEX * 4 // Bytes from one vertex to the next
-
-export type RGB = readonly [number, number, number]
 
 // Single source of truth for vertex layout for the game
 export const VERTEX_LAYOUT: GPUVertexBufferLayout = {
@@ -81,17 +80,17 @@ export class MeshBuilder {
         return this.data.length / FLOATS_PER_VERTEX
     }
 
-    add(verts: readonly number[], color: RGB): this { // Add vertices to mesh, interleaving position and color
+    add(verts: readonly number[], color: Color): this { // Add vertices to mesh, interleaving position and color
         Assert.that(verts.length % 6 === 0, "verts must be whole triangles — 6 numbers each, 3 positions")
 
         for (let i = 0; i < verts.length; i += 2) {
-            this.data.push(verts[i]!, verts[i + 1]!, color[0], color[1], color[2])
+            this.data.push(verts[i]!, verts[i + 1]!, ...color.rgb)
         }
 
         return this
     }
 
-    quad(x: number, y: number, width: number, height: number, color: RGB): this { // Add a quad to the buffer
+    quad(x: number, y: number, width: number, height: number, color: Color): this { // Add a quad to the buffer
         const x2 = x + width
         const y2 = y + height
         return this.add([x, y, x2, y, x2, y2, x, y, x2, y2, x, y2], color)

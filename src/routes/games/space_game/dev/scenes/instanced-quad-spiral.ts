@@ -1,3 +1,4 @@
+import { Color } from "../../render/color"
 import type { Frame } from "../../render/frame"
 import type { SceneContext, SceneInstance } from "../../render/scene"
 import type { DevSceneDefinition } from "../DevScene"
@@ -48,7 +49,7 @@ class InstancedQuads implements SceneInstance<QuadValues> {
 
         // 1x1 white, centered, so the instance transform scales about its middle and
         // the instance color comes through unchanged
-        this.quad = new MeshBuilder().quad(-0.5, -0.5, 1, 1, [1, 1, 1]).build(gpu, "unit quad")
+        this.quad = new MeshBuilder().quad(-0.5, -0.5, 1, 1, Color.WHITE).build(gpu, "unit quad")
 
         this.batch = InstanceBatch.create(gpu, instanceLayout, 1024, "quads")
     }

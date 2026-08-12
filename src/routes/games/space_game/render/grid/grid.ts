@@ -2,12 +2,12 @@
 
 import { Assert } from "../../dev/assert"
 import type { Vec2 } from "../camera"
-import type { RGB } from "../mesh"
+import { Color } from "../color"
 import { normalizeTurns, type BlockShape } from "./shapes"
 import { DEFAULT_KIND, statsFor, type ComponentKind } from "./components"
 import type { ShipLayer } from "./layers"
 
-const DEFAULT_COLOR: RGB = [0.6, 0.6, 0.6]
+const DEFAULT_COLOR = Color.gray(0.6)
 
 /*
  * Cells are keyed by a packed integer rather than a "col,row" string, because
@@ -29,7 +29,7 @@ export interface Cell {
     shape: BlockShape
     turns: number
     mirrored: boolean
-    color: RGB
+    color: Color
     /** 0 = unlit, 1 = fully emissive. Nothing reads this until post-processing. */
     emission: number
 
@@ -51,7 +51,7 @@ export interface Cell {
 export interface CellOptions {
     turns?: number
     mirrored?: boolean
-    color?: RGB
+    color?: Color
     emission?: number
     kind?: ComponentKind
     /** 1-based. Clamped to the levels the kind actually has. */

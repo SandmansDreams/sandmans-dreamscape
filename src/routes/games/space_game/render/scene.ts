@@ -13,6 +13,13 @@ export interface SceneContext {
     readonly canvas: HTMLCanvasElement
     /** Shared with the dev panel - scenes record their own metrics here. */
     readonly stats: Stats
+    /**
+     * Publishes a value for the dev page to read on its ticker.
+     *
+     * Same lifetime as stats: cleared on a scene swap, so the outgoing scene's
+     * data cannot linger and read like the new scene's.
+     */
+    publish(key: string, value: unknown): void
 }
 
 /**
@@ -26,6 +33,13 @@ export interface SceneInstance<V = any> {
     render(frame: Frame): void
     resize?(width: number, height: number): void
     readonly actions?: Record<string, () => void>
+    /**
+     * Receives a value pushed from the dev page - the mirror of context.publish.
+     *
+     * For state a panel owns that does not fit the settings bag, like the ship
+     * editor's brush. Ignore keys you do not recognize.
+     */
+    receive?(key: string, value: unknown): void
     dispose(): void
 }
 
@@ -35,6 +49,8 @@ export interface SceneDefinition<V = any> {
     readonly name: string
     readonly description: string
     readonly settings?: SettingsSchema
+    /** Show the builder panel for this scene. */
+    readonly builder?: boolean
     create(context: SceneContext): SceneInstance<V>
 }
 
@@ -45,6 +61,7 @@ export class SceneRunner {
     private readonly gpu: GPU
     private readonly loop = new FrameLoop()
     private readonly timer: GpuTimer
+    private readonly channel = new Map<string, unknown>()
 
     private instance: SceneInstance | null = null
     private values: SettingValues = {}
@@ -60,6 +77,11 @@ export class SceneRunner {
     get budgetMs(): number { return this.loop.budgetMs }
     get gpuTimingSupported(): boolean { return this.timer.supported }
 
+    /** Whatever the current scene last published under `key`. */
+    published<T>(key: string): T | undefined {
+        return this.channel.get(key) as T | undefined
+    }
+
     load(definition: SceneDefinition, values: SettingValues): void {
         this.instance?.dispose()
 
@@ -71,11 +93,13 @@ export class SceneRunner {
         // The outgoing scene's metrics would otherwise stay in the panel forever,
         // frozen at their last value and reading like live numbers
         this.stats.clear()
+        this.channel.clear()
 
         this.instance = definition.create({
             gpu: this.gpu,
             canvas: this.gpu.canvas,
             stats: this.stats,
+            publish: (key, value) => this.channel.set(key, value),
         })
 
         // Force resize() on the new scene's first frame
@@ -101,6 +125,15 @@ export class SceneRunner {
         this.instance?.dispose()
         this.instance = null
         this.timer.destroy()
+    }
+
+    /** Pushes a value to the current scene. Ignored if it does not accept any. */
+    send(key: string, value: unknown): void {
+        try {
+            this.instance?.receive?.(key, value)
+        } catch (error) {
+            console.error(`SceneRunner: receiving "${key}" threw.`, error)
+        }
     }
 
     /** Runs a scene action by name. Unknown names are ignored. */

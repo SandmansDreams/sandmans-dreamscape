@@ -7,11 +7,18 @@ import { SHIP_LAYERS, type ShipLayer } from "../render/grid/layers"
 export class Ship {
     readonly id: string
     name: string
+    creator: string
     readonly layers: Record<ShipLayer, Grid>
 
-    constructor(id: string, name: string) {
+    /**
+     * `creator` defaults to the same string readShip falls back to, so a ship
+     * built in code and one read from a file without the field agree rather than
+     * one of them being empty.
+     */
+    constructor(id: string, name: string, creator = "Unknown") {
         this.id = id
         this.name = name
+        this.creator = creator
 
         // Built here rather than in a second step, so a Ship is never half-made
         const layers = {} as Record<ShipLayer, Grid>

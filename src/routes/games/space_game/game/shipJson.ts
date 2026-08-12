@@ -8,7 +8,7 @@ import {
 import type { Cell, Grid } from "../render/grid/grid"
 import { SHIP_LAYERS, type ShipLayer } from "../render/grid/layers"
 import { BLOCK_SHAPES, type BlockShape } from "../render/grid/shapes"
-import type { RGB } from "../render/mesh"
+import { Color } from "../render/color"
 import { Ship } from "./ship"
 
 export const SHIP_FORMAT_VERSION = 4
@@ -38,6 +38,7 @@ export interface ShipJson {
     version: number
     id: string
     name: string
+    creator: string
     palette: Record<string, readonly number[]>
     layers: Partial<Record<ShipLayer, ShipCellJson[]>>
 }
@@ -50,18 +51,8 @@ export interface ReadResult {
 
 const KNOWN_SHAPES: ReadonlySet<string> = new Set(BLOCK_SHAPES)
 
-function hexKey(color: RGB): string {
-    return color
-        .map((channel) =>
-            Math.round(Math.min(1, Math.max(0, channel)) * 255)
-                .toString(16)
-                .padStart(2, "0"),
-        )
-        .join("")
-}
-
 class PaletteWriter {
-    private readonly byKey = new Map<string, RGB>()
+    private readonly byKey = new Map<string, Color>()
 
     /**
      * The key for a color, adding it if new.
@@ -70,8 +61,9 @@ class PaletteWriter {
      * gets the same name and re-exporting after an unrelated edit produces a
      * stable diff instead of renumbering every entry.
      */
-    keyFor(color: RGB): string {
-        const base = hexKey(color)
+    keyFor(color: Color): string {
+        // Color.hex already renders the digits; drop the leading hash
+        const base = color.hex.replace("#", "")
 
         // Two colors can round to the same hex while differing as floats. Suffix
         // instead of letting the second silently overwrite the first.
@@ -83,15 +75,16 @@ class PaletteWriter {
                 this.byKey.set(key, color)
                 return key
             }
-            if (existing[0] === color[0] && existing[1] === color[1] && existing[2] === color[2]) {
-                return key
-            }
+            if (existing.equals(color)) return key
         }
     }
 
     toJson(): Record<string, readonly number[]> {
-        // Sorted so the palette does not reshuffle between exports
-        return Object.fromEntries([...this.byKey].sort(([a], [b]) => a.localeCompare(b)))
+        // Sorted so the palette does not reshuffle between exports. Written as
+        // plain triples because JSON has no idea what a Color is.
+        return Object.fromEntries(
+            [...this.byKey].sort(([a], [b]) => a.localeCompare(b)).map(([key, color]) => [key, color.rgb]),
+        )
     }
 }
 
@@ -129,6 +122,7 @@ export function shipToJson(ship: Ship): ShipJson {
         version: SHIP_FORMAT_VERSION,
         id: ship.id,
         name: ship.name,
+        creator: ship.creator,
         palette: palette.toJson(),
         layers,
     }
@@ -147,6 +141,7 @@ export function shipToText(ship: Ship): string {
     lines.push(`  "version": ${json.version},`)
     lines.push(`  "id": ${JSON.stringify(json.id)},`)
     lines.push(`  "name": ${JSON.stringify(json.name)},`)
+    lines.push(`  "creator": ${JSON.stringify(json.creator)},`)
 
     const palette = Object.entries(json.palette).map(
         ([key, color]) => `    ${JSON.stringify(key)}: [${color.join(", ")}]`,
@@ -168,8 +163,8 @@ export function shipToText(ship: Ship): string {
 
 /*~~~ Reading ~~~*/
 
-function readPalette(raw: unknown, warnings: string[]): Map<string, RGB> {
-    const palette = new Map<string, RGB>()
+function readPalette(raw: unknown, warnings: string[]): Map<string, Color> {
+    const palette = new Map<string, Color>()
     if (raw == null || typeof raw !== "object") return palette
 
     for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
@@ -181,19 +176,19 @@ function readPalette(raw: unknown, warnings: string[]): Map<string, RGB> {
             warnings.push(`palette "${key}" is not three numbers, ignored`)
             continue
         }
-        palette.set(key, [value[0], value[1], value[2]] as RGB)
+        palette.set(key, Color.rgb(value[0], value[1], value[2]))
     }
 
     return palette
 }
 
-const FALLBACK_COLOR: RGB = [0.6, 0.6, 0.6]
+const FALLBACK_COLOR = Color.gray(0.6)
 
 function readCell(
     grid: Grid,
     layer: ShipLayer,
     raw: unknown,
-    palette: Map<string, RGB>,
+    palette: Map<string, Color>,
     warnings: string[],
 ): void {
     if (raw == null || typeof raw !== "object") {
@@ -263,6 +258,7 @@ export function readShip(data: unknown): ReadResult {
     const ship = new Ship(
         typeof json.id === "string" ? json.id : "untitled",
         typeof json.name === "string" ? json.name : "Untitled",
+        typeof json.creator === "string" ? json.creator : "Unknown"
     )
 
     const palette = readPalette(json.palette, warnings)

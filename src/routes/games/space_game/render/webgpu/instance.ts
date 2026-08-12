@@ -3,7 +3,7 @@
 import { Buffer } from "./buffer"
 import type { Frame } from "../frame"
 import type { GPU } from "./gpu"
-import type { Mesh, RGB } from "../mesh"
+import type { Mesh } from "../mesh"
 
 // offset.xy, rotation.xy (cos, sin scaled), color.rgba
 export const FLOATS_PER_INSTANCE = 8

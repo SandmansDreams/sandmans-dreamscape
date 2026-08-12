@@ -25,7 +25,8 @@
 
 import { browser } from "$app/environment"
 import { Assert } from "../dev/assert"
-import type { MeshBuilder, RGB } from "./mesh"
+import type { MeshBuilder } from "./mesh"
+import type { Color } from "./color"
 
 /*
  * Sheet format is name_type_WxH.png: a 16x6 grid of cells starting at code point
@@ -172,15 +173,15 @@ export class BitmapFont {
     }
 
     /** Advance for one character, in world units. */
-    private advance(character: string, pixel: number): number {
-        return (this.glyph(character).width + this.letterSpacing) * pixel
+    private advance(character: string, pixelSize: number): number {
+        return (this.glyph(character).width + this.letterSpacing) * pixelSize
     }
 
     /**
      * Appends `text` as quads into `builder`.
      *
      * @param x,y top-left of the first glyph's box, y-down
-     * @param pixel world units per font pixel - a cell is glyphWidth x glyphHeight of these
+     * @param pixelSize world units per font pixelSize - a cell is glyphWidth x glyphHeight of these
      * @returns width of the widest line, in world units
      */
     appendText(
@@ -188,13 +189,13 @@ export class BitmapFont {
         text: string,
         x: number,
         y: number,
-        pixel: number,
-        color: RGB,
+        pixelSize: number,
+        color: Color,
         options: TextOptions = {},
     ): number {
         const align = options.align ?? "left"
         const lines = text.split("\n")
-        const widths = lines.map((line) => this.measureLine(line, pixel))
+        const widths = lines.map((line) => this.measureLine(line, pixelSize))
         const blockWidth = options.width ?? Math.max(0, ...widths)
 
         let cursorY = y
@@ -212,15 +213,15 @@ export class BitmapFont {
             } else if (align === "right") {
                 startX = x + slack
             } else if (align === "justify" && (options.justifyLastLine || index < lines.length - 1)) {
-                // Whole font pixels only, so justified text stays on the pixel grid -
+                // Whole font pixels only, so justified text stays on the pixelSize grid -
                 // fractional offsets smear it against a pixelated canvas
-                const distributed = distributeSlack(Math.floor(slack / pixel), countSpaces(line))
+                const distributed = distributeSlack(Math.floor(slack / pixelSize), countSpaces(line))
                 perGap = distributed.perGap
                 wideGaps = distributed.wideGaps
             }
 
-            this.appendLine(builder, line, startX, cursorY, pixel, color, perGap, wideGaps)
-            cursorY += this.lineAdvance * pixel
+            this.appendLine(builder, line, startX, cursorY, pixelSize, color, perGap, wideGaps)
+            cursorY += this.lineAdvance * pixelSize
         }
 
         return blockWidth
@@ -231,8 +232,8 @@ export class BitmapFont {
         line: string,
         x: number,
         y: number,
-        pixel: number,
-        color: RGB,
+        pixelSize: number,
+        color: Color,
         perGap: number,
         wideGaps: number,
     ): void {
@@ -242,44 +243,44 @@ export class BitmapFont {
         // for...of over a string walks code points, not UTF-16 units
         for (const character of line) {
             for (const [row, column, length] of this.glyph(character).runs) {
-                builder.quad(cursorX + column * pixel, y + row * pixel, length * pixel, pixel, color)
+                builder.quad(cursorX + column * pixelSize, y + row * pixelSize, length * pixelSize, pixelSize, color)
             }
 
-            cursorX += this.advance(character, pixel)
+            cursorX += this.advance(character, pixelSize)
 
             if (character === " ") {
-                cursorX += (perGap + (gap < wideGaps ? 1 : 0)) * pixel
+                cursorX += (perGap + (gap < wideGaps ? 1 : 0)) * pixelSize
                 gap++
             }
         }
     }
 
     /** Width of the widest line, in world units. */
-    measureText(text: string, pixel: number): number {
+    measureText(text: string, pixelSize: number): number {
         let widest = 0
-        for (const line of text.split("\n")) widest = Math.max(widest, this.measureLine(line, pixel))
+        for (const line of text.split("\n")) widest = Math.max(widest, this.measureLine(line, pixelSize))
         return widest
     }
 
     /** Width of a single line. No newline handling. */
-    private measureLine(line: string, pixel: number): number {
+    private measureLine(line: string, pixelSize: number): number {
         let width = 0
-        for (const character of line) width += this.advance(character, pixel)
+        for (const character of line) width += this.advance(character, pixelSize)
 
         // The trailing letterSpacing after the last glyph is not part of the text
-        return Math.max(0, width - this.letterSpacing * pixel)
+        return Math.max(0, width - this.letterSpacing * pixelSize)
     }
 
     /** Height in world units, counting whole cells only - see `descent`. */
-    measureTextHeight(text: string, pixel: number): number {
+    measureTextHeight(text: string, pixelSize: number): number {
         let lines = 1
         for (const character of text) if (character === "\n") lines++
-        return (lines * this.lineAdvance - this.lineSpacing) * pixel
+        return (lines * this.lineAdvance - this.lineSpacing) * pixelSize
     }
 
     /** Word-wraps to `maxWidth` world units, hard-breaking words that cannot fit. */
-    wrap(text: string, maxWidth: number, pixel: number): string {
-        return wrapText(text, maxWidth, (line) => this.measureText(line, pixel))
+    wrap(text: string, maxWidth: number, pixelSize: number): string {
+        return wrapText(text, maxWidth, (line) => this.measureText(line, pixelSize))
     }
 
     /**
@@ -463,7 +464,7 @@ export function wrapText(
 /**
  * Splits `slackPixels` across `gaps` word gaps, in whole pixels.
  *
- * `wideGaps` leading gaps take one extra pixel each, so the remainder is spread
+ * `wideGaps` leading gaps take one extra pixelSize each, so the remainder is spread
  * along the line rather than dumped entirely on the last gap.
  */
 export function distributeSlack(slackPixels: number, gaps: number): { perGap: number; wideGaps: number } {

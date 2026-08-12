@@ -1,6 +1,7 @@
 // The geometry for every block shape, each defined once in a canonical orientation
 
-import type { MeshBuilder, RGB } from "../mesh"
+import type { MeshBuilder } from "../mesh"
+import type { Color } from "../color"
 
 export const BLOCK_SHAPES = [
     "empty",
@@ -105,7 +106,7 @@ export function appendShape(
     x: number,
     y: number,
     size: number,
-    color: RGB,
+    color: Color,
 ): void {
     if (shape === "empty") return
 

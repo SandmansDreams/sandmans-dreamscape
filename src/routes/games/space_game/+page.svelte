@@ -13,6 +13,8 @@
         saveSceneValues,
         type SettingValues,
     } from "./settings/settings"
+    import BuilderPanel from "./dev/BuilderPanel.svelte"
+    import { loadBrush, saveBrush, type Brush } from "./dev/brush"
 
     const DEV_COLOR = "#87CEEB"
 
@@ -26,6 +28,9 @@
     let runner = $state<SceneRunner | null>(null)
     let scene = $state<SceneDefinition | null>(initial)
     let values = $state<SettingValues>(initial ? loadSceneValues(initial.id, initial.settings ?? {}) : {})
+
+    let palette = $state<string[]>([])
+    let brush = $state<Brush>(loadBrush())
 
     let fps = $state(0)
     let budgetMs = $state(1000 / 60)
@@ -58,6 +63,21 @@
         values = loadSceneValues(definition.id, definition.settings ?? {})
         saveSceneId(definition.id)
     }
+
+    // The brush is not a setting, so it travels on its own channel
+    $effect(() => {
+        runner?.send("brush", brush)
+    })
+
+    let brushSaveTimer: ReturnType<typeof setTimeout> | undefined
+
+    $effect(() => {
+        const snapshot = brush
+        // Debounced for the same reason settings are: dragging emission would
+        // otherwise write localStorage on every pointer move
+        clearTimeout(brushSaveTimer)
+        brushSaveTimer = setTimeout(() => saveBrush(snapshot), 400)
+    })
 
     // Selection changes rebuild every GPU resource the scene owns
     $effect(() => {
@@ -104,6 +124,7 @@
                 fps = created!.fps
                 budgetMs = created!.budgetMs
                 statLines = created!.stats.entries()
+                palette = created!.published<string[]>("palette") ?? []
             }, 200)
         })() // These 2 parentheses are important
 
@@ -121,6 +142,10 @@
 }} />
 
 <div id="container">
+    {#if scene?.builder}
+        <BuilderPanel bind:brush {palette} />
+    {/if}
+
     {#if devMode}
         <div id="dev-panel" style:--DEV_COLOR={`${DEV_COLOR}`}>
             <header>
@@ -181,6 +206,11 @@
         image-rendering: crisp-edges;
     }
 
+    footer {
+        text-align: center;
+        color: var(--DEV_COLOR);
+    }
+
     #container {
         background-color: black;
         position: absolute;
@@ -213,7 +243,10 @@
         padding: 15px;
         width: 25vw;
         max-height: calc(100vh - 48px);
-        overflow-y: none;
+        /* auto, not none: "none" is not a value overflow-y takes, so the panel
+           spilled past its max-height and focusing a control down there scrolled
+           #container instead, dragging the canvas up off the top of the window */
+        overflow-y: auto;
         opacity: 25%;
         transition: .25s ease;
     }
