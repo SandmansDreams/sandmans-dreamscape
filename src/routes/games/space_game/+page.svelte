@@ -64,7 +64,9 @@
         saveSceneId(definition.id)
     }
 
-    // The brush is not a setting, so it travels on its own channel
+    // The brush is not a setting, so it travels on its own channel. Declared
+    // after the load effect so a scene swap sends to the new instance, not the
+    // one being torn down
     $effect(() => {
         runner?.send("brush", brush)
     })
@@ -147,7 +149,7 @@
     {/if}
 
     {#if devMode}
-        <div id="dev-panel" style:--DEV_COLOR={`${DEV_COLOR}`}>
+        <div id="dev-panel" class:below-bar={scene?.builder} style:--DEV_COLOR={`${DEV_COLOR}`}>
             <header>
                 <span class="title">DEV MODE: ON</span>
             </header>
@@ -274,6 +276,9 @@
         background: #0dfa;
         background-clip: content-box;
     }
+    /* The builder's top bar owns the full width of the screen, so the dev panel
+       drops below it rather than underneath it */
+    #dev-panel.below-bar { top: 92px; max-height: calc(100vh - 128px); }
 
     /* Firefox, which has no pseudo-elements to style */
     @supports not selector(::-webkit-scrollbar) {

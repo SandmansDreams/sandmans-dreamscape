@@ -5,7 +5,7 @@ import { Grid, type GridBounds } from "../render/grid/grid"
 import { SHIP_LAYERS, type ShipLayer } from "../render/grid/layers"
 
 export class Ship {
-    readonly id: string
+    id: string
     name: string
     creator: string
     readonly layers: Record<ShipLayer, Grid>

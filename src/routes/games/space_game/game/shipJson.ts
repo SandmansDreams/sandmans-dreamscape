@@ -51,6 +51,18 @@ export interface ReadResult {
 
 const KNOWN_SHAPES: ReadonlySet<string> = new Set(BLOCK_SHAPES)
 
+/**
+ * Six decimals, and no trailing float noise.
+ *
+ * A channel converted from hsl comes out as 0.22200000000000003, which is
+ * unreadable in a file meant to be hand-edited. Six decimals is still two
+ * orders of magnitude finer than the 1/255 a color survives on screen, so this
+ * shortens the text without moving the color.
+ */
+function round6(value: number): number {
+    return Math.round(value * 1e6) / 1e6
+}
+
 class PaletteWriter {
     private readonly byKey = new Map<string, Color>()
 
@@ -83,7 +95,9 @@ class PaletteWriter {
         // Sorted so the palette does not reshuffle between exports. Written as
         // plain triples because JSON has no idea what a Color is.
         return Object.fromEntries(
-            [...this.byKey].sort(([a], [b]) => a.localeCompare(b)).map(([key, color]) => [key, color.rgb]),
+            [...this.byKey]
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([key, color]) => [key, color.rgb.map(round6)]),
         )
     }
 }

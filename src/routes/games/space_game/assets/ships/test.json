@@ -2,7 +2,7 @@
   "version": 4,
   "id": "test",
   "name": "Test Ship",
-  "creator": "Unknown",
+  "creator": "SpaceGameCreator",
   "palette": {
     "424a57": [0.26, 0.29, 0.34],
     "59d9ff": [0.35, 0.85, 1],
@@ -71,3 +71,4 @@
     ]
   }
 }
+

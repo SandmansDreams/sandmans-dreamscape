@@ -57,6 +57,9 @@ const SETTINGS = {
         options: SHIPS.map((ship) => ship.id),
         placeholder: "Find a ship...",
         columns: SHIP_COLUMNS,
+        // Past the default 8: the result box scrolls, so an unfiltered list
+        // showing every ship beats one that silently stops at the eighth
+        limit: 50,
     },
     getShip:   { type: "button", label: "Download Ship" },
 
@@ -421,7 +424,6 @@ class ShipViewer implements SceneInstance<ViewerValues> {
         if (!ship || !this.input.over) return null
 
         const world = this.camera.screenToWorld(this.input.x, this.input.y)
-        ;(globalThis as any).__hoverDebug = { over: this.input.over, px: this.input.x, py: this.input.y, wx: world.x, wy: world.y, ox: this.origin.x, oy: this.origin.y, views: this.views.length }
 
         for (let index = 0; index < this.views.length; index++) {
             const at = this.viewPoints[index]!
@@ -645,8 +647,8 @@ class ShipViewer implements SceneInstance<ViewerValues> {
         // Half size, on the line below the name
         DEFAULT_FONT.appendText(
             builder,
-            ship.creator,
-            -DEFAULT_FONT.measureText(ship.creator, creatorPixel) / 2,
+            `Made by: ${ship.creator}`,
+            -DEFAULT_FONT.measureText(`Made by: ${ship.creator}`, creatorPixel) / 2,
             creatorY,
             creatorPixel,
             LABEL_COLOR,

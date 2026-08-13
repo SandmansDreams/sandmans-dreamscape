@@ -18,34 +18,34 @@ import { Ship } from "../../game/ship"
 import { shipFromText, shipToText } from "../../game/shipJson"
 import type { ActionsOf, SettingsSchema, ValuesOf } from "../../settings/settings"
 import type { DevSceneDefinition } from "../DevScene"
+import { DEFAULT_BRUSH, loadBrush, type Brush } from "../brush"
+import { canPlaceAt } from "../../render/grid/shipLegality"
+import { appendShape } from "../../render/grid/shapes"
 
 const CELL = 32
 /** How far the lattice reaches, in cells each way. Panning past it just runs out. */
 const LATTICE = 48
+/** How far past the hull to offer cells. Two, so a thruster's reach stays visible. */
+const MARGIN = 2
+/** How far the axes reach, in cells. They only exist to make the origin findable. */
+const AXIS_REACH = 64
 
 const FACINGS = ["N", "E", "S", "W"] as const
 
-const GRID_COLOR = Color.from("#1e2630")
-const AXIS_COLOR = Color.from("#39485c")
 const HOVER_COLOR = Color.from("#ffffff")
+const BLOCKED_COLOR = Color.from("#ff5a5a")
+const MARK_COLOR = Color.from("#2f4256")
+
+/** How far the ghost is washed out. 0 is solid, 1 is invisible. */
+const GHOST_FADE = 0.72
+const BACKGROUND = Color.rgb(0.05, 0.05, 0.07)
 
 const SETTINGS = {
-    layer:      { type: "selection", label: "Layer", default: "hull",
-                  options: SHIP_LAYERS, display: "segmented" },
-    tool:       { type: "selection", label: "Tool", default: "paint",
-                  options: ["paint", "erase"], display: "segmented" },
-    shape:      { type: "selection", label: "Shape", default: "full", options: DRAWN_SHAPES },
-    turns:      { type: "range", label: "Turns", default: 0, min: 0, max: 3, step: 1 },
-    mirrored:   { type: "checkbox", label: "Mirrored", default: false },
-    kind:       { type: "selection", label: "Kind", default: "hull", options: COMPONENT_KINDS },
-    level:      { type: "range", label: "Level", default: 1, min: 1, max: 3, step: 1 },
-    facing:     { type: "selection", label: "Facing", default: "N",
-                  options: FACINGS, display: "segmented" },
-    color:      { type: "color", label: "Color", default: "#94a1b3" },
-    lattice:    { type: "checkbox", label: "Grid", default: true },
+    marks:      { type: "checkbox", label: "Legal cells", default: true },
 
     shipSep:    { type: "separator", label: "Ship" },
     name:       { type: "text", label: "Name", default: "New Ship" },
+    creator:    { type: "text", label: "Creator", default: "SpaceGameCreator" },
     undo:       { type: "button", label: "Undo" },
     redo:       { type: "button", label: "Redo" },
     clearLayer: { type: "button", label: "Clear layer" },
@@ -61,6 +61,23 @@ type EditorValues = ValuesOf<typeof SETTINGS>
 /** Every cell of every layer, copied. Color is immutable, so it can be shared. */
 type Snapshot = Record<ShipLayer, Cell[]>
 
+/** "Scythe Ship" -> "scythe-ship", so a downloaded file drops straight into assets/ships. */
+function slug(name: string): string {
+    const clean = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
+    return clean === "" ? "untitled" : clean
+}
+
+/** A small cross at a cell's center. Line geometry, so it shares the line pipeline. */
+function appendMark(out: number[], col: number, row: number, origin: Vec2): void {
+    const x = (col - origin.x) * CELL + CELL / 2
+    const y = (row - origin.y) * CELL + CELL / 2
+    const arm = CELL * 0.12
+    const { r, g, b } = MARK_COLOR
+
+    out.push(x - arm, y, r, g, b, x + arm, y, r, g, b)
+    out.push(x, y - arm, r, g, b, x, y + arm, r, g, b)
+}
+
 class ShipBuilder implements SceneInstance<EditorValues> {
     private readonly context: SceneContext
     private readonly input: PointerInput
@@ -72,8 +89,13 @@ class ShipBuilder implements SceneInstance<EditorValues> {
     private ship = new Ship("untitled", "New Ship")
 
     private readonly meshes = new Map<ShipLayer, Mesh>()
-    private lattice: Mesh | null = null
+    private axes: Mesh | null = null
+    private marks: Mesh | null = null
+    private marksKey = ""
     private hover: Mesh | null = null
+    private ghost: Mesh | null = null
+
+    private brush: Brush = loadBrush()
 
     private builtRevision = -1
     private hoverKey = ""
@@ -89,10 +111,14 @@ class ShipBuilder implements SceneInstance<EditorValues> {
     readonly actions: Record<ActionsOf<typeof SETTINGS>, () => void> = {
         undo: () => this.undo(),
         redo: () => this.redo(),
-        clearLayer: () => this.mutate(() => this.ship.layers[this.settings?.layer ?? "hull"].clear()),
+        clearLayer: () => this.mutate(() => this.ship.layers[this.brush.layer].clear()),
         clearAll: () => this.mutate(() => { for (const grid of this.ship.layersOf()) grid.clear() }),
         download: () => downloadText(`${this.ship.id}.json`, shipToText(this.ship)),
         load: () => this.loadPasted(),
+    }
+
+    receive(key: string, value: unknown): void {
+        if (key === "brush") this.brush = value as Brush
     }
 
     constructor(context: SceneContext) {
@@ -118,7 +144,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
 
     update(_dt: number, settings: EditorValues): void {
         this.settings = settings
-        if (this.ship.name !== settings.name) this.ship.name = settings.name
+        this.syncIdentity(settings)
 
         const world = this.camera.screenToWorld(this.input.x, this.input.y)
         const col = Math.floor(world.x / CELL + this.origin.x)
@@ -126,7 +152,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
 
         // A snapshot per stroke, not per cell, so one undo reverts a whole drag
         if (this.input.pressed(0)) this.pushUndo()
-        if (this.input.isDown(0) && this.input.over) this.apply(col, row, settings)
+        if (this.input.isDown(0) && this.input.over) this.apply(col, row)
 
         // Divided by zoom so a drag moves the world under the cursor by the same
         // amount whatever the magnification
@@ -140,10 +166,21 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         }
 
         if (this.ship.geometryRevision !== this.builtRevision) this.rebuildMeshes()
-        this.rebuildOverlay(col, row, settings)
+        this.rebuildMarks()
+        this.rebuildCursor(col, row)
 
         // Last: everything above reads the edges and deltas this clears
         this.input.endFrame()
+    }
+
+    /** Keeps the ship's name, creator and filename in step with the fields. */
+    private syncIdentity(settings: EditorValues): void {
+        if (this.ship.name !== settings.name) {
+            this.ship.name = settings.name
+            this.ship.id = slug(settings.name)
+        }
+
+        if (this.ship.creator !== settings.creator) this.ship.creator = settings.creator
     }
 
     render(frame: Frame): void {
@@ -153,16 +190,15 @@ class ShipBuilder implements SceneInstance<EditorValues> {
 
         this.cameraBinding.upload(this.camera, gpu.width, gpu.height)
 
-        if (settings.lattice && this.lattice) {
-            frame.setPipeline(this.lines).setBindGroup(0, this.cameraBinding.group)
-            this.lattice.draw(frame)
-        }
+        frame.setPipeline(this.lines).setBindGroup(0, this.cameraBinding.group)
+        if (settings.marks && this.marks) this.marks.draw(frame)
 
         frame.setPipeline(this.pipeline).setBindGroup(0, this.cameraBinding.group)
         for (const layer of SHIP_LAYERS) {
             const mesh = this.meshes.get(layer)
             if (mesh) mesh.draw(frame)
         }
+        if (this.ghost) this.ghost.draw(frame)
 
         if (this.hover) {
             frame.setPipeline(this.lines).setBindGroup(0, this.cameraBinding.group)
@@ -176,43 +212,58 @@ class ShipBuilder implements SceneInstance<EditorValues> {
     dispose(): void {
         this.input.destroy()
         for (const mesh of this.meshes.values()) mesh.destroy()
-        this.lattice?.destroy()
+        this.axes?.destroy()
+        this.marks?.destroy()
         this.hover?.destroy()
         this.cameraBinding.destroy()
     }
 
     /*~~~ Editing ~~~*/
 
-    private apply(col: number, row: number, settings: EditorValues): void {
-        const grid = this.ship.layers[settings.layer]
+        private apply(col: number, row: number): void {
+        const brush = this.brush
+        const grid = this.ship.layers[brush.layer]
 
-        if (settings.tool === "erase") {
+        if (brush.tool === "erase") {
             grid.delete(col, row)
             return
         }
 
-        const existing = grid.get(col, row)
-        const kind = settings.kind as ComponentKind
+        // The same call that drew the marks, so what is offered and what is
+        // accepted cannot drift apart
+        if (!canPlaceAt(this.ship, brush.layer, col, row, brush.kind, brush.facing).ok) return
+        if (this.matchesBrush(grid.get(col, row))) return
 
-        // Skip an identical repaint: a drag revisits the same cell for many
-        // frames, and each set() would bump geometryRevision and re-tessellate
-        if (
-            existing &&
-            existing.shape === settings.shape &&
-            existing.mirrored === settings.mirrored &&
-            existing.kind === kind &&
-            existing.level === settings.level &&
-            existing.color.hex === settings.color
-        ) return
-
-        grid.set(col, row, settings.shape as BlockShape, {
-            turns: settings.turns,
-            mirrored: settings.mirrored,
-            kind,
-            level: Math.min(settings.level, maxLevel(kind)),
-            facing: FACINGS.indexOf(settings.facing as (typeof FACINGS)[number]),
-            color: Color.from(settings.color),
+        grid.set(col, row, brush.shape, {
+            turns: brush.turns,
+            mirrored: brush.mirrored,
+            kind: brush.kind,
+            level: Math.min(brush.level, maxLevel(brush.kind)),
+            facing: brush.facing,
+            color: Color.from(brush.color),
+            emission: brush.emission,
         })
+    }
+
+    /**
+     * True when placing would change nothing.
+     *
+     * A drag revisits the same cell for many frames, and each set() would bump
+     * geometryRevision and re-tessellate the whole layer. Turns and facing count
+     * here: rotating the brush and repainting a cell has to actually rotate it.
+     */
+    private matchesBrush(cell: Cell | undefined): boolean {
+        const brush = this.brush
+
+        return cell !== undefined
+            && cell.shape === brush.shape
+            && cell.turns === brush.turns
+            && cell.mirrored === brush.mirrored
+            && cell.kind === brush.kind
+            && cell.level === brush.level
+            && cell.facing === brush.facing
+            && cell.emission === brush.emission
+            && cell.color.hex === brush.color
     }
 
     private snapshot(): Snapshot {
@@ -291,40 +342,87 @@ class ShipBuilder implements SceneInstance<EditorValues> {
             if (builder.vertexCount > 0) this.meshes.set(layer, builder.build(gpu, layer))
         }
 
+        this.publishPalette()
+        this.builtRevision = this.ship.geometryRevision
         this.builtRevision = this.ship.geometryRevision
     }
 
-    /** The lattice and the hover box, both line geometry. */
-    private rebuildOverlay(col: number, row: number, settings: EditorValues): void {
-        const gpu = this.context.gpu
+    /** The distinct colors already in the ship, for the panel's swatch row. */
+    private publishPalette(): void {
+        const hexes = new Set<string>()
 
-        if (!this.lattice) {
-            const out: number[] = []
-            const span = LATTICE * CELL
-
-            for (let i = -LATTICE; i <= LATTICE; i++) {
-                // The axes get their own color, so the origin is findable after a pan
-                const color = i === 0 ? AXIS_COLOR : GRID_COLOR
-                const at = i * CELL
-
-                out.push(at, -span, color.r, color.g, color.b, at, span, color.r, color.g, color.b)
-                out.push(-span, at, color.r, color.g, color.b, span, at, color.r, color.g, color.b)
-            }
-
-            this.lattice = Mesh.create(gpu, new Float32Array(out), "lattice")
+        for (const grid of this.ship.layersOf()) {
+            for (const cell of grid.list) hexes.add(cell.color.hex)
         }
 
-        const key = `${col},${row},${this.input.over}`
+        this.context.publish("palette", [...hexes].sort())
+    }
+
+    /**
+     * A mark on every cell the current brush may legally fill.
+     *
+     * Bounded by the hull plus a margin rather than by the viewport: the set of
+     * placeable cells is small and known, and scanning what is on screen would
+     * rebuild on every pan.
+     */
+    private rebuildMarks(): void {
+        const brush = this.brush
+        const key = `${this.ship.geometryRevision}|${brush.layer}|${brush.kind}|${brush.facing}`
+        if (key === this.marksKey) return
+        this.marksKey = key
+
+        this.marks?.destroy()
+        this.marks = null
+
+        const bounds = this.ship.bounds
+        const out: number[] = []
+
+        for (let row = (bounds?.minRow ?? 0) - MARGIN; row <= (bounds?.maxRow ?? 0) + MARGIN; row++) {
+            for (let col = (bounds?.minCol ?? 0) - MARGIN; col <= (bounds?.maxCol ?? 0) + MARGIN; col++) {
+                if (!canPlaceAt(this.ship, brush.layer, col, row, brush.kind, brush.facing).ok) continue
+                appendMark(out, col, row, this.origin)
+            }
+        }
+
+        if (out.length > 0) {
+            this.marks = Mesh.create(this.context.gpu, new Float32Array(out), "legal cells")
+        }
+    }
+
+        /**
+     * Everything that follows the cursor: the cell outline and the block a click
+     * would place.
+     *
+     * One key covers both, because both change on the same events - moving to
+     * another cell, or picking a different block.
+     */
+    private rebuildCursor(col: number, row: number): void {
+        const brush = this.brush
+        const legal = canPlaceAt(this.ship, brush.layer, col, row, brush.kind, brush.facing).ok
+        const key = `${col},${row},${this.input.over},${legal},` +
+            `${brush.shape},${brush.turns},${brush.mirrored},${brush.tool},${brush.color}`
+
         if (key === this.hoverKey) return
         this.hoverKey = key
 
         this.hover?.destroy()
+        this.ghost?.destroy()
         this.hover = null
+        this.ghost = null
         if (!this.input.over) return
 
+        this.hover = this.buildHoverBox(col, row, legal)
+
+        // Nothing to preview when erasing, and nothing to promise on a cell that
+        // would refuse the block anyway
+        if (brush.tool === "paint" && legal) this.ghost = this.buildGhost(col, row)
+    }
+
+    /** The cell outline, red where the brush would be refused. */
+    private buildHoverBox(col: number, row: number, legal: boolean): Mesh {
         const x = (col - this.origin.x) * CELL
         const y = (row - this.origin.y) * CELL
-        const { r, g, b } = HOVER_COLOR
+        const { r, g, b } = legal ? HOVER_COLOR : BLOCKED_COLOR
 
         const box = [
             x, y, x + CELL, y,
@@ -336,7 +434,26 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         const out: number[] = []
         for (let i = 0; i < box.length; i += 2) out.push(box[i]!, box[i + 1]!, r, g, b)
 
-        this.hover = Mesh.create(gpu, new Float32Array(out), "hover")
+        return Mesh.create(this.context.gpu, new Float32Array(out), "hover")
+    }
+
+    /** The block a click would place, in its real geometry and orientation. */
+    private buildGhost(col: number, row: number): Mesh | null {
+        const brush = this.brush
+        const builder = new MeshBuilder()
+
+        appendShape(
+            builder,
+            brush.shape,
+            brush.turns,
+            brush.mirrored,
+            (col - this.origin.x) * CELL,
+            (row - this.origin.y) * CELL,
+            CELL,
+            Color.from(brush.color).mix(BACKGROUND, GHOST_FADE),
+        )
+
+        return builder.vertexCount > 0 ? builder.build(this.context.gpu, "ghost") : null
     }
 }
 
@@ -345,8 +462,10 @@ const scene: DevSceneDefinition<EditorValues> = {
     name: "Ship Builder",
     description:
         "Left drag paints, right or middle drag pans, wheel zooms. The brush is the " +
-        "settings below. Undo covers a whole stroke, not a single block.",
+        "panel on the right; only marked cells accept a block. Undo covers a whole " +
+        "stroke, not a single block.",
     settings: SETTINGS,
+    builder: true,
     create: (context) => new ShipBuilder(context),
 }
 
