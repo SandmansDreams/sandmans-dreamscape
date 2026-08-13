@@ -325,6 +325,36 @@
         overflow-y: auto;
     }
 
+    /* Matches the dev panel's own bar. Same caveat: these are ignored the moment
+       scrollbar-width or scrollbar-color is set on the element, so the standard
+       properties live in the @supports block below. */
+    .results::-webkit-scrollbar {
+        width: 10px;
+    }
+    .results::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    .results::-webkit-scrollbar-thumb {
+        background: #0df3;
+        border-radius: 5px;
+        /* Transparent border plus content-box clipping insets the thumb without
+           narrowing the track, so the hit area stays a comfortable 10px */
+        border: 2px solid transparent;
+        background-clip: content-box;
+    }
+    .results::-webkit-scrollbar-thumb:hover {
+        background: #0dfa;
+        background-clip: content-box;
+    }
+
+    /* Firefox, which has no pseudo-elements to style */
+    @supports not selector(::-webkit-scrollbar) {
+        .results {
+            scrollbar-width: thin;
+            scrollbar-color: #0df6 transparent;
+        }
+    }
+
     /* Scrolls away with the rows rather than sticking: a sticky header over a
        translucent panel needs an opaque backing or the rows ghost through it */
     .result-head {

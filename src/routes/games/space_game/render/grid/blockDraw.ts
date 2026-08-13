@@ -1,13 +1,13 @@
 // Drawing blocks with placeholder art for the functional kinds
 
-import { Color } from "../render/color"
-import { DEFAULT_FONT } from "../render/font"
-import type { Vec2 } from "../render/camera"
-import type { ComponentKind } from "../render/grid/components"
-import type { Cell, Grid } from "../render/grid/grid"
-import { appendShape, type BlockShape } from "../render/grid/shapes"
-import { appendTriangleOutline } from "../render/grid/gridOutline"
-import { MeshBuilder } from "../render/mesh"
+import { Color } from "../color"
+import { DEFAULT_FONT } from "../font"
+import type { Vec2 } from "../camera"
+import type { ComponentKind } from "./components"
+import type { Cell, Grid } from "./grid"
+import { appendShape, type BlockShape } from "./shapes"
+import { appendTriangleOutline } from "./gridOutline"
+import { MeshBuilder } from "../mesh"
 
 /** Placeholder marks until functional blocks have real art. */
 export const KIND_LETTER: Record<ComponentKind, string> = {
@@ -28,9 +28,25 @@ export interface BlockDisplay {
     mirrored: boolean
 }
 
+/**
+ * The parts of a block these functions actually read.
+ *
+ * Narrower than Cell so the editor can preview a block it has not placed yet -
+ * a ghost has no hit points or coordinates, and inventing them just to satisfy
+ * a type would be a lie about what is being drawn.
+ */
+export interface BlockLike {
+    shape: BlockShape
+    turns: number
+    mirrored: boolean
+    kind: ComponentKind
+    facing: number
+    level: number
+}
+
 /** True when this kind draws as a placeholder rather than as its own shape. */
-export function isComponent(cell: Cell): boolean {
-    return KIND_LETTER[cell.kind] !== ""
+export function isComponent(block: BlockLike): boolean {
+    return KIND_LETTER[block.kind] !== ""
 }
 
 /**
@@ -39,10 +55,10 @@ export function isComponent(cell: Cell): boolean {
  * The solid mesh and the outline both ask this, so a functional block cannot be
  * a hexagon in one view and its underlying shape in the other.
  */
-export function displayBlock(cell: Cell): BlockDisplay {
-    return isComponent(cell)
+export function displayBlock(block: BlockLike): BlockDisplay {
+    return isComponent(block)
         ? { shape: "hexagon", turns: 0, mirrored: false }
-        : { shape: cell.shape, turns: cell.turns, mirrored: cell.mirrored }
+        : { shape: block.shape, turns: block.turns, mirrored: block.mirrored }
 }
 
 /** World position of a cell's north-west corner. */
@@ -53,19 +69,26 @@ function cellCorner(cell: Cell, cellSize: number, origin: Vec2): Vec2 {
     }
 }
 
-/** The facing bar and initial that mark a component, without its body. */
-function appendComponentGlyph(
+/**
+ * The facing bar, initial and level that mark a component, without its body.
+ *
+ * Exported so the editor's ghost can preview exactly what a click will draw -
+ * the alternative is the ghost showing the hull shape the brush last held,
+ * which is not what gets placed.
+ */
+export function appendComponentGlyph(
     builder: MeshBuilder,
-    cell: Cell,
+    block: BlockLike,
     x: number,
     y: number,
     cellSize: number,
+    color: Color = LETTER_COLOR,
 ): void {
     // edgeLine is a thin bar flush against the north edge with four orientations,
     // so rotating it by `facing` is exactly a direction marker
-    appendShape(builder, "edgeLine", cell.facing, false, x, y, cellSize, LETTER_COLOR)
+    appendShape(builder, "edgeLine", block.facing, false, x, y, cellSize, color)
 
-    const letter = KIND_LETTER[cell.kind]
+    const letter = KIND_LETTER[block.kind]
     const pixel = cellSize / 12
 
     DEFAULT_FONT.appendText(
@@ -74,7 +97,39 @@ function appendComponentGlyph(
         x + (cellSize - DEFAULT_FONT.measureText(letter, pixel)) / 2,
         y + (cellSize - DEFAULT_FONT.glyphHeight * pixel) / 2,
         pixel,
-        LETTER_COLOR,
+        color,
+    )
+
+    appendLevelDigit(builder, block, x, y, cellSize, color)
+}
+
+/**
+ * The level, in the corner opposite the facing bar's usual home.
+ *
+ * Level 1 is left blank: it is the default every component starts at, and a "1"
+ * on every block on the ship is noise that makes the upgraded ones harder to
+ * pick out rather than easier.
+ */
+function appendLevelDigit(
+    builder: MeshBuilder,
+    block: BlockLike,
+    x: number,
+    y: number,
+    cellSize: number,
+    color: Color,
+): void {
+    if (block.level <= 1) return
+
+    const text = String(block.level)
+    const pixel = cellSize / 20
+
+    DEFAULT_FONT.appendText(
+        builder,
+        text,
+        x + cellSize - DEFAULT_FONT.measureText(text, pixel) - cellSize * 0.12,
+        y + cellSize - DEFAULT_FONT.glyphHeight * pixel - cellSize * 0.1,
+        pixel,
+        color,
     )
 }
 

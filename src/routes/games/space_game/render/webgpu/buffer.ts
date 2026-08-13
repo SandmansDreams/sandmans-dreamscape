@@ -1,6 +1,6 @@
 // Buffer handler for creating and writing to GPU buffers
 
-import { Assert } from "../../dev/assert"
+import { Assert } from "../../assert"
 import type { GPU } from "./gpu"
 
 // WebGPU requires buffer sizes and write offsets to be multiples of 4 bytes

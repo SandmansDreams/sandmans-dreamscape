@@ -1,9 +1,9 @@
 <script lang="ts">
     import { onMount, untrack } from "svelte"
-    import { Assert } from "./dev/assert"
+    import { Assert } from "./assert"
     import { DEV_SCENES } from "./dev/DevScene"
     import type { StatEntry } from "./dev/performance"
-    import SettingsPanel from "./dev/SettingsPanel.svelte"
+    import SettingsPanel from "./dev/DevSettingsPanel.svelte"
     import { GPU } from "./render/webgpu/gpu"
     import { SceneRunner, type SceneDefinition } from "./render/scene"
     import {
@@ -13,8 +13,9 @@
         saveSceneValues,
         type SettingValues,
     } from "./settings/settings"
-    import BuilderPanel from "./dev/BuilderPanel.svelte"
-    import { loadBrush, saveBrush, type Brush } from "./dev/brush"
+    import BuilderUI from "./render/ui/BuilderUI.svelte"
+    import { loadBrush, type Brush } from "./render/grid/brush"
+    import type { SelectedCell, ShipInfo } from "./dev/scenes/ship-builder"
 
     const DEV_COLOR = "#87CEEB"
 
@@ -30,6 +31,11 @@
     let values = $state<SettingValues>(initial ? loadSceneValues(initial.id, initial.settings ?? {}) : {})
 
     let palette = $state<string[]>([])
+    let shipInfo = $state<ShipInfo | null>(null)
+    let selected = $state<SelectedCell | null>(null)
+
+    // Mirrors the scene's brush - the scene owns it, this only renders it. Seeded
+    // from storage so the panel is not blank in the frames before a scene loads.
     let brush = $state<Brush>(loadBrush())
 
     let fps = $state(0)
@@ -63,23 +69,6 @@
         values = loadSceneValues(definition.id, definition.settings ?? {})
         saveSceneId(definition.id)
     }
-
-    // The brush is not a setting, so it travels on its own channel. Declared
-    // after the load effect so a scene swap sends to the new instance, not the
-    // one being torn down
-    $effect(() => {
-        runner?.send("brush", brush)
-    })
-
-    let brushSaveTimer: ReturnType<typeof setTimeout> | undefined
-
-    $effect(() => {
-        const snapshot = brush
-        // Debounced for the same reason settings are: dragging emission would
-        // otherwise write localStorage on every pointer move
-        clearTimeout(brushSaveTimer)
-        brushSaveTimer = setTimeout(() => saveBrush(snapshot), 400)
-    })
 
     // Selection changes rebuild every GPU resource the scene owns
     $effect(() => {
@@ -122,11 +111,19 @@
             runner = created
             created.start()
 
+            // Pushed rather than polled: a swatch that lagged its own picker by a
+            // fifth of a second would read as broken
+            created.onPublish((key, value) => {
+                if (key === "brush") brush = value as Brush
+                if (key === "palette") palette = value as string[]
+                if (key === "shipInfo") shipInfo = value as ShipInfo
+                if (key === "selected") selected = value as SelectedCell | null
+            })
+
             ticker = setInterval(() => {
                 fps = created!.fps
                 budgetMs = created!.budgetMs
                 statLines = created!.stats.entries()
-                palette = created!.published<string[]>("palette") ?? []
             }, 200)
         })() // These 2 parentheses are important
 
@@ -145,11 +142,20 @@
 
 <div id="container">
     {#if scene?.builder}
-        <BuilderPanel bind:brush {palette} />
+        <BuilderUI
+            {brush}
+            {palette}
+            {shipInfo}
+            {selected}
+            onPatch={(patch) => runner?.send("brush", patch)}
+            onAction={(name) => runner?.send("action", name)}
+            onUpgrade={(delta) => runner?.send("upgrade", delta)}
+            onHighlight={(hex) => runner?.send("highlight", hex)}
+        />
     {/if}
 
     {#if devMode}
-        <div id="dev-panel" class:below-bar={scene?.builder} style:--DEV_COLOR={`${DEV_COLOR}`}>
+        <div id="dev-panel" class:beside-builder={scene?.builder} style:--DEV_COLOR={`${DEV_COLOR}`}>
             <header>
                 <span class="title">DEV MODE: ON</span>
             </header>
@@ -234,7 +240,10 @@
         position: absolute;
         top: 12px;
         left: 12px;
-        z-index: 1;
+        /* Above the builder's bars. They are fixed and full-width, so anything
+           lower loses its clicks to them wherever the two overlap - the panel
+           would still be visible, just inert, which reads as a broken control */
+        z-index: 4;
         font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
         color: #fff;
         background: #070b0ee6;
@@ -277,8 +286,19 @@
         background-clip: content-box;
     }
     /* The builder's top bar owns the full width of the screen, so the dev panel
-       drops below it rather than underneath it */
-    #dev-panel.below-bar { top: 92px; max-height: calc(100vh - 128px); }
+       drops below it rather than underneath it. The bar is a single row by
+       design - its palette scrolls instead of wrapping - so this offset stays
+       correct however many colours a ship has. */
+    /* Tucked into the gap the builder leaves: right of its shape column, below
+       its toolbar, above its component tray. Anchored to both vertical edges
+       rather than given a height, so the panel's own overflow-y scrolls a long
+       settings list inside whatever room is left. */
+    #dev-panel.beside-builder {
+        top: 116px;
+        left: 150px;
+        bottom: 120px;
+        max-height: none;
+    }
 
     /* Firefox, which has no pseudo-elements to style */
     @supports not selector(::-webkit-scrollbar) {

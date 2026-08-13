@@ -83,7 +83,8 @@ export class Camera {
         return out
     }
 
-    fit( // Moves camera to a world rect and zoms so it fits (ignores rotation)
+    /** Moves camera to a world rect and zooms so it fits (ignores rotation) */
+    fit(
         left: number,
         top: number,
         right: number,

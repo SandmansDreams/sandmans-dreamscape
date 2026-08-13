@@ -62,6 +62,7 @@ export class SceneRunner {
     private readonly loop = new FrameLoop()
     private readonly timer: GpuTimer
     private readonly channel = new Map<string, unknown>()
+    private listener: ((key: string, value: unknown) => void) | null = null
 
     private instance: SceneInstance | null = null
     private values: SettingValues = {}
@@ -77,9 +78,17 @@ export class SceneRunner {
     get budgetMs(): number { return this.loop.budgetMs }
     get gpuTimingSupported(): boolean { return this.timer.supported }
 
-    /** Whatever the current scene last published under `key`. */
-    published<T>(key: string): T | undefined {
-        return this.channel.get(key) as T | undefined
+    /**
+     * Called the moment a scene publishes, instead of waiting for the next poll.
+     *
+     * `published()` is still there for anything happy to read on a ticker. This
+     * exists for state the UI mirrors live: a swatch that lagged its own picker
+     * by a fifth of a second reads as broken.
+     *
+     * One listener, because there is one dev page. A second call replaces the first.
+     */
+    onPublish(listener: (key: string, value: unknown) => void): void {
+        this.listener = listener
     }
 
     load(definition: SceneDefinition, values: SettingValues): void {
@@ -99,7 +108,10 @@ export class SceneRunner {
             gpu: this.gpu,
             canvas: this.gpu.canvas,
             stats: this.stats,
-            publish: (key, value) => this.channel.set(key, value),
+            publish: (key, value) => {
+                this.channel.set(key, value)
+                this.listener?.(key, value)
+            },
         })
 
         // Force resize() on the new scene's first frame

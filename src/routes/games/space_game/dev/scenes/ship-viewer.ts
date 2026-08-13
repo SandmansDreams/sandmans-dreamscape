@@ -13,12 +13,12 @@ import { INSTANCED_2D } from "../../render/shaders/instanced2d"
 import { MESH_2D } from "../../render/shaders/mesh2d"
 import { type ActionsOf, type SearchColumn, type SettingsSchema, type ValuesOf } from "../../settings/settings"
 import type { DevSceneDefinition } from "../DevScene"
-import { downloadText } from "../download"
+import { downloadText } from "../../download"
 import { shipToText } from "../../game/shipJson"
 import { appendGridOutline } from "../../render/grid/gridOutline"
 import { Color } from "../../render/color"
-import { appendComponentGlyphOutlines, appendLayer, displayBlock } from "../blockDraw"
-import { PointerInput } from "../input"
+import { appendComponentGlyphOutlines, appendLayer, displayBlock } from "../../render/grid/blockDraw"
+import { PointerInput } from "../../game/input"
 
 const DEFAULT_WIREFRAME_COLOR = Color.from("#00fbff")
 const LABEL_COLOR = Color.from("#797979")
@@ -71,6 +71,7 @@ const SETTINGS = {
 
     pickerSeparator: { type: "separator", label: "Settings"},
 
+    resolution: { type: "range", label: "Resolution", default: 1, min: 0.05, max: 1, step: 0.05 },
     spacing:   { type: "range", label: "Spacing", default: 1.0, min: 0, max: 3.0, step: 0.1 },
     origin:    { type: "selection", label: "Origin", default: "mass", options: ["mass", "bounds"], display: "segmented" },
     spin:      { type: "range", label: "Spin", default: 0.2, min: 0, max: 2, step: 0.05 },
@@ -260,6 +261,7 @@ class ShipViewer implements SceneInstance<ViewerValues> {
     update(dt: number, settings: ViewerValues): void {
         this.elapsed += dt
         this.settings = settings
+        this.context.gpu.resolutionScale = settings.resolution
 
         // Before the rebuild guard: that returns early on an unchanged settings
         // key, which would skip every per-frame input read below it
@@ -289,6 +291,8 @@ class ShipViewer implements SceneInstance<ViewerValues> {
     }
 
     dispose(): void {
+        this.context.gpu.resolutionScale = 1
+
         this.input.destroy()
 
         this.disposeMeshes()

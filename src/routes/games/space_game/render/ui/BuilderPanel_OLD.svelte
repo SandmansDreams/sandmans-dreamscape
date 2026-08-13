@@ -1,22 +1,23 @@
 <script lang="ts">
-    import { shapeSvgPath } from "./shapeSVG"
-    import { DEFAULT_BRUSH, type Brush } from "./brush"
-    import { DRAWN_SHAPES } from "../render/grid/palette"
-    import { SHIP_LAYERS } from "../render/grid/layers"
-    import { COMPONENT_KINDS, maxLevel, type ComponentKind } from "../render/grid/components"
-    import { turnCount, variantCount, type BlockShape } from "../render/grid/shapes"
+    import { shapeSvgPath } from "../shapeSVG"
+    import { DEFAULT_BRUSH, type Brush } from "../grid/brush"
+    import { DRAWN_SHAPES } from "../grid/palette"
+    import { SHIP_LAYERS } from "../grid/layers"
+    import { COMPONENT_KINDS, maxLevel, type ComponentKind } from "../grid/components"
+    import { turnCount, variantCount, type BlockShape } from "../grid/shapes"
 
     /**
-     * The ship editor's brush.
+     * The ship editor's controls.
      *
-     * Owned here rather than in the settings bag, so a field can be the type that
-     * suits it - facing is a plain 0-3 rather than the string a selection setting
-     * would have forced - and so there is only ever one control per property.
+     * Owns nothing. `brush` is the scene's, rendered here; every control asks for
+     * a change through onPatch and waits to be told what the brush became. That
+     * is why there is no local copy to fall out of step with the scene.
      */
-    let { brush = $bindable(), palette = [] }: {
+    let { brush, palette = [], onPatch }: {
         brush: Brush
         /** Hex colors currently used in the ship, published by the scene. */
         palette?: string[]
+        onPatch: (patch: Partial<Brush>) => void
     } = $props()
 
     const FACINGS = ["N", "E", "S", "W"] as const
@@ -25,15 +26,15 @@
     /**
      * Which row the bottom bar shows.
      *
-     * A view choice only. The brush carries a shape and a component kind at all
-     * times, so switching tabs never changes what would be placed - it changes
-     * which half of it you can reach.
+     * The one piece of state that genuinely belongs here: it is a view choice, not
+     * part of the brush. The brush carries a shape and a component kind at all
+     * times, so switching tabs never changes what would be placed.
      */
     let tab = $state<"blocks" | "components">("blocks")
 
+    /** Requested, not applied. The scene decides, publishes, and this rerenders. */
     function set(patch: Partial<Brush>) {
-        // Replaced rather than mutated, so the parent's effect sees a new object
-        brush = { ...brush, ...patch }
+        onPatch(patch)
     }
 
     function selectShape(shape: BlockShape) {
@@ -147,7 +148,7 @@
             </div>
         {/if}
 
-        <button onclick={() => (brush = { ...DEFAULT_BRUSH })}>Reset</button>
+        <button onclick={() => onPatch(DEFAULT_BRUSH)}>Reset</button>
     </div>
 
     <div id="spacer"></div>
@@ -312,7 +313,15 @@
         opacity: 0.8;
         text-transform: uppercase;
     }
-    .palette { flex-wrap: wrap; max-width: 30vw; }
+    /* Scrolls rather than wraps: a wrapping palette makes the whole bar taller as
+       a ship gains colours, and anything positioned below it has no fixed height
+       to clear */
+    .palette {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        max-width: 28vw;
+        padding-bottom: 2px;
+    }
     .chip {
         width: 28px;
         height: 28px;
@@ -432,6 +441,37 @@
         gap: 4px;
         font-size: 14px;
         flex-shrink: 0;
+    }
+
+    /* Chrome and Safari. These are ignored the moment scrollbar-width or
+       scrollbar-color is set on the same element, which is why the standard
+       properties are quarantined in the @supports block below. */
+    #bottom-bar-options::-webkit-scrollbar {
+        height: 12px;
+    }
+    #bottom-bar-options::-webkit-scrollbar-track {
+        background: rgba(0, 191, 255, 0.06);
+        border-radius: 6px;
+    }
+    #bottom-bar-options::-webkit-scrollbar-thumb {
+        background: var(--ui-background);
+        border-radius: 6px;
+        /* Transparent border plus content-box clipping insets the thumb without
+           narrowing the track, so the hit area stays a comfortable 12px */
+        border: 3px solid transparent;
+        background-clip: content-box;
+    }
+    #bottom-bar-options::-webkit-scrollbar-thumb:hover {
+        background: rgba(0, 255, 64, 0.5);
+        background-clip: content-box;
+    }
+
+    /* Firefox, which has no pseudo-elements to style */
+    @supports not selector(::-webkit-scrollbar) {
+        #bottom-bar-options {
+            scrollbar-width: thin;
+            scrollbar-color: rgba(0, 191, 255, 0.5) rgba(0, 191, 255, 0.06);
+        }
     }
 
     #bottom-bar-right {

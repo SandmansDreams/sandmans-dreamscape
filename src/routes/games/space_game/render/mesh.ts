@@ -1,6 +1,6 @@
 // World-space geometry: a CPU-side triangle accumulator and the GPU buffer it uploads to
 
-import { Assert } from "../dev/assert"
+import { Assert } from "../assert"
 import { Buffer } from "./webgpu/buffer"
 import type { Frame } from "./frame"
 import type { GPU } from "./webgpu/gpu"

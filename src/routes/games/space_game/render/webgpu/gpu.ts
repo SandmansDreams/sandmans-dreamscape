@@ -1,9 +1,14 @@
 // Provides information for rendering including device information and canvas context
 
 import { devicePixelRatio } from "svelte/reactivity/window" // Svelte reactive version of the built-in dpr
-import { Assert } from "../../dev/assert"
+import { Assert } from "../../assert"
 import { COLOR_BLACK, Frame } from "../frame"
 import type { GpuTimer } from "../timing"
+
+/** 0 is an invalid texture size, and anything over the device limit throws on the next frame. */
+function clampSize(value: number, max: number): number {
+    return Math.max(1, Math.min(Math.round(value), max))
+}
 
 export class GPU {
     readonly canvas: HTMLCanvasElement
@@ -13,6 +18,12 @@ export class GPU {
 
     private readonly maxSize: number
     private readonly observer: ResizeObserver
+
+    // The size the canvas actually occupies, in device pixels, before scaling.
+    // Kept so a change to resolutionScale can re-apply without a resize event.
+    private nativeWidth = 1
+    private nativeHeight = 1
+    private scale = 1
 
     private constructor(
         canvas: HTMLCanvasElement,
@@ -95,14 +106,42 @@ export class GPU {
         return this.canvas.width / this.canvas.height
     }
 
+    /** Records the size the canvas wants. The scale decides what it actually gets. */
     private resize(width: number, height: number): void {
-        // 0 is an invalid texture size, anything over the device limit throws on the next frame
-        this.canvas.width = Math.max(1, Math.min(Math.round(width), this.maxSize))
-        this.canvas.height = Math.max(1, Math.min(Math.round(height), this.maxSize))
+        this.nativeWidth = width
+        this.nativeHeight = height
+        this.applySize()
+    }
+
+    private applySize(): void {
+        this.canvas.width = clampSize(this.nativeWidth * this.scale, this.maxSize)
+        this.canvas.height = clampSize(this.nativeHeight * this.scale, this.maxSize)
     }
 
     destroy(): void {
         this.observer.disconnect()
         this.device.destroy()
+    }
+
+    /**
+     * Drawing-buffer size as a fraction of the canvas's device pixels.
+     *
+     * 1 is native. Below that the scene renders into a smaller buffer and the
+     * browser stretches it on display - a performance dial, and with the canvas's
+     * `image-rendering: pixelated` a deliberate chunky look rather than a blur.
+     * Above 1 is supersampling: smoother edges for quadratically more pixels.
+     */
+    get resolutionScale(): number {
+        return this.scale
+    }
+
+    set resolutionScale(value: number) {
+        // Clamped rather than trusted: the caller is usually a slider, and 0 gives
+        // a 1x1 buffer while something huge throws on the next frame
+        const clamped = Math.min(4, Math.max(0.05, value))
+        if (clamped === this.scale) return
+
+        this.scale = clamped
+        this.applySize()
     }
 }

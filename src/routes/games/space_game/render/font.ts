@@ -24,7 +24,7 @@
 */
 
 import { browser } from "$app/environment"
-import { Assert } from "../dev/assert"
+import { Assert } from "../assert"
 import type { MeshBuilder } from "./mesh"
 import type { Color } from "./color"
 

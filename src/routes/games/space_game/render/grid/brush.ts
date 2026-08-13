@@ -1,11 +1,15 @@
 // What the ship editor is about to place
 
-import { DEFAULT_KIND, type ComponentKind } from "../render/grid/components"
-import type { ShipLayer } from "../render/grid/layers"
-import type { BlockShape } from "../render/grid/shapes"
-import { loadStore, saveStore } from "../settings/storage"
+import { DEFAULT_KIND, type ComponentKind } from "./components"
+import type { ShipLayer } from "./layers"
+import type { BlockShape } from "./shapes"
+import { loadStore, saveStore } from "../../settings/storage"
 
-export type BrushTool = "paint" | "erase"
+/**
+ * `select` is the "look, do not touch" tool: clicking still picks the cell the
+ * info panel describes, but nothing is placed or removed.
+ */
+export type BrushTool = "paint" | "erase" | "select"
 
 /**
  * The editor's brush.

@@ -1,4 +1,4 @@
-import { Assert } from "../../dev/assert"
+import { Assert } from "../../assert"
 import type { GPU } from "./gpu"
 import type { Shader } from "./shader"
 

@@ -1,6 +1,6 @@
 // A sparse map of blocks on an integer lattice. No units, no GPU.
 
-import { Assert } from "../../dev/assert"
+import { Assert } from "../../assert"
 import type { Vec2 } from "../camera"
 import { Color } from "../color"
 import { normalizeTurns, type BlockShape } from "./shapes"

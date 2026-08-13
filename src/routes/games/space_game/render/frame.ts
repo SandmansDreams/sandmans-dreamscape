@@ -1,6 +1,6 @@
 // Create command encoder and bring it all together per-frame?
 
-import { Assert } from "../dev/assert"
+import { Assert } from "../assert"
 import type { Buffer } from "./webgpu/buffer"
 import type { GPU } from "./webgpu/gpu"
 import type { Pipeline } from "./webgpu/pipeline"

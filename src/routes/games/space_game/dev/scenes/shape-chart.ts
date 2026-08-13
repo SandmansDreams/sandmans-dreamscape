@@ -28,10 +28,6 @@ type ChartMode = ChartValues["mode"]
 const BACKDROP_COLOR = Color.rgb(0.10, 0.10, 0.10)
 const LABEL_COLOR = Color.rgb(0.60, 0.60, 0.60)
 
-// Shared with the shape-test ship, so a block here and the same block there are
-// always the same color
-const DRAWN = DRAWN_SHAPES
-
 /** One turn's position inside a block, as rows of turn numbers. */
 type Arrangement = readonly (readonly number[])[]
 
@@ -120,7 +116,7 @@ function textHeight(pixel: number): number {
 /** Widest shape name, so the label column fits the longest one. */
 function labelColumnWidth(layout: ChartLayout): number {
     let widest = 0
-    for (const shape of DRAWN) {
+    for (const shape of DRAWN_SHAPES) {
         widest = Math.max(widest, DEFAULT_FONT.measureText(shape, layout.fontPixel))
     }
     return widest + layout.columnGap
@@ -287,7 +283,7 @@ class ShapeChart implements SceneInstance<ChartValues> {
         const rowStep = blockH + layout.rowGap
         const firstRowY = rowStep
 
-        DRAWN.forEach((shape, index) => {
+        DRAWN_SHAPES.forEach((shape, index) => {
             const y = firstRowY + index * rowStep
             const color = settings.palette ? shapeColor(shape) : Color.from(settings.color)
 
@@ -326,7 +322,7 @@ class ShapeChart implements SceneInstance<ChartValues> {
             top: 0,
             right: Math.max(mirroredX + blockW, 1),
             // Trailing rowGap is not part of the chart
-            bottom: Math.max(firstRowY + DRAWN.length * rowStep - layout.rowGap, 1),
+            bottom: Math.max(firstRowY + DRAWN_SHAPES.length * rowStep - layout.rowGap, 1),
         }
     }
 }
