@@ -203,6 +203,7 @@
   },
   "active": "d5971898faa58106",
   "lastOpenFiles": [
+    "assets/fonts/SpaceGameSpheron_mono_10x10.png",
     "assets/ships/node_modules",
     "assets/ships/test.json",
     "assets/ships/shape-test.json",
@@ -214,7 +215,6 @@
     "dev/scenes/ship-viewer.ts",
     "dev/scenes/ship-viewer_VIBED.ts",
     "assets/ships/test.ts",
-    "dev/shapeSVG.test.ts",
     "_notes/Claude Plans/6 Actual Game Design — Ship editor and JSON round-trip.md",
     "_notes/Claude Plans/7 Actual Game Design — Ship builder UI.md",
     "_notes/Claude Plans/5 WebGPU 2D render layer — Block grid, shapes and hulls.md",
