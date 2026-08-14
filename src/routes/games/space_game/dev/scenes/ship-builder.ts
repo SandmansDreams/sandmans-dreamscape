@@ -816,12 +816,16 @@ class ShipBuilder implements SceneInstance<EditorValues> {
      */
     private rebuildMarks(): void {
         const brush = this.brush
-        const key = `${this.ship.geometryRevision}|${brush.layer}|${brush.kind}|${brush.facing}`
+        const key = `${this.ship.geometryRevision}|${brush.layer}|${brush.kind}|${brush.facing}|${brush.tool}`
         if (key === this.marksKey) return
         this.marksKey = key
 
         this.marks?.destroy()
         this.marks = null
+
+        // Marks answer "where could this go", which is a question only the paint
+        // tool is asking. Erasing and selecting act on what is already there.
+        if (brush.tool !== "paint") return
 
         const bounds = this.ship.bounds
         const out: number[] = []

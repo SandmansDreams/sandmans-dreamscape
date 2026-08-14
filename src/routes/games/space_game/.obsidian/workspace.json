@@ -203,6 +203,7 @@
   },
   "active": "d5971898faa58106",
   "lastOpenFiles": [
+    "assets/ships/Scooner.json",
     "render/ui/BuilderUI.svelte",
     "render/ui/BuilderPanel_OLD.svelte",
     "render/ui/f",
@@ -213,7 +214,6 @@
     "render/grid/blockDraw.ts",
     "render/grid/brush.ts",
     "render/shapeSVG.ts",
-    "render/shapeSVG.test.ts",
     "assets/fonts/SpaceGameSpheron_mono_10x10.png",
     "CLAUDE.md",
     "_notes/Claude Plans/6 Actual Game Design — Ship editor and JSON round-trip.md",

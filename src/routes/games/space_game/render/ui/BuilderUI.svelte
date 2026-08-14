@@ -54,6 +54,14 @@
     }
 
     /**
+     * True while the brush would actually place what the pickers are showing.
+     *
+     * Erase and select act on blocks already down, so highlighting a shape or a
+     * placement during either would advertise a choice that changes nothing.
+     */
+    let picking = $derived(brush.tool === "paint")
+
+    /**
      * Switches shape, carrying the rotation when it still means something.
      *
      * A wedge's turn 3 is meaningless on a shape with one turn, so the rotation
@@ -64,7 +72,9 @@
         const count = turnCount(shape)
         const carried = count === turnCount(brush.shape) ? brush.turns % count : 0
 
-        set({ shape, turns: carried })
+        // Back to paint, as picking a placement does: choosing a shape while the
+        // brush sits on erase would otherwise light nothing up and do nothing
+        set({ shape, turns: carried, tool: "paint" })
     }
 
     /**
@@ -158,23 +168,37 @@
 
 <div id="build-ui">
     <div id="top-panel" class="panel">
+        <div class="group">
+            {#each TOOLS as name (name)}
+                <button class={brush.tool === name ? "active" : ""} onclick={() => set({ tool: name })}>
+                    {name}
+                </button>
+            {/each}
+        </div>
 
-        {#each DRAWN_SHAPES as shape (shape)}
-            <button
-                class={`shape-swatch wide ${brush.shape === shape ? "active" : ""}`}
-                onclick={() => selectShape(shape)}
-                title={shape}
-                aria-label={shape}
-            >
-                <svg class="shape-svg" viewBox="0 0 100 100" aria-hidden="true">
-                    <path
-                        d={shapeSvgPath(shape, swatchTurns(shape), swatchMirrored(shape))}
-                        fill={brush.color}
-                    />
-                </svg>
-                <span class="component-name">{shape}</span>
-            </button>
-        {/each}
+        <span class="divider"></span>
+
+        <div class="group">
+            <button onclick={() => onAction("undo")}>undo</button>
+            <button onclick={() => onAction("redo")}>redo</button>
+            <button onclick={() => onAction("clearLayer")}>clear layer</button>
+            <button onclick={() => onAction("clearAll")}>clear all</button>
+        </div>
+
+        <span class="divider"></span>
+
+        <div class="group">
+            <button onclick={() => onAction("upload")}>upload</button>
+            <button onclick={() => onAction("download")}>download</button>
+        </div>
+
+        <span class="divider"></span>
+
+        <div class="group hints">
+            <span><b>R</b> rotate</span>
+            <span><b>M</b> mirror</span>
+            <span><b>L</b> level</span>
+        </div>
     </div>
 
     <div id="draw-panel" class="panel">
@@ -200,7 +224,7 @@
         <div id="placements">
             {#each COMPONENT_KINDS as kind (kind)}
                 <button
-                    class={`placement-swatch ${brush.kind === kind ? "active" : ""}`}
+                    class={`placement-swatch ${picking && brush.kind === kind ? "active" : ""}`}
                     onclick={() => selectKind(kind)}
                     onmouseenter={() => (hoveredKind = kind)}
                     onmouseleave={() => (hoveredKind = null)}
@@ -326,38 +350,22 @@
     </div>
 
     <div id="bottom-panel" class="panel">
-        <div class="group">
-            {#each TOOLS as name (name)}
-                <button class={brush.tool === name ? "active" : ""} onclick={() => set({ tool: name })}>
-                    {name}
-                </button>
-            {/each}
-        </div>
-
-        <span class="divider"></span>
-
-        <div class="group">
-            <button onclick={() => onAction("undo")}>undo</button>
-            <button onclick={() => onAction("redo")}>redo</button>
-            <button onclick={() => onAction("clearLayer")}>clear layer</button>
-            <button onclick={() => onAction("clearAll")}>clear all</button>
-        </div>
-
-        <span class="divider"></span>
-
-        <div class="group">
-            <button onclick={() => onAction("upload")}>upload</button>
-            <button onclick={() => onAction("download")}>download</button>
-        </div>
-
-        <span class="divider"></span>
-
-        <div class="group hints">
-            <span><b>R</b> rotate</span>
-            <span><b>M</b> mirror</span>
-            <span><b>L</b> level</span>
-        </div>
-    
+        {#each DRAWN_SHAPES as shape (shape)}
+            <button
+                class={`shape-swatch wide ${picking && brush.shape === shape ? "active" : ""}`}
+                onclick={() => selectShape(shape)}
+                title={shape}
+                aria-label={shape}
+            >
+                <svg class="shape-svg" viewBox="0 0 100 100" aria-hidden="true">
+                    <path
+                        d={shapeSvgPath(shape, swatchTurns(shape), swatchMirrored(shape))}
+                        fill={brush.color}
+                    />
+                </svg>
+                <span class="component-name">{shape}</span>
+            </button>
+        {/each}
     </div>
 </div>
 
@@ -445,10 +453,9 @@
         left: 50%;
         transform: translateX(-50%);
         display: flex;
-        gap: 6px;
-        padding: 8px;
-        max-width: 58vw;
-        overflow-x: auto;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 12px;
     }
     .group { display: flex; gap: 5px; align-items: center; }
     .divider {
@@ -518,6 +525,35 @@
     .shape-swatch:hover { background: rgba(0, 191, 255, 0.2); }
     .shape-swatch.active { background: rgba(0, 255, 64, 0.22); }
     .shape-svg { width: 100%; height: 100%; display: block; }
+
+    /* The bottom tray runs sideways, so its swatches are fixed-width columns with
+       a name under the art rather than cells in a grid */
+    .shape-swatch.wide {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+        width: 62px;
+        flex-shrink: 0;
+        aspect-ratio: auto;
+        border-radius: 5px;
+    }
+    .shape-swatch.wide .shape-svg { width: 30px; height: 30px; }
+
+    /* Two across, same square cells as the shapes had - a placement is picked the
+       same way a shape is, and the column is only wide enough for two */
+    #placements { display: grid; grid-template-columns: repeat(2, 1fr); }
+    .placement-swatch {
+        border: 1px solid var(--ui-separator);
+        border-radius: 0;
+        width: 100%;
+        margin: 0;
+        aspect-ratio: 1 / 1;
+        padding: 4px;
+        background: transparent;
+    }
+    .placement-swatch:hover { background: rgba(0, 191, 255, 0.2); }
+    .placement-swatch.active { background: rgba(0, 255, 64, 0.22); }
 
     #levels { display: flex; flex-direction: column; }
     .level-swatch {
@@ -608,9 +644,10 @@
         left: 50%;
         transform: translateX(-50%);
         display: flex;
-        align-items: center;
-        gap: 10px;
-        padding: 8px 12px;
+        gap: 6px;
+        padding: 8px;
+        max-width: 62vw;
+        overflow-x: auto;
     }
     .component-swatch {
         position: relative;
