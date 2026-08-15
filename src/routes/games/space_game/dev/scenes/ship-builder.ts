@@ -4,7 +4,7 @@ import { shipFromText, shipToText } from "../../game/shipJson"
 import { Camera, CameraBinding, type Vec2 } from "../../render/camera"
 import { Color } from "../../render/color"
 import type { Frame } from "../../render/frame"
-import { maxLevel, type ComponentKind } from "../../render/grid/components"
+import { componentById, kindOf, maxLevel } from "../../render/grid/components"
 import type { Cell } from "../../render/grid/grid"
 import { SHIP_LAYERS, type ShipLayer } from "../../render/grid/layers"
 import { appendShape, type BlockShape } from "../../render/grid/shapes"
@@ -91,7 +91,10 @@ export interface SelectedCell {
     row: number
     layer: ShipLayer
     shape: BlockShape
-    kind: ComponentKind
+    /** A registry id. */
+    type: string
+    /** The type's display name, so the panel does not repeat the lookup. */
+    typeName: string
     level: number
     maxLevel: number
     turns: number
@@ -120,7 +123,7 @@ function ghostCell(brush: Brush, facing: number): BlockLike {
         shape: brush.shape,
         turns: brush.turns,
         mirrored: brush.mirrored,
-        kind: brush.kind,
+        type: brush.type,
         level: brush.level,
         facing,
     }
@@ -510,7 +513,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         const cell = at ? this.ship.layers[at.layer].get(at.col, at.row) : undefined
 
         const key = cell && at
-            ? `${at.layer},${at.col},${at.row},${cell.shape},${cell.kind},${cell.level},${cell.turns},${cell.mirrored},${cell.facing},${cell.color.hex}`
+            ? `${at.layer},${at.col},${at.row},${cell.shape},${cell.type},${cell.level},${cell.turns},${cell.mirrored},${cell.facing},${cell.color.hex}`
             : ""
 
         if (key === this.selectionKey) return
@@ -531,9 +534,10 @@ class ShipBuilder implements SceneInstance<EditorValues> {
             row: at.row,
             layer: at.layer,
             shape: cell.shape,
-            kind: cell.kind,
+            type: cell.type,
+            typeName: componentById(cell.type).name,
             level: cell.level,
-            maxLevel: maxLevel(cell.kind),
+            maxLevel: maxLevel(cell.type),
             turns: cell.turns,
             mirrored: cell.mirrored,
             facing: cell.facing,
@@ -546,7 +550,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
     }
 
     /**
-     * Re-levels the selected block, clamped to what its kind actually has.
+     * Re-levels the selected block, clamped to what its type actually has.
      *
      * Goes through set() rather than assigning `cell.level`, because the level is
      * what hit points and mass are derived from - writing the field alone would
@@ -560,14 +564,14 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         const cell = grid.get(at.col, at.row)
         if (!cell) return
 
-        const level = Math.min(maxLevel(cell.kind), Math.max(1, cell.level + delta))
+        const level = Math.min(maxLevel(cell.type), Math.max(1, cell.level + delta))
         if (level === cell.level) return
 
         this.pushUndo()
         grid.set(at.col, at.row, cell.shape, {
             turns: cell.turns,
             mirrored: cell.mirrored,
-            kind: cell.kind,
+            type: cell.type,
             level,
             facing: cell.facing,
             color: cell.color,
@@ -591,14 +595,14 @@ class ShipBuilder implements SceneInstance<EditorValues> {
 
         // The same call that drew the marks, so what is offered and what is
         // accepted cannot drift apart
-        if (!canPlaceAt(this.ship, brush.layer, col, row, brush.kind).ok) return
+        if (!canPlaceAt(this.ship, brush.layer, col, row, brush.type).ok) return
         if (this.matchesBrush(grid.get(col, row))) return
 
         grid.set(col, row, brush.shape, {
             turns: brush.turns,
             mirrored: brush.mirrored,
-            kind: brush.kind,
-            level: Math.min(brush.level, maxLevel(brush.kind)),
+            type: brush.type,
+            level: Math.min(brush.level, maxLevel(brush.type)),
             facing: this.facingFor(col, row),
             color: Color.from(brush.color),
             emission: brush.emission,
@@ -613,7 +617,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
      * brush happened to be left pointing.
      */
     private facingFor(col: number, row: number): number {
-        return this.brush.kind === "thruster"
+        return kindOf(this.brush.type) === "thruster"
             ? bestThrusterFacing(this.ship, col, row, this.brush.facing)
             : this.brush.facing
     }
@@ -632,7 +636,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
             && cell.shape === brush.shape
             && cell.turns === brush.turns
             && cell.mirrored === brush.mirrored
-            && cell.kind === brush.kind
+            && cell.type === brush.type
             && cell.level === brush.level
             && cell.facing === brush.facing
             && cell.emission === brush.emission
@@ -816,7 +820,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
      */
     private rebuildMarks(): void {
         const brush = this.brush
-        const key = `${this.ship.geometryRevision}|${brush.layer}|${brush.kind}|${brush.facing}|${brush.tool}`
+        const key = `${this.ship.geometryRevision}|${brush.layer}|${brush.type}|${brush.facing}|${brush.tool}`
         if (key === this.marksKey) return
         this.marksKey = key
 
@@ -832,7 +836,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
 
         for (let row = (bounds?.minRow ?? 0) - MARGIN; row <= (bounds?.maxRow ?? 0) + MARGIN; row++) {
             for (let col = (bounds?.minCol ?? 0) - MARGIN; col <= (bounds?.maxCol ?? 0) + MARGIN; col++) {
-                if (!canPlaceAt(this.ship, brush.layer, col, row, brush.kind).ok) continue
+                if (!canPlaceAt(this.ship, brush.layer, col, row, brush.type).ok) continue
                 appendMark(out, col, row, this.origin)
             }
         }
@@ -851,10 +855,10 @@ class ShipBuilder implements SceneInstance<EditorValues> {
      */
     private rebuildCursor(col: number, row: number): void {
         const brush = this.brush
-        const legal = canPlaceAt(this.ship, brush.layer, col, row, brush.kind).ok
+        const legal = canPlaceAt(this.ship, brush.layer, col, row, brush.type).ok
         const key = `${col},${row},${this.input.pointer.over},${legal},` +
             `${brush.shape},${brush.turns},${brush.mirrored},${brush.tool},${brush.color},` +
-            `${brush.kind},${brush.level},${brush.facing},${this.ship.geometryRevision}`
+            `${brush.type},${brush.level},${brush.facing},${this.ship.geometryRevision}`
 
         if (key === this.hoverKey) return
         this.hoverKey = key

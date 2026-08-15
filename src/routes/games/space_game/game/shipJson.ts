@@ -1,9 +1,11 @@
 import {
     canPlace,
-    DEFAULT_KIND,
+    componentById,
+    componentsOfKind,
+    DEFAULT_TYPE,
+    findComponent,
     isComponentKind,
     statsFor,
-    type ComponentKind,
 } from "../render/grid/components"
 import type { Cell, Grid } from "../render/grid/grid"
 import { SHIP_LAYERS, type ShipLayer } from "../render/grid/layers"
@@ -12,7 +14,7 @@ import { Color } from "../render/color"
 import { Ship } from "./ship"
 import { FALLBACK_COLOR, PaletteWriter, paletteLines, readPalette } from "./palette"
 
-export const SHIP_FORMAT_VERSION = 4
+export const SHIP_FORMAT_VERSION = 6
 
 /**
  * One block.
@@ -28,7 +30,8 @@ export interface ShipCellJson {
     m?: boolean  // mirrored
     p?: string   // palette key
     e?: number   // emission
-    k?: string   // component kind
+    ty?: string  // component type, a registry id
+    k?: string   // v5 and earlier: the category, before types existed
     lv?: number  // level
     f?: number   // facing
     hp?: number  // hit points override
@@ -52,6 +55,42 @@ export interface ReadResult {
 
 const KNOWN_SHAPES: ReadonlySet<string> = new Set(BLOCK_SHAPES)
 
+/**
+ * The component a cell names, migrating a v5 category if that is all it has.
+ *
+ * v5 and earlier stored `k`, the category, because there was exactly one thing
+ * per category to store. The first type registered under a category is what
+ * those cells become - which is why the order of `REGISTRY` is load-bearing for
+ * old files, and why the plainest model of each category is listed first.
+ */
+function readType(cell: ShipCellJson, where: string, warnings: string[]): string {
+    if (cell.ty !== undefined) {
+        if (findComponent(cell.ty)) return cell.ty
+        warnings.push(`${where}: unknown type "${cell.ty}", treated as ${DEFAULT_TYPE}`)
+        return DEFAULT_TYPE
+    }
+
+    if (cell.k === undefined) return DEFAULT_TYPE
+
+    // A category that has since become a type: `battery` was a kind of its own
+    // before storage absorbed it, and the ships that shipped still say so. Tried
+    // before the category lookup so nothing has to guess which it meant.
+    if (!isComponentKind(cell.k)) {
+        if (findComponent(cell.k)) return cell.k
+
+        warnings.push(`${where}: unknown kind "${cell.k}", treated as ${DEFAULT_TYPE}`)
+        return DEFAULT_TYPE
+    }
+
+    const migrated = componentsOfKind(cell.k)[0]
+    if (migrated) return migrated.id
+
+    // A category with no types registered under it: possible only mid-refactor,
+    // but silently producing a hull block here would be a lie worth naming
+    warnings.push(`${where}: no component of kind "${cell.k}", treated as ${DEFAULT_TYPE}`)
+    return DEFAULT_TYPE
+}
+
 function cellToJson(cell: Cell, layer: ShipLayer, palette: PaletteWriter): ShipCellJson {
     const out: ShipCellJson = { c: cell.col, r: cell.row, s: cell.shape }
 
@@ -59,11 +98,11 @@ function cellToJson(cell: Cell, layer: ShipLayer, palette: PaletteWriter): ShipC
     if (cell.mirrored) out.m = true
     out.p = palette.keyFor(cell.color)
     if (cell.emission !== 0) out.e = cell.emission
-    if (cell.kind !== DEFAULT_KIND) out.k = cell.kind
+    if (cell.type !== DEFAULT_TYPE) out.ty = cell.type
     if (cell.level !== 1) out.lv = cell.level
     if (cell.facing !== 0) out.f = cell.facing
 
-    const defaults = statsFor(cell.kind, cell.level)
+    const defaults = statsFor(cell.type, cell.level)
     if (cell.hitPoints !== defaults.hitPoints) out.hp = cell.hitPoints
     // Cosmetic mass is forced to 0 on the way back in, so writing it is noise
     if (layer !== "cosmetic" && cell.mass !== defaults.mass) out.ma = cell.mass
@@ -153,15 +192,13 @@ function readCell(
         return
     }
 
-    let kind: ComponentKind = DEFAULT_KIND
-    if (cell.k !== undefined) {
-        if (isComponentKind(cell.k)) kind = cell.k
-        else warnings.push(`${where}: unknown kind "${cell.k}", treated as ${DEFAULT_KIND}`)
-    }
+    const type = readType(cell, where, warnings)
 
     // A rule violation is worth reporting but not worth deleting someone's work -
     // the editor is where placement gets enforced
-    if (!canPlace(kind, layer)) warnings.push(`${where}: ${kind} is not allowed on the ${layer} layer`)
+    if (!canPlace(type, layer)) {
+        warnings.push(`${where}: ${componentById(type).name} is not allowed on the ${layer} layer`)
+    }
 
     let color = FALLBACK_COLOR
     if (cell.p !== undefined) {
@@ -175,7 +212,7 @@ function readCell(
         mirrored: cell.m,
         color,
         emission: cell.e,
-        kind,
+        type,
         level: cell.lv,
         hitPoints: cell.hp,
         mass: cell.ma,

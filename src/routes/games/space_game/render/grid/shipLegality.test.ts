@@ -12,17 +12,17 @@ function shipWithHull(): Ship {
 describe("hull adjacency", () => {
     it("lets the first block go anywhere", () => {
         const ship = new Ship("t", "T")
-        expect(canPlaceAt(ship, "hull", 17, -4, "hull").ok).toBe(true)
+        expect(canPlaceAt(ship, "hull", 17, -4, "hull-plate").ok).toBe(true)
     })
 
     it("refuses a block that touches nothing", () => {
-        const result = canPlaceAt(shipWithHull(), "hull", 5, 5, "hull")
+        const result = canPlaceAt(shipWithHull(), "hull", 5, 5, "hull-plate")
         expect(result.ok).toBe(false)
         expect(result.reason).toContain("touch")
     })
 
     it("allows a block against an existing one", () => {
-        expect(canPlaceAt(shipWithHull(), "hull", 3, 1, "hull").ok).toBe(true)
+        expect(canPlaceAt(shipWithHull(), "hull", 3, 1, "hull-plate").ok).toBe(true)
     })
 
     it("allows repainting a block that is already there", () => {
@@ -30,32 +30,32 @@ describe("hull adjacency", () => {
         // refuse to recolor the only block on the ship
         const ship = new Ship("t", "T")
         ship.layers.hull.set(0, 0, "full")
-        expect(canPlaceAt(ship, "hull", 0, 0, "hull").ok).toBe(true)
+        expect(canPlaceAt(ship, "hull", 0, 0, "hull-plate").ok).toBe(true)
     })
 })
 
 describe("layer rules", () => {
     it("refuses a weapon on the hull layer", () => {
-        const result = canPlaceAt(shipWithHull(), "hull", 1, 1, "weapon")
+        const result = canPlaceAt(shipWithHull(), "hull", 1, 1, "autocannon")
         expect(result.ok).toBe(false)
         expect(result.reason).toContain("cannot go on")
     })
 
     it("refuses a component floating beside the hull", () => {
-        const result = canPlaceAt(shipWithHull(), "placement", 9, 9, "weapon")
+        const result = canPlaceAt(shipWithHull(), "placement", 9, 9, "autocannon")
         expect(result.ok).toBe(false)
         expect(result.reason).toContain("sit on")
     })
 
     it("allows a component on top of a hull block", () => {
-        expect(canPlaceAt(shipWithHull(), "placement", 1, 1, "weapon").ok).toBe(true)
+        expect(canPlaceAt(shipWithHull(), "placement", 1, 1, "autocannon").ok).toBe(true)
     })
 })
 
 describe("thruster edge rule", () => {
     it("allows one within reach of any edge", () => {
         // (1,2) is the bottom row of a 3x3 hull, so south is open one step away
-        expect(canPlaceAt(shipWithHull(), "coverable", 1, 2, "thruster").ok).toBe(true)
+        expect(canPlaceAt(shipWithHull(), "coverable", 1, 2, "ion-thruster").ok).toBe(true)
     })
 
     it("refuses one buried too deep", () => {
@@ -64,7 +64,7 @@ describe("thruster edge rule", () => {
         // reaches open space within the reach
         ship.layers.hull.fill(0, 0, 6, 6, "full")
 
-        const result = canPlaceAt(ship, "coverable", 3, 3, "thruster")
+        const result = canPlaceAt(ship, "coverable", 3, 3, "ion-thruster")
         expect(result.ok).toBe(false)
         expect(result.reason).toContain("edge")
     })
@@ -75,10 +75,10 @@ describe("thruster edge rule", () => {
         expect(thrusterFacings(shipWithHull(), 1, 2).sort()).toEqual([1, 2, 3])
     })
 
-    it("does not apply the rule to other kinds", () => {
+    it("does not apply the rule to other categories", () => {
         // A generator may sit anywhere on the hull, however deep
         const ship = new Ship("t", "T")
         ship.layers.hull.fill(0, 0, 2, 5, "full")
-        expect(canPlaceAt(ship, "coverable", 1, 0, "generator").ok).toBe(true)
+        expect(canPlaceAt(ship, "coverable", 1, 0, "fusion-core").ok).toBe(true)
     })
 })

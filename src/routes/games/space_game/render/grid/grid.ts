@@ -4,7 +4,7 @@ import { Assert } from "../../assert"
 import type { Vec2 } from "../camera"
 import { Color } from "../color"
 import { normalizeTurns, type BlockShape } from "./shapes"
-import { DEFAULT_KIND, statsFor, type ComponentKind } from "./components"
+import { DEFAULT_TYPE, kindOf, statsFor, type ComponentKind } from "./components"
 import type { ShipLayer } from "./layers"
 
 const DEFAULT_COLOR = Color.gray(0.6)
@@ -34,7 +34,15 @@ export interface Cell {
     emission: number
 
     // Gameplay: changing these bumps revision only
-    kind: ComponentKind
+    /**
+     * Which component this is, as a registry id.
+     *
+     * A string rather than the Component itself so a cell stays plain data: the
+     * file format writes it, an undo snapshot copies it, and neither has to know
+     * the registry exists. `kindOf` is the lookup when the category is what you
+     * actually wanted.
+     */
+    type: string
     level: number
     hitPoints: number
     mass: number
@@ -53,8 +61,9 @@ export interface CellOptions {
     mirrored?: boolean
     color?: Color
     emission?: number
-    kind?: ComponentKind
-    /** 1-based. Clamped to the levels the kind actually has. */
+    /** A registry id. Anything unknown falls back to the default type's stats. */
+    type?: string
+    /** 1-based. Clamped to the levels the type actually has. */
     level?: number
     /** Overrides the level's default. */
     hitPoints?: number
@@ -138,9 +147,9 @@ export class Grid {
             `cell (${col}, ${row}) is outside the packable range of ±${KEY_MAX}`,
         )
 
-        const kind = options.kind ?? DEFAULT_KIND
+        const type = options.type ?? DEFAULT_TYPE
         const level = options.level ?? 1
-        const defaults = statsFor(kind, level)
+        const defaults = statsFor(type, level)
 
         // Cosmetics are free by design - the doc's rule is not to punish a player
         // for wanting their ship to look good, so this is enforced here rather
@@ -155,7 +164,7 @@ export class Grid {
             mirrored: options.mirrored ?? false,
             color: options.color ?? DEFAULT_COLOR,
             emission: options.emission ?? 0,
-            kind,
+            type,
             level,
             hitPoints: options.hitPoints ?? defaults.hitPoints,
             mass,
@@ -310,14 +319,20 @@ export class Grid {
         }
     }
 
-    /** Every cell of one kind, so "where are the thrusters" is a lookup not a scan. */
+    /**
+     * Every cell of one category, so "where are the thrusters" is a lookup not a scan.
+     *
+     * Bucketed by category rather than by type because that is the question the
+     * game asks: thrust comes from every thruster, whatever model it is.
+     */
     ofKind(kind: ComponentKind): readonly Cell[] {
         if (this.byKindVersion !== this.version) {
             this.cachedByKind = new Map()
             for (const cell of this.cells.values()) {
-                const bucket = this.cachedByKind.get(cell.kind)
+                const cellKind = kindOf(cell.type)
+                const bucket = this.cachedByKind.get(cellKind)
                 if (bucket) bucket.push(cell)
-                else this.cachedByKind.set(cell.kind, [cell])
+                else this.cachedByKind.set(cellKind, [cell])
             }
             this.byKindVersion = this.version
         }

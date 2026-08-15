@@ -1,6 +1,6 @@
 // What the ship editor is about to place
 
-import { DEFAULT_KIND, type ComponentKind } from "./components"
+import { DEFAULT_TYPE, findComponent } from "./components"
 import { SHIP_LAYERS, type ShipLayer } from "./layers"
 import type { BlockShape } from "./shapes"
 import { loadStore, saveStore } from "../../settings/storage"
@@ -11,10 +11,16 @@ import { loadStore, saveStore } from "../../settings/storage"
  */
 export type BrushTool = "build" | "destroy" | "select"
 
-/** Fields whose value must be one of a known set, not merely the right type. */
-const ALLOWED: Partial<Record<keyof Brush, readonly string[]>> = {
-    tool: ["build", "destroy", "select"],
-    layer: SHIP_LAYERS,
+/**
+ * Fields that must name something real, not merely be the right type.
+ *
+ * A predicate rather than a list because `type` is checked against the registry,
+ * which no literal array could stay in step with.
+ */
+const VALID: Partial<Record<keyof Brush, (value: unknown) => boolean>> = {
+    tool: (value) => value === "build" || value === "destroy" || value === "select",
+    layer: (value) => SHIP_LAYERS.includes(value as ShipLayer),
+    type: (value) => typeof value === "string" && findComponent(value) !== null,
 }
 
 /**
@@ -31,7 +37,8 @@ export interface Brush {
     shape: BlockShape
     turns: number
     mirrored: boolean
-    kind: ComponentKind
+    /** A registry id, so the brush names a crate rather than "some storage". */
+    type: string
     level: number
     /** 0-3 as N/E/S/W. */
     facing: number
@@ -46,7 +53,7 @@ export const DEFAULT_BRUSH: Brush = {
     shape: "full",
     turns: 0,
     mirrored: false,
-    kind: DEFAULT_KIND,
+    type: DEFAULT_TYPE,
     level: 1,
     facing: 0,
     color: "#94a1b3",
@@ -72,9 +79,9 @@ export function loadBrush(): Brush {
     for (const key of Object.keys(DEFAULT_BRUSH) as (keyof Brush)[]) {
         const value = bag[key]
 
-        const allowed = ALLOWED[key]
-        if (allowed && !allowed.includes(value as string)) continue
-        
+        const valid = VALID[key]
+        if (valid && !valid(value)) continue
+
         // Same primitive type as the default is the whole check: every field is a
         // string, number or boolean, and a wrong one is not worth reasoning about
         if (typeof value === typeof DEFAULT_BRUSH[key]) (brush[key] as unknown) = value

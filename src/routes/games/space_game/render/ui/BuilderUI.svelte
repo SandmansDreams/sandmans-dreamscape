@@ -4,7 +4,10 @@
     import { DRAWN_SHAPES } from "../grid/palette"
     import { turnCount, type BlockShape } from "../grid/shapes"
     import { SHIP_LAYERS } from "../grid/layers"
-    import { canPlace, COMPONENT_KINDS, maxLevel, statsFor, type ComponentKind } from "../grid/components"
+    import {
+        canPlace, componentById, componentsOfKind, kindOf, maxLevel, statsFor,
+        type ComponentKind,
+    } from "../grid/components"
     import { KIND_LETTER } from "../grid/blockDraw"
     import type { SelectedCell, ShipInfo } from "../../dev/scenes/ship-builder"
     
@@ -45,11 +48,17 @@
         onHighlight: (hex: string | null) => void
     } = $props()
 
-    /** The kind under the cursor right now, which outranks everything else. */
-    let hoveredKind = $state<ComponentKind | null>(null)
+    /** The type under the cursor right now, which outranks everything else. */
+    let hoveredType = $state<string | null>(null)
+
+    /** The category the brush is holding, which is what the picker highlights. */
+    let brushKind = $derived(kindOf(brush.type))
 
     /** True while the brush places a machine rather than plain structure. */
-    let placingComponent = $derived(brush.kind !== "hull")
+    let placingComponent = $derived(brushKind !== "hull")
+
+    /** The models available under the brush's category. */
+    let types = $derived(componentsOfKind(brushKind))
 
     /**
      * What the bottom of the info panel talks about.
@@ -59,7 +68,7 @@
      * flashing them for only as long as the pointer rests on the button.
      */
     let describing = $derived(
-        hoveredKind ?? (selected ? null : placingComponent ? brush.kind : null),
+        hoveredType ?? (selected ? null : placingComponent ? brush.type : null),
     )
 
     /** Requested, not applied. The scene decides, publishes, and this rerenders. */
@@ -91,24 +100,39 @@
         set({ shape, turns: carried, tool: "build" })
     }
 
+    /** The model a category offers first, which is what its button selects. */
+    function firstTypeOf(kind: ComponentKind): string {
+        return componentsOfKind(kind)[0]?.id ?? brush.type
+    }
+
     /**
      * Picks a component to place.
      *
-     * Also switches to paint and to a layer the kind is allowed on: choosing a
+     * Also switches to paint and to a layer the type is allowed on: choosing a
      * thruster while the brush sits on "erase" and the cosmetic layer meant three
      * more clicks before anything could happen, and every one of them was the
      * only possible answer.
      */
-    function selectKind(kind: ComponentKind) {
-        const layers = SHIP_LAYERS.filter((layer) => canPlace(kind, layer))
+    function selectType(type: string) {
+        const layers = SHIP_LAYERS.filter((layer) => canPlace(type, layer))
         const layer = layers.includes(brush.layer) ? brush.layer : layers[0] ?? brush.layer
 
         set({
-            kind,
+            type,
             layer,
-            level: Math.min(brush.level, maxLevel(kind)),
+            level: Math.min(brush.level, maxLevel(type)),
             tool: brush.tool === "build" ? brush.tool : "build",
         })
+    }
+
+    /**
+     * Picks a category, keeping the model if the brush already holds one of them.
+     *
+     * Clicking STORAGE while a battery is in hand must not silently swap it for a
+     * crate - the category button is how you get to the tray, not a reset.
+     */
+    function selectKind(kind: ComponentKind) {
+        selectType(brushKind === kind ? brush.type : firstTypeOf(kind))
     }
 
     /**
@@ -126,9 +150,9 @@
         set({ turns: (brush.turns + 1) % turnCount(brush.shape) })
     }
 
-    /** Cycles 1..max and wraps, so one key reaches every level of the current kind. */
+    /** Cycles 1..max and wraps, so one key reaches every level of the current type. */
     function cycleLevel() {
-        set({ level: (brush.level % maxLevel(brush.kind)) + 1 })
+        set({ level: (brush.level % maxLevel(brush.type)) + 1 })
     }
 
     function step<T>(list: readonly T[], current: T, by: number): T {
@@ -136,9 +160,9 @@
         return list[(index + by + list.length) % list.length]!
     }
 
-    /** 1..max for a kind, which is what stands in for its variants. */
-    function levelsOf(kind: ComponentKind): number[] {
-        return Array.from({ length: maxLevel(kind) }, (_, index) => index + 1)
+    /** 1..max for a type, which is how far it upgrades. */
+    function levelsOf(type: string): number[] {
+        return Array.from({ length: maxLevel(type) }, (_, index) => index + 1)
     }
 
     function onKey(event: KeyboardEvent) {
@@ -236,10 +260,10 @@
         <div class="heading">PLACEMENTS</div>
         <div id="placements">
             <button 
-                class={`icon-button ${picking && brush.kind === "hull" ? "active" : ""}`} 
+                class={`icon-button ${picking && brushKind === "hull" ? "active" : ""}`} 
                 onclick={() => selectKind("hull")}
-                onmouseenter={() => (hoveredKind = "hull")}
-                onmouseleave={() => (hoveredKind = null)}
+                onmouseenter={() => (hoveredType = firstTypeOf("hull"))}
+                onmouseleave={() => (hoveredType = null)}
                 title={"hull"}
                 aria-label={"hull"}
             >
@@ -247,10 +271,10 @@
                 HULL
             </button>
             <button 
-                class={`icon-button ${picking && brush.kind === "storage" ? "active" : ""}`} 
+                class={`icon-button ${picking && brushKind === "storage" ? "active" : ""}`} 
                 onclick={() => selectKind("storage")}
-                onmouseenter={() => (hoveredKind = "storage")}
-                onmouseleave={() => (hoveredKind = null)}
+                onmouseenter={() => (hoveredType = firstTypeOf("storage"))}
+                onmouseleave={() => (hoveredType = null)}
                 title={"storage"}
                 aria-label={"storage"}
             >
@@ -258,10 +282,10 @@
                 STORAGE
             </button>
             <button 
-                class={`icon-button ${picking && brush.kind === "thruster" ? "active" : ""}`} 
+                class={`icon-button ${picking && brushKind === "thruster" ? "active" : ""}`} 
                 onclick={() => selectKind("thruster")}
-                onmouseenter={() => (hoveredKind = "thruster")}
-                onmouseleave={() => (hoveredKind = null)}
+                onmouseenter={() => (hoveredType = firstTypeOf("thruster"))}
+                onmouseleave={() => (hoveredType = null)}
                 title={"thruster"}
                 aria-label={"thruster"}
             >
@@ -269,10 +293,10 @@
                 THRUSTER
             </button>
             <button 
-                class={`icon-button ${picking && brush.kind === "generator" ? "active" : ""}`} 
+                class={`icon-button ${picking && brushKind === "generator" ? "active" : ""}`} 
                 onclick={() => selectKind("generator")}
-                onmouseenter={() => (hoveredKind = "generator")}
-                onmouseleave={() => (hoveredKind = null)}
+                onmouseenter={() => (hoveredType = firstTypeOf("generator"))}
+                onmouseleave={() => (hoveredType = null)}
                 title={"generator"}
                 aria-label={"generator"}
             >
@@ -280,10 +304,10 @@
                 GENERATOR
             </button>
             <button 
-                class={`icon-button ${picking && brush.kind === "weapon" ? "active" : ""}`} 
+                class={`icon-button ${picking && brushKind === "weapon" ? "active" : ""}`} 
                 onclick={() => selectKind("weapon")}
-                onmouseenter={() => (hoveredKind = "weapon")}
-                onmouseleave={() => (hoveredKind = null)}
+                onmouseenter={() => (hoveredType = firstTypeOf("weapon"))}
+                onmouseleave={() => (hoveredType = null)}
                 title={"weapon"}
                 aria-label={"weapon"}
             >
@@ -291,10 +315,10 @@
                 WEAPON
             </button>
             <button 
-                class={`icon-button ${picking && brush.kind === "projector" ? "active" : ""}`} 
+                class={`icon-button ${picking && brushKind === "projector" ? "active" : ""}`} 
                 onclick={() => selectKind("projector")}
-                onmouseenter={() => (hoveredKind = "projector")}
-                onmouseleave={() => (hoveredKind = null)}
+                onmouseenter={() => (hoveredType = firstTypeOf("projector"))}
+                onmouseleave={() => (hoveredType = null)}
                 title={"projector"}
                 aria-label={"projector"}
             >
@@ -303,20 +327,39 @@
             </button>
         </div>
 
+        <!-- Only shown when there is a choice to make: a category with one model
+             is already named by the heading below, and a tray of one is noise -->
+        {#if types.length > 1}
+            <div class="heading">MODEL</div>
+            <div id="types">
+                {#each types as type (type.id)}
+                    <button
+                        class={`type-row ${picking && brush.type === type.id ? "active" : ""}`}
+                        onclick={() => selectType(type.id)}
+                        onmouseenter={() => (hoveredType = type.id)}
+                        onmouseleave={() => (hoveredType = null)}
+                        title={type.name}
+                    >
+                        {type.name}
+                    </button>
+                {/each}
+            </div>
+        {/if}
+
         <!-- Only a machine has grades to choose between; structure has shapes,
              and those live in the tray along the bottom -->
         {#if placingComponent}
-            <div class="heading">{brush.kind.toUpperCase()}</div>
+            <div class="heading">{componentById(brush.type).name.toUpperCase()}</div>
             <div id="levels">
-                {#each levelsOf(brush.kind) as level (level)}
+                {#each levelsOf(brush.type) as level (level)}
                     <button
                         class={`level-swatch ${brush.level === level ? "active" : ""}`}
                         onclick={() => set({ level })}
-                        onmouseenter={() => (hoveredKind = brush.kind)}
-                        onmouseleave={() => (hoveredKind = null)}
+                        onmouseenter={() => (hoveredType = brush.type)}
+                        onmouseleave={() => (hoveredType = null)}
                     >
                         <span class="roman">L{level}</span>
-                        <span class="sub">{statsFor(brush.kind, level).hitPoints}hp</span>
+                        <span class="sub">{statsFor(brush.type, level).hitPoints}hp</span>
                     </button>
                 {/each}
             </div>
@@ -377,12 +420,14 @@
         <div id="layers">
             {#each SHIP_LAYERS as layer (layer)}
                 <!-- Disabled rather than hidden: the count is still worth reading,
-                     and a row vanishing as you switch kinds is disorienting -->
+                     and a row vanishing as you switch types is disorienting -->
                 <button
                     class={`layer-row ${brush.layer === layer ? "active" : ""}`}
                     onclick={() => set({ layer })}
-                    disabled={!canPlace(brush.kind, layer)}
-                    title={canPlace(brush.kind, layer) ? layer : `${brush.kind} cannot go on ${layer}`}
+                    disabled={!canPlace(brush.type, layer)}
+                    title={canPlace(brush.type, layer)
+                        ? layer
+                        : `${componentById(brush.type).name} cannot go on ${layer}`}
                 >
                     <span>{layer}</span>
                     <span class="count">{shipInfo?.perLayer[layer] ?? 0}</span>
@@ -390,11 +435,11 @@
             {/each}
         </div>
 
-        <!-- A hovered kind wins over the selection: you are asking about the thing
+        <!-- A hovered type wins over the selection: you are asking about the thing
              under the cursor right now, not the thing you clicked a minute ago -->
         {#if describing}
             {@const stats = statsFor(describing, brush.level)}
-            <div class="heading">{describing.toUpperCase()} L{brush.level}</div>
+            <div class="heading">{componentById(describing).name.toUpperCase()} L{brush.level}</div>
             <dl class="readout">
                 <dt>hp</dt><dd>{stats.hitPoints}</dd>
                 <dt>mass</dt><dd>{stats.mass}</dd>
@@ -406,7 +451,7 @@
                 <dt>at</dt><dd>{selected.col}, {selected.row}</dd>
                 <dt>layer</dt><dd>{selected.layer}</dd>
                 <dt>shape</dt><dd>{selected.shape}</dd>
-                <dt>kind</dt><dd>{selected.kind}</dd>
+                <dt>type</dt><dd>{selected.typeName}</dd>
                 <dt>hp</dt><dd>{selected.hitPoints}</dd>
                 <dt>mass</dt><dd>{selected.mass}</dd>
             </dl>
@@ -647,6 +692,19 @@
     }
     .placement-swatch:hover { background: rgba(0, 191, 255, 0.2); }
     .placement-swatch.active { background: rgba(0, 255, 64, 0.22); }
+
+    /* Stacked and full width, like the layer rows: a model is picked by its
+       name, and names do not fit in a swatch */
+    #types { display: flex; flex-direction: column; }
+    .type-row {
+        border-radius: 0;
+        border: 1px solid var(--ui-separator);
+        background: transparent;
+        font-size: 12px;
+        text-align: left;
+        padding: .3rem .5rem;
+    }
+    .type-row:hover { background: rgba(0, 191, 255, 0.2); }
 
     #levels { display: flex; flex-direction: column; }
     .level-swatch {

@@ -10,7 +10,7 @@ function sample(): Ship {
     ship.layers.hull.set(1, 0, "wedge", { turns: 2, color: Color.rgb(0.58, 0.63, 0.7) })
     ship.layers.hull.set(-1, 0, "halfWedge", { mirrored: true, color: Color.rgb(0.26, 0.29, 0.34) })
     ship.layers.coverable.set(0, 1, "full", {
-        kind: "thruster",
+        type: "ion-thruster",
         facing: 2,
         emission: 0.8,
         color: Color.rgb(0.26, 0.29, 0.34),
@@ -80,7 +80,7 @@ describe("round trip", () => {
         expect(ship.name).toBe("Test Ship")
 
         const thruster = ship.layers.coverable.get(0, 1)!
-        expect(thruster.kind).toBe("thruster")
+        expect(thruster.type).toBe("ion-thruster")
         expect(thruster.facing).toBe(2)
         expect(thruster.emission).toBe(0.8)
 
@@ -111,13 +111,13 @@ describe("readShip() leniency", () => {
         expect(warnings.some((w) => w.includes("banana"))).toBe(true)
     })
 
-    it("falls back to hull for an unknown kind rather than dropping the block", () => {
+    it("falls back to the default type for an unknown one rather than dropping the block", () => {
         const { ship, warnings } = readShip({
             version: SHIP_FORMAT_VERSION,
-            layers: { hull: [{ c: 0, r: 0, s: "full", k: "warp-core" }] },
+            layers: { hull: [{ c: 0, r: 0, s: "full", ty: "warp-core" }] },
         })
 
-        expect(ship.layers.hull.get(0, 0)!.kind).toBe("hull")
+        expect(ship.layers.hull.get(0, 0)!.type).toBe("hull-plate")
         expect(warnings.some((w) => w.includes("warp-core"))).toBe(true)
     })
 
@@ -134,5 +134,72 @@ describe("readShip() leniency", () => {
     it("does not throw on rubbish", () => {
         expect(() => readShip(null)).not.toThrow()
         expect(() => readShip({ layers: { hull: "nope" } })).not.toThrow()
+    })
+})
+
+describe("v5 migration", () => {
+    /** A file from when a cell named its category and there was one thing in it. */
+    function v5() {
+        return {
+            version: 5,
+            id: "old", name: "Old", creator: "SpaceGameCreator",
+            palette: {},
+            layers: {
+                hull: [{ c: 0, r: 0, s: "full" }],
+                coverable: [
+                    { c: 0, r: 1, s: "full", k: "thruster", f: 2 },
+                    { c: 1, r: 1, s: "full", k: "storage" },
+                ],
+            },
+        }
+    }
+
+    it("turns a category into the first type registered under it", () => {
+        const { ship } = readShip(v5())
+
+        expect(ship.layers.coverable.get(0, 1)!.type).toBe("ion-thruster")
+        expect(ship.layers.coverable.get(1, 1)!.type).toBe("crate")
+    })
+
+    it("rescues a category that has since become a type", () => {
+        // The shipped ships still say k:"battery" from before storage absorbed
+        // it. Reading that as "unknown" would turn every battery into hull.
+        const { ship, warnings } = readShip({
+            version: 4,
+            layers: { coverable: [{ c: 0, r: 0, s: "full", k: "battery" }] },
+        })
+
+        expect(ship.layers.coverable.get(0, 0)!.type).toBe("battery")
+        expect(warnings.some((w) => w.includes("battery"))).toBe(false)
+    })
+
+    it("keeps a cell that named no category on the default type", () => {
+        const { ship } = readShip(v5())
+
+        expect(ship.layers.hull.get(0, 0)!.type).toBe("hull-plate")
+    })
+
+    it("keeps every block, which is what a lost migration would cost", () => {
+        const { ship } = readShip(v5())
+
+        expect(ship.layers.hull.size).toBe(1)
+        expect(ship.layers.coverable.size).toBe(2)
+    })
+
+    it("carries the migrated cell's stats from its new type", () => {
+        const { ship } = readShip(v5())
+        const thruster = ship.layers.coverable.get(0, 1)!
+
+        // An ion thruster at level 1, not whatever the old category table said
+        expect(thruster.hitPoints).toBe(8)
+        expect(thruster.facing).toBe(2)
+    })
+
+    it("re-exports as the current version, cleanly", () => {
+        const { ship } = readShip(v5())
+        const { ship: again, warnings } = readShip(shipToJson(ship))
+
+        expect(warnings).toEqual([])
+        expect(again.layers.coverable.get(0, 1)!.type).toBe("ion-thruster")
     })
 })

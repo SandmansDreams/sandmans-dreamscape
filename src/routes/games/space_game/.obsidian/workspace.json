@@ -199,6 +199,7 @@
   },
   "active": "d5971898faa58106",
   "lastOpenFiles": [
+    "migrationCheck.test.ts",
     "migrate.test.ts",
     "game/__convert.test.ts",
     "render/grid/artGrid.ts",
@@ -209,7 +210,6 @@
     "game/palette.ts",
     "render/grid/__probe.test.ts",
     "render/grid/sampling.test-utils.ts",
-    "render/grid/spriteMesh.test.ts",
     "assets/icons/SpaceGame-Weapon.png",
     "assets/icons/SpaceGame-Thruster.png",
     "assets/icons/SpaceGame-Storage.png",

@@ -2,7 +2,7 @@
 // and any future validator cannot disagree about them.
 
 import type { Ship } from "../../game/ship"
-import { canPlace, type ComponentKind } from "./components"
+import { canPlace, componentById } from "./components"
 import type { ShipLayer } from "./layers"
 
 export interface Legality {
@@ -34,10 +34,12 @@ export function canPlaceAt(
     layer: ShipLayer,
     col: number,
     row: number,
-    kind: ComponentKind,
+    type: string,
 ): Legality {
-    if (!canPlace(kind, layer)) {
-        return { ok: false, reason: `${kind} cannot go on the ${layer} layer` }
+    const component = componentById(type)
+
+    if (!canPlace(type, layer)) {
+        return { ok: false, reason: `${component.name} cannot go on the ${layer} layer` }
     }
 
     const hull = ship.layers.hull
@@ -57,7 +59,8 @@ export function canPlaceAt(
         return { ok: false, reason: "must sit on a hull block" }
     }
 
-    if (kind === "thruster" && thrusterFacings(ship, col, row).length === 0) {
+    // By category, not by type: every thruster answers to the same edge rule
+    if (component.kind === "thruster" && thrusterFacings(ship, col, row).length === 0) {
         return { ok: false, reason: `a thruster must be within ${THRUSTER_REACH} blocks of an edge` }
     }
 

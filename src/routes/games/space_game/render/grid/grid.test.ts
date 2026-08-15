@@ -110,38 +110,38 @@ describe("Grid revisions", () => {
 })
 
 describe("Grid components", () => {
-    it("takes hit points and mass from the kind's level", () => {
+    it("takes hit points and mass from the type's level", () => {
         const grid = new Grid()
-        const cell = grid.set(0, 0, "full", { kind: "generator", level: 2 })
+        const cell = grid.set(0, 0, "full", { type: "fusion-core", level: 2 })
         expect(cell.hitPoints).toBe(20)
         expect(cell.mass).toBe(5)
     })
 
-    it("clamps a level past what the kind has", () => {
+    it("clamps a level past what the type has", () => {
         const grid = new Grid()
-        const cell = grid.set(0, 0, "full", { kind: "storage", level: 99 })
-        expect(cell.hitPoints).toBe(12) // storage tops out at level 2
+        const cell = grid.set(0, 0, "full", { type: "crate", level: 99 })
+        expect(cell.hitPoints).toBe(12) // a crate tops out at level 2
     })
 
     it("lets a cell override the level's defaults", () => {
         const grid = new Grid()
-        const cell = grid.set(0, 0, "full", { kind: "hull", hitPoints: 999 })
+        const cell = grid.set(0, 0, "full", { type: "hull-plate", hitPoints: 999 })
         expect(cell.hitPoints).toBe(999)
         expect(cell.mass).toBe(1) // untouched
     })
 
     it("gives cosmetic blocks no mass, whatever the caller asks for", () => {
         const grid = new Grid("cosmetic")
-        const cell = grid.set(0, 0, "full", { kind: "hull", mass: 50 })
+        const cell = grid.set(0, 0, "full", { type: "hull-plate", mass: 50 })
         expect(cell.mass).toBe(0)
         expect(grid.mass).toBe(0)
     })
 
-    it("indexes cells by kind and reindexes after a change", () => {
+    it("indexes cells by category and reindexes after a change", () => {
         const grid = new Grid()
-        grid.set(0, 0, "full", { kind: "thruster" })
-        grid.set(1, 0, "full", { kind: "thruster" })
-        grid.set(2, 0, "full", { kind: "weapon" })
+        grid.set(0, 0, "full", { type: "ion-thruster" })
+        grid.set(1, 0, "full", { type: "ion-thruster" })
+        grid.set(2, 0, "full", { type: "autocannon" })
 
         expect(grid.ofKind("thruster")).toHaveLength(2)
         expect(grid.ofKind("weapon")).toHaveLength(1)
@@ -160,8 +160,8 @@ describe("Grid.centerOfMass", () => {
 
     it("pulls toward the heavy end", () => {
         const grid = new Grid()
-        grid.set(0, 0, "full", { kind: "hull" })       // mass 1, center x 0.5
-        grid.set(3, 0, "full", { kind: "generator" })  // mass 3, center x 3.5
+        grid.set(0, 0, "full", { type: "hull-plate" })       // mass 1, center x 0.5
+        grid.set(3, 0, "full", { type: "fusion-core" })  // mass 3, center x 3.5
 
         // (0.5*1 + 3.5*3) / 4 = 2.75, well right of the bounds center at 2
         expect(grid.centerOfMass.x).toBeCloseTo(2.75)
@@ -184,8 +184,8 @@ describe("Grid.centerOfMass", () => {
 
     it("pulls toward the heavy end", () => {
         const grid = new Grid()
-        grid.set(0, 0, "full", { kind: "hull" })       // mass 1, center x 0.5
-        grid.set(3, 0, "full", { kind: "generator" })  // mass 3, center x 3.5
+        grid.set(0, 0, "full", { type: "hull-plate" })       // mass 1, center x 0.5
+        grid.set(3, 0, "full", { type: "fusion-core" })  // mass 3, center x 3.5
 
         // (0.5*1 + 3.5*3) / 4 = 2.75, well right of the bounds center at 2
         expect(grid.centerOfMass.x).toBeCloseTo(2.75)

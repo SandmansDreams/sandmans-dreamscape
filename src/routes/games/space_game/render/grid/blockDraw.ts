@@ -1,15 +1,21 @@
-// Drawing blocks with placeholder art for the functional kinds
+// Drawing blocks with placeholder art for the functional categories
 
 import { Color } from "../color"
 import { DEFAULT_FONT } from "../font"
 import type { Vec2 } from "../camera"
-import type { ComponentKind } from "./components"
+import { kindOf, type ComponentKind } from "./components"
 import type { Cell, Grid } from "./grid"
 import { appendShape, type BlockShape } from "./shapes"
 import { appendTriangleOutline } from "./gridOutline"
 import { MeshBuilder } from "../mesh"
 
-/** Placeholder marks until functional blocks have real art. */
+/**
+ * Placeholder marks until functional blocks have real art.
+ *
+ * Keyed by category rather than by type: the letter says "this is a machine and
+ * roughly what sort", which is all a placeholder can honestly claim. Two models
+ * of thruster share a T until one of them has art of its own.
+ */
 export const KIND_LETTER: Record<ComponentKind, string> = {
     hull: "",
     thruster: "T",
@@ -38,14 +44,15 @@ export interface BlockLike {
     shape: BlockShape
     turns: number
     mirrored: boolean
-    kind: ComponentKind
+    /** A registry id. `kindOf` is how the placeholder finds its letter. */
+    type: string
     facing: number
     level: number
 }
 
-/** True when this kind draws as a placeholder rather than as its own shape. */
+/** True when this block draws as a placeholder rather than as its own shape. */
 export function isComponent(block: BlockLike): boolean {
-    return KIND_LETTER[block.kind] !== ""
+    return KIND_LETTER[kindOf(block.type)] !== ""
 }
 
 /**
@@ -87,7 +94,7 @@ export function appendComponentGlyph(
     // so rotating it by `facing` is exactly a direction marker
     appendShape(builder, "edgeLine", block.facing, false, x, y, cellSize, color)
 
-    const letter = KIND_LETTER[block.kind]
+    const letter = KIND_LETTER[kindOf(block.type)]
     const pixel = cellSize / 12
 
     DEFAULT_FONT.appendText(
