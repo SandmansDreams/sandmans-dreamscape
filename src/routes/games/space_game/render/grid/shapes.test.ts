@@ -2,21 +2,9 @@ import { describe, expect, it } from "vitest"
 import { Color } from "../color"
 import { appendShape, BLOCK_SHAPES, MIRRORABLE_SHAPES, turnCount, type BlockShape } from "./shapes"
 import { FLOATS_PER_VERTEX, MeshBuilder } from "../mesh"
+import { coverageOf as coverageOfMesh } from "./sampling.test-utils"
 
 const DRAWN = BLOCK_SHAPES.filter((shape) => shape !== "empty")
-
-const SAMPLES = 24
-
-/*
- * Sample offsets, deliberately different per axis and off any neat fraction.
- *
- * A point exactly on an edge is inside or outside by float rounding, and
- * mirroring reverses the winding, which flips that tie. Offsetting both axes by
- * the SAME amount does not help: the diamond's edges are x - y = +-20, and a
- * uniform offset cancels in x - y, leaving the samples right back on the line.
- */
-const OFFSET_X = 0.3183
-const OFFSET_Y = 0.5171
 
 /** The vertex positions a shape emits, as [x, y] pairs. */
 function positionsOf(shape: BlockShape, turns: number, mirrored = false, size = 40): number[][] {
@@ -34,49 +22,17 @@ function round(n: number): string {
     return (Number(n.toFixed(6)) + 0).toString()
 }
 
-function cross(x: number, y: number, from: number[], to: number[]): number {
-    return (x - to[0]!) * (from[1]! - to[1]!) - (from[0]! - to[0]!) * (y - to[1]!)
-}
-
-function inTriangle(x: number, y: number, a: number[], b: number[], c: number[]): boolean {
-    const d1 = cross(x, y, a, b)
-    const d2 = cross(x, y, b, c)
-    const d3 = cross(x, y, c, a)
-
-    // A consistent sign means inside. Winding may be either way after a mirror,
-    // so both all-negative and all-positive count.
-    const negative = d1 < 0 || d2 < 0 || d3 < 0
-    const positive = d1 > 0 || d2 > 0 || d3 > 0
-    return !(negative && positive)
-}
-
 /**
  * The area a shape covers, as a sampled bitmap.
  *
- * Compares the figure rather than the triangles: mirroring re-splits a quad
- * along the opposite diagonal, so two identical rectangles can be built from
- * completely different triangle pairs.
+ * A thin wrapper: the sampling itself is shared with the sprite bake tests,
+ * which compare a merged mesh against an unmerged one for the same reason.
  */
 function coverageOf(shape: BlockShape, turns: number, mirrored = false, size = 40): string {
-    const points = positionsOf(shape, turns, mirrored, size)
-    let bitmap = ""
-
-    for (let row = 0; row < SAMPLES; row++) {
-        for (let column = 0; column < SAMPLES; column++) {
-            const x = ((column + OFFSET_X) / SAMPLES) * size
-            const y = ((row + OFFSET_Y) / SAMPLES) * size
-
-            let inside = false
-            for (let i = 0; i < points.length && !inside; i += 3) {
-                inside = inTriangle(x, y, points[i]!, points[i + 1]!, points[i + 2]!)
-            }
-            bitmap += inside ? "#" : "."
-        }
-    }
-
-    return bitmap
+    const builder = new MeshBuilder()
+    appendShape(builder, shape, turns, mirrored, 0, 0, size, Color.WHITE)
+    return coverageOfMesh(builder.toArray(), size)
 }
-
 
 describe("appendShape()", () => {
     it("emits nothing for empty", () => {

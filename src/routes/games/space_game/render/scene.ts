@@ -7,6 +7,9 @@ import type { GPU } from "./webgpu/gpu"
 import { FrameLoop } from "./loop"
 import { GpuTimer } from "./timing"
 
+/** Which editing surface a scene wants alongside the canvas, if any. */
+export type SceneUi = "builder" | "sprite"
+
 /** Everything the runner hands a scene so it can build itself. */
 export interface SceneContext {
     readonly gpu: GPU
@@ -50,7 +53,7 @@ export interface SceneDefinition<V = any> {
     readonly description: string
     readonly settings?: SettingsSchema
     /** Show the builder panel for this scene. */
-    readonly builder?: boolean
+    readonly ui?: SceneUi
     create(context: SceneContext): SceneInstance<V>
 }
 

@@ -937,7 +937,7 @@ const scene: DevSceneDefinition<EditorValues> = {
         "panel on the right; only marked cells accept a block. Undo covers a whole " +
         "stroke, not a single block.",
     settings: SETTINGS,
-    builder: true,
+    ui: "builder",
     create: (context) => new ShipBuilder(context),
 }
 

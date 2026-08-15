@@ -297,4 +297,5 @@ export class Color {
     static readonly WHITE = Color.gray(1)
     static readonly BLACK = Color.gray(0)
     static readonly TRANSPARENT = Color.rgb(0, 0, 0, 0)
+    static readonly FALLBACK = Color.gray(0.5)
 }

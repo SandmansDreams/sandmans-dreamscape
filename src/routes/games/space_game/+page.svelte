@@ -16,6 +16,8 @@
     import BuilderUI from "./render/ui/BuilderUI.svelte"
     import { loadBrush, type Brush } from "./render/grid/brush"
     import type { SelectedCell, ShipInfo } from "./dev/scenes/ship-builder"
+    import SpriteEditorUI from "./render/ui/SpriteEditorUI.svelte"
+    import type { ArtBrush, ArtInfo } from "./dev/scenes/sprite-editor"
 
     const DEV_COLOR = "#87CEEB"
 
@@ -37,6 +39,8 @@
     // Mirrors the scene's brush - the scene owns it, this only renders it. Seeded
     // from storage so the panel is not blank in the frames before a scene loads.
     let brush = $state<Brush>(loadBrush())
+    let artBrush = $state<ArtBrush | null>(null)
+    let artInfo = $state<ArtInfo | null>(null)
 
     let fps = $state(0)
     let budgetMs = $state(1000 / 60)
@@ -115,6 +119,8 @@
             // fifth of a second would read as broken
             created.onPublish((key, value) => {
                 if (key === "brush") brush = value as Brush
+                if (key === "artBrush") artBrush = value as ArtBrush
+                if (key === "artInfo") artInfo = value as ArtInfo
                 if (key === "palette") palette = value as string[]
                 if (key === "shipInfo") shipInfo = value as ShipInfo
                 if (key === "selected") selected = value as SelectedCell | null
@@ -141,7 +147,7 @@
 }} />
 
 <div id="container">
-    {#if scene?.builder}
+    {#if scene?.ui === "builder"}
         <BuilderUI
             {brush}
             {palette}
@@ -152,10 +158,19 @@
             onUpgrade={(delta) => runner?.send("upgrade", delta)}
             onHighlight={(hex) => runner?.send("highlight", hex)}
         />
+    {:else if scene?.ui === "sprite" && artBrush}
+        <!-- artBrush guards the first frame: the scene publishes from its
+             constructor, but the panel renders before that reaches this state -->
+        <SpriteEditorUI
+            brush={artBrush}
+            info={artInfo}
+            onPatch={(patch) => runner?.send("artBrush", patch)}
+            onAction={(name) => runner?.send("action", name)}
+        />
     {/if}
 
     {#if devMode}
-        <div id="dev-panel" class:beside-builder={scene?.builder} style:--DEV_COLOR={`${DEV_COLOR}`}>
+        <div id="dev-panel" style:--DEV_COLOR={`${DEV_COLOR}`}>
             <header>
                 <span class="title">DEV MODE: ON</span>
             </header>
@@ -284,20 +299,6 @@
     #dev-panel::-webkit-scrollbar-thumb:hover {
         background: #0dfa;
         background-clip: content-box;
-    }
-    /* The builder's top bar owns the full width of the screen, so the dev panel
-       drops below it rather than underneath it. The bar is a single row by
-       design - its palette scrolls instead of wrapping - so this offset stays
-       correct however many colours a ship has. */
-    /* Tucked into the gap the builder leaves: right of its shape column, below
-       its toolbar, above its component tray. Anchored to both vertical edges
-       rather than given a height, so the panel's own overflow-y scrolls a long
-       settings list inside whatever room is left. */
-    #dev-panel.beside-builder {
-        top: 116px;
-        left: 150px;
-        bottom: 120px;
-        max-height: none;
     }
 
     /* Firefox, which has no pseudo-elements to style */
