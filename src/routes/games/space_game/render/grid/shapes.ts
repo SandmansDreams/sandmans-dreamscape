@@ -12,9 +12,11 @@ export const BLOCK_SHAPES = [
     // Straight slopes
     "wedge",
     "halfWedge",
+    "quarterWedge",
     // Curved
     "arc",
     "halfArc",
+    "quarterArc",
     // N-gon ish
     "hexagon",
     "octagon",
@@ -31,7 +33,9 @@ export const BLOCK_SHAPES = [
 
 export type BlockShape = typeof BLOCK_SHAPES[number]
 
-export const MIRRORABLE_SHAPES: readonly BlockShape[] = ["halfWedge", "halfArc", "jutHalfWedge"]
+export const MIRRORABLE_SHAPES: readonly BlockShape[] = [
+    "halfWedge", "halfArc", "jutHalfWedge",
+]
 
 /*
  * Compass tables: which way a shape's feature points for a given `turns` value.
@@ -75,7 +79,7 @@ const CIRCLE_SEGMENTS = 40
  */
 const TURN_EXCEPTIONS: Partial<Record<BlockShape, number>> = {
     empty: 1,
-    full: 1,       // square, identical under every quarter turn
+    full: 1,       // full, identical under every quarter turn
     octagon: 1,    // 45 degree symmetry divides 90 exactly
     diamond: 1,    // corners at the edge midpoints
     circle: 1,
@@ -160,6 +164,12 @@ function buildShape(out: number[], frame: CellFrame, shape: BlockShape): void {
             pushTriangle(out, frame, 0, 0, size, 0, 0, half)
             return
 
+        case "quarterWedge":
+            // A shallow ramp: full width along the north edge, tapering from half
+            // height at the west to nothing at the east
+            pushTriangle(out, frame, 0, 0, half, 0, 0, half)
+            return
+
         case "arc":
             // A quarter disc pinned to the north-west corner, so the cell is full
             // except for a rounded bite out of the south-east
@@ -169,6 +179,11 @@ function buildShape(out: number[], frame: CellFrame, shape: BlockShape): void {
         case "halfArc":
             // The same sweep squashed vertically - a quarter ellipse
             pushFan(out, frame, 0, 0, size, half, 0, Math.PI / 2, ARC_SEGMENTS)
+            return
+
+        case "quarterArc":
+            // The same sweep squashed vertically - a quarter ellipse
+            pushFan(out, frame, 0, 0, half, half, 0, Math.PI / 2, ARC_SEGMENTS)
             return
 
         case "hexagon":
@@ -270,7 +285,7 @@ function pushQuad(
  *
  * Separate x and y radii let one helper cover the quarter disc, the squashed
  * half-height arc, the jut wedges and the full circle.
- */
+*/
 function pushFan(
     out: number[],
     frame: CellFrame,

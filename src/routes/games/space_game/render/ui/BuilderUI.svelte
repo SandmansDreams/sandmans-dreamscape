@@ -7,6 +7,22 @@
     import { canPlace, COMPONENT_KINDS, maxLevel, statsFor, type ComponentKind } from "../grid/components"
     import { KIND_LETTER } from "../grid/blockDraw"
     import type { SelectedCell, ShipInfo } from "../../dev/scenes/ship-builder"
+    
+    import screwDriverIconSRC from "../../assets/icons/SpaceGame-Screw_Driver.png"
+    import eraserIconSRC from "../../assets/icons/SpaceGame-Eraser.png"
+    import selectIconSRC from "../../assets/icons/SpaceGame-Select.png"
+    import undoIconSRC from "../../assets/icons/SpaceGame-Undo.png"
+    import clearLayerIconSRC from "../../assets/icons/SpaceGame-X.png"
+    import clearAllIconSRC from "../../assets/icons/SpaceGame-Bomb.png"
+    import arrowIconSRC from "../../assets/icons/SpaceGame-Arrow.png"
+    import hullIconSRC from "../../assets/icons/SpaceGame-Hull.png"
+    import thrusterIconSRC from "../../assets/icons/SpaceGame-Thruster.png"
+    import batteryIconSRC from "../../assets/icons/SpaceGame-Battery.png"
+    import storageIconSRC from "../../assets/icons/SpaceGame-Storage.png"
+    import generatorIconSRC from "../../assets/icons/SpaceGame-Generator.png"
+    import projectorIconSRC from "../../assets/icons/SpaceGame-Projector.png"
+    import weaponIconSRC from "../../assets/icons/SpaceGame-Weapon.png"
+
 
     /**
      * The builder's whole interface.
@@ -28,8 +44,6 @@
         /** Hex to box on the ship, or null to clear. */
         onHighlight: (hex: string | null) => void
     } = $props()
-
-    const TOOLS = ["paint", "erase", "select"] as const
 
     /** The kind under the cursor right now, which outranks everything else. */
     let hoveredKind = $state<ComponentKind | null>(null)
@@ -59,7 +73,7 @@
      * Erase and select act on blocks already down, so highlighting a shape or a
      * placement during either would advertise a choice that changes nothing.
      */
-    let picking = $derived(brush.tool === "paint")
+    let picking = $derived(brush.tool === "build")
 
     /**
      * Switches shape, carrying the rotation when it still means something.
@@ -74,7 +88,7 @@
 
         // Back to paint, as picking a placement does: choosing a shape while the
         // brush sits on erase would otherwise light nothing up and do nothing
-        set({ shape, turns: carried, tool: "paint" })
+        set({ shape, turns: carried, tool: "build" })
     }
 
     /**
@@ -93,7 +107,7 @@
             kind,
             layer,
             level: Math.min(brush.level, maxLevel(kind)),
-            tool: brush.tool === "paint" ? brush.tool : "paint",
+            tool: brush.tool === "build" ? brush.tool : "build",
         })
     }
 
@@ -169,79 +183,124 @@
 <div id="build-ui">
     <div id="top-panel" class="panel">
         <div class="group">
-            {#each TOOLS as name (name)}
-                <button class={brush.tool === name ? "active" : ""} onclick={() => set({ tool: name })}>
-                    {name}
-                </button>
-            {/each}
+            <button class={`icon-button ${brush.tool === "build" ? "active" : ""}`} onclick={() => set({ tool: "build" })}>
+                <img class="image-icon" src={screwDriverIconSRC} alt="screw-driver.png">
+                BUILD
+            </button>
+            <button class={`icon-button ${brush.tool === "destroy" ? "active" : ""}`} onclick={() => set({ tool: "destroy" })}>
+                <img class="image-icon" src={eraserIconSRC} alt="eraser.png">
+                DESTROY
+            </button>
+            <button class={`icon-button ${brush.tool === "select" ? "active" : ""}`} onclick={() => set({ tool: "select" })}>
+                <img class="image-icon" src={selectIconSRC} alt="select.png">
+                SELECT
+            </button>
         </div>
 
         <span class="divider"></span>
 
         <div class="group">
-            <button onclick={() => onAction("undo")}>undo</button>
-            <button onclick={() => onAction("redo")}>redo</button>
-            <button onclick={() => onAction("clearLayer")}>clear layer</button>
-            <button onclick={() => onAction("clearAll")}>clear all</button>
+            <button class="icon-button" onclick={() => onAction("undo")}>
+                <img class="image-icon" src={undoIconSRC} alt="undo.png">
+                UNDO
+            </button>
+            <button class="icon-button" onclick={() => onAction("redo")}>
+                <img class="image-icon" src={undoIconSRC} style="transform: scaleX(-1)" alt="redo.png">
+                REDO
+            </button>
+            <button class="icon-button" onclick={() => onAction("clearLayer")}>
+                <img class="image-icon" src={clearLayerIconSRC} alt="redo.png">
+                CLEAR
+            </button>
+            <button class="icon-button" onclick={() => onAction("clearAll")}>
+                <img class="image-icon" src={clearAllIconSRC} alt="redo.png">
+                CLEAR ALL
+            </button>
         </div>
 
         <span class="divider"></span>
 
         <div class="group">
-            <button onclick={() => onAction("upload")}>upload</button>
-            <button onclick={() => onAction("download")}>download</button>
-        </div>
-
-        <span class="divider"></span>
-
-        <div class="group hints">
-            <span><b>R</b> rotate</span>
-            <span><b>M</b> mirror</span>
-            <span><b>L</b> level</span>
+            <button class="icon-button" onclick={() => onAction("upload")}>
+                <img class="image-icon" src={arrowIconSRC} alt="redo.png">
+                UPLOAD
+            </button>
+            <button class="icon-button" onclick={() => onAction("download")}>
+                <img class="image-icon" src={arrowIconSRC} style="transform: scaleY(-1)" alt="redo.png">
+                DOWNLOAD
+            </button>
         </div>
     </div>
 
     <div id="draw-panel" class="panel">
-        <div class="heading">COLOR</div>
-        <input
-            id="build-color"
-            type="color"
-            value={brush.color}
-            oninput={(e) => set({ color: e.currentTarget.value })}
-        />
-
-        <div class="heading">EMISSION</div>
-        <div class="slider-row">
-            <input
-                type="range" min="0" max="1" step="0.05"
-                value={brush.emission}
-                oninput={(e) => set({ emission: e.currentTarget.valueAsNumber })}
-            />
-            <span class="slider-value">{brush.emission.toFixed(2)}</span>
-        </div>
-
         <div class="heading">PLACEMENTS</div>
         <div id="placements">
-            {#each COMPONENT_KINDS as kind (kind)}
-                <button
-                    class={`placement-swatch ${picking && brush.kind === kind ? "active" : ""}`}
-                    onclick={() => selectKind(kind)}
-                    onmouseenter={() => (hoveredKind = kind)}
-                    onmouseleave={() => (hoveredKind = null)}
-                    title={kind}
-                    aria-label={kind}
-                >
-                    <svg class="shape-svg" viewBox="0 0 100 100" aria-hidden="true">
-                        <path d={shapeSvgPath("hexagon", 0, false)} fill={brush.color} />
-                        <text x="50" y="46" class="glyph">{KIND_LETTER[kind] || "H"}</text>
-                        <!-- The level rides the sprite, the same way it does on a
-                             placed block, so the picker reads like the ship will -->
-                        {#if brush.kind === kind && brush.level > 1}
-                            <text x="78" y="80" class="glyph-level">{brush.level}</text>
-                        {/if}
-                    </svg>
-                </button>
-            {/each}
+            <button 
+                class={`icon-button ${picking && brush.kind === "hull" ? "active" : ""}`} 
+                onclick={() => selectKind("hull")}
+                onmouseenter={() => (hoveredKind = "hull")}
+                onmouseleave={() => (hoveredKind = null)}
+                title={"hull"}
+                aria-label={"hull"}
+            >
+                <img class="image-icon" src={hullIconSRC} alt="hull.png">
+                HULL
+            </button>
+            <button 
+                class={`icon-button ${picking && brush.kind === "storage" ? "active" : ""}`} 
+                onclick={() => selectKind("storage")}
+                onmouseenter={() => (hoveredKind = "storage")}
+                onmouseleave={() => (hoveredKind = null)}
+                title={"storage"}
+                aria-label={"storage"}
+            >
+                <img class="image-icon" src={storageIconSRC} alt="storage.png">
+                STORAGE
+            </button>
+            <button 
+                class={`icon-button ${picking && brush.kind === "thruster" ? "active" : ""}`} 
+                onclick={() => selectKind("thruster")}
+                onmouseenter={() => (hoveredKind = "thruster")}
+                onmouseleave={() => (hoveredKind = null)}
+                title={"thruster"}
+                aria-label={"thruster"}
+            >
+                <img class="image-icon" src={thrusterIconSRC} alt="thruster.png">
+                THRUSTER
+            </button>
+            <button 
+                class={`icon-button ${picking && brush.kind === "generator" ? "active" : ""}`} 
+                onclick={() => selectKind("generator")}
+                onmouseenter={() => (hoveredKind = "generator")}
+                onmouseleave={() => (hoveredKind = null)}
+                title={"generator"}
+                aria-label={"generator"}
+            >
+                <img class="image-icon" src={generatorIconSRC} alt="generator.png">
+                GENERATOR
+            </button>
+            <button 
+                class={`icon-button ${picking && brush.kind === "weapon" ? "active" : ""}`} 
+                onclick={() => selectKind("weapon")}
+                onmouseenter={() => (hoveredKind = "weapon")}
+                onmouseleave={() => (hoveredKind = null)}
+                title={"weapon"}
+                aria-label={"weapon"}
+            >
+                <img class="image-icon" src={weaponIconSRC} alt="weapon.png">
+                WEAPON
+            </button>
+            <button 
+                class={`icon-button ${picking && brush.kind === "projector" ? "active" : ""}`} 
+                onclick={() => selectKind("projector")}
+                onmouseenter={() => (hoveredKind = "projector")}
+                onmouseleave={() => (hoveredKind = null)}
+                title={"projector"}
+                aria-label={"projector"}
+            >
+                <img class="image-icon" src={projectorIconSRC} alt="projector.png">
+                PROJECTOR
+            </button>
         </div>
 
         <!-- Only a machine has grades to choose between; structure has shapes,
@@ -262,7 +321,23 @@
                 {/each}
             </div>
         {/if}
+        <div class="heading">COLOR</div>
+        <input
+            id="build-color"
+            type="color"
+            value={brush.color}
+            oninput={(e) => set({ color: e.currentTarget.value })}
+        />
 
+        <div class="heading">EMISSION</div>
+        <div class="slider-row">
+            <input
+                type="range" min="0" max="1" step="0.05"
+                value={brush.emission}
+                oninput={(e) => set({ emission: e.currentTarget.valueAsNumber })}
+            />
+            <span class="slider-value">{brush.emission.toFixed(2)}</span>
+        </div>
         <div class="heading">PALETTE</div>
         <div id="palette">
             {#each palette as entry (entry)}
@@ -363,7 +438,7 @@
                         fill={brush.color}
                     />
                 </svg>
-                <span class="component-name">{shape}</span>
+                <!--<span class="component-name">{shape}</span>-->
             </button>
         {/each}
     </div>
@@ -387,7 +462,7 @@
         color: var(--text-color);
         background: none;
         z-index: 1;
-        font-family: 'Courier New', Courier, monospace;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
         /* The panels take the pointer back; everything between belongs to the canvas */
         pointer-events: none;
     }
@@ -435,7 +510,7 @@
         font-weight: bold;
         color: var(--text-color);
         background: var(--ui-background);
-        border-bottom: 1px solid var(--ui-separator);
+        border-block: 1px solid var(--ui-separator);
     }
 
     .empty {
@@ -470,12 +545,29 @@
     }
     .hints b { color: var(--active); }
 
+    .icon-button {
+        width: 85px;
+        height: 85px;
+        padding: 3px;
+        color: white;
+        font-weight: bold;
+        font-size: 12px;
+        border-radius: 0;
+        margin: 0;
+    }
+    .image-icon {
+        width: 40px;
+        height: 40px;
+        margin-bottom: 5px;
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+    }
+
     /*~~~ Left: colour, shapes or levels, palette ~~~*/
     #draw-panel {
         left: 14px;
         top: 50%;
         transform: translateY(-50%);
-        width: 122px;
         max-height: 74vh;
         overflow-y: auto;
     }
@@ -519,12 +611,11 @@
         width: 100%;
         margin: 0;
         aspect-ratio: 1 / 1;
-        padding: 4px;
         background: transparent;
     }
     .shape-swatch:hover { background: rgba(0, 191, 255, 0.2); }
     .shape-swatch.active { background: rgba(0, 255, 64, 0.22); }
-    .shape-svg { width: 100%; height: 100%; display: block; }
+    .shape-svg { width: 100%; height: 100%; display: block; aspect-ratio: 1/1; padding: 0;}
 
     /* The bottom tray runs sideways, so its swatches are fixed-width columns with
        a name under the art rather than cells in a grid */
@@ -532,24 +623,26 @@
         display: flex;
         flex-direction: column;
         align-items: center;
+        justify-content: center;
         gap: 2px;
-        width: 62px;
+        width: 50px;
         flex-shrink: 0;
         aspect-ratio: auto;
         border-radius: 5px;
+        aspect-ratio: 1/1
     }
-    .shape-swatch.wide .shape-svg { width: 30px; height: 30px; }
+    .shape-swatch.wide .shape-svg { width: 30px; height: 30px; padding: 0;}
 
     /* Two across, same square cells as the shapes had - a placement is picked the
        same way a shape is, and the column is only wide enough for two */
-    #placements { display: grid; grid-template-columns: repeat(2, 1fr); }
+    #placements { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px}
     .placement-swatch {
         border: 1px solid var(--ui-separator);
         border-radius: 0;
         width: 100%;
         margin: 0;
         aspect-ratio: 1 / 1;
-        padding: 4px;
+        padding: 0;
         background: transparent;
     }
     .placement-swatch:hover { background: rgba(0, 191, 255, 0.2); }
@@ -662,7 +755,7 @@
         border: 2px solid var(--ui-separator);
     }
     .component-swatch:hover { background: rgba(0, 191, 255, 0.2); }
-    .component-swatch .shape-svg { width: 32px; height: 32px; }
+    .component-swatch .shape-svg { width: 32px; height: 32px; padding: 0;}
     .component-name { font-size: 11px; }
 
     .glyph {

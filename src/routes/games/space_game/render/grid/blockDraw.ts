@@ -13,7 +13,6 @@ import { MeshBuilder } from "../mesh"
 export const KIND_LETTER: Record<ComponentKind, string> = {
     hull: "",
     thruster: "T",
-    battery: "B",
     storage: "S",
     generator: "G",
     projector: "P",

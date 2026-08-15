@@ -584,7 +584,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         // "look at this block" destructive.
         if (brush.tool === "select") return
 
-        if (brush.tool === "erase") {
+        if (brush.tool === "destroy") {
             grid.delete(col, row)
             return
         }
@@ -825,7 +825,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
 
         // Marks answer "where could this go", which is a question only the paint
         // tool is asking. Erasing and selecting act on what is already there.
-        if (brush.tool !== "paint") return
+        if (brush.tool !== "build") return
 
         const bounds = this.ship.bounds
         const out: number[] = []
@@ -867,11 +867,11 @@ class ShipBuilder implements SceneInstance<EditorValues> {
 
         this.hover = this.buildHoverBox(col, row, legal)
 
-        // Nothing to preview when erasing or selecting, nothing to promise on a
+        // Nothing to preview when destroying or selecting, nothing to promise on a
         // cell that would refuse the block, and nothing to add on one that already
         // holds exactly this - a ghost over an identical block is just a smudge
         const identical = this.matchesBrush(this.ship.layers[brush.layer].get(col, row))
-        if (brush.tool === "paint" && legal && !identical) this.ghost = this.buildGhost(col, row)
+        if (brush.tool === "build" && legal && !identical) this.ghost = this.buildGhost(col, row)
     }
 
     /** The cell outline, red where the brush would be refused. */

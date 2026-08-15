@@ -1,7 +1,7 @@
 // What the ship editor is about to place
 
 import { DEFAULT_KIND, type ComponentKind } from "./components"
-import type { ShipLayer } from "./layers"
+import { SHIP_LAYERS, type ShipLayer } from "./layers"
 import type { BlockShape } from "./shapes"
 import { loadStore, saveStore } from "../../settings/storage"
 
@@ -9,7 +9,13 @@ import { loadStore, saveStore } from "../../settings/storage"
  * `select` is the "look, do not touch" tool: clicking still picks the cell the
  * info panel describes, but nothing is placed or removed.
  */
-export type BrushTool = "paint" | "erase" | "select"
+export type BrushTool = "build" | "destroy" | "select"
+
+/** Fields whose value must be one of a known set, not merely the right type. */
+const ALLOWED: Partial<Record<keyof Brush, readonly string[]>> = {
+    tool: ["build", "destroy", "select"],
+    layer: SHIP_LAYERS,
+}
 
 /**
  * The editor's brush.
@@ -36,7 +42,7 @@ export interface Brush {
 
 export const DEFAULT_BRUSH: Brush = {
     layer: "hull",
-    tool: "paint",
+    tool: "build",
     shape: "full",
     turns: 0,
     mirrored: false,
@@ -65,6 +71,10 @@ export function loadBrush(): Brush {
 
     for (const key of Object.keys(DEFAULT_BRUSH) as (keyof Brush)[]) {
         const value = bag[key]
+
+        const allowed = ALLOWED[key]
+        if (allowed && !allowed.includes(value as string)) continue
+        
         // Same primitive type as the default is the whole check: every field is a
         // string, number or boolean, and a wrong one is not worth reasoning about
         if (typeof value === typeof DEFAULT_BRUSH[key]) (brush[key] as unknown) = value

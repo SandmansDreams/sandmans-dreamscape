@@ -119,8 +119,8 @@ describe("Grid components", () => {
 
     it("clamps a level past what the kind has", () => {
         const grid = new Grid()
-        const cell = grid.set(0, 0, "full", { kind: "battery", level: 99 })
-        expect(cell.hitPoints).toBe(10) // battery tops out at level 2
+        const cell = grid.set(0, 0, "full", { kind: "storage", level: 99 })
+        expect(cell.hitPoints).toBe(12) // storage tops out at level 2
     })
 
     it("lets a cell override the level's defaults", () => {
@@ -145,7 +145,6 @@ describe("Grid components", () => {
 
         expect(grid.ofKind("thruster")).toHaveLength(2)
         expect(grid.ofKind("weapon")).toHaveLength(1)
-        expect(grid.ofKind("battery")).toHaveLength(0)
 
         grid.delete(0, 0)
         expect(grid.ofKind("thruster")).toHaveLength(1)

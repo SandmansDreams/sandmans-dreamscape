@@ -5,7 +5,6 @@ import type { ShipLayer } from "./layers"
 export type ComponentKind =
     | "hull" // Shape blocks, body of the ship
     | "thruster" 
-    | "battery"
     | "storage"
     | "generator"
     | "projector"
@@ -52,13 +51,6 @@ export const COMPONENTS: Record<ComponentKind, ComponentDefinition> = {
             { hitPoints: 8, mass: 2 },
             { hitPoints: 14, mass: 3 },
             { hitPoints: 22, mass: 4 },
-        ],
-    },
-    battery: {
-        layers: ["coverable"],
-        levels: [
-            { hitPoints: 6, mass: 2 },
-            { hitPoints: 10, mass: 3 },
         ],
     },
     storage: { // Special mass also due to storage containing things

@@ -20,7 +20,7 @@
     const DEV_COLOR = "#87CEEB"
 
     let canvas = $state<HTMLCanvasElement | null>(null)
-    let devMode = $state(true) // If want only in dev, swith to 'import.meta.env.DEV'
+    let devMode = $state(false) // If want only in dev, swith to 'import.meta.env.DEV'
 
     // The scene list needs no GPU, so the last-used scene can be restored before the
     // device exists - the load effect below simply waits for the runner
