@@ -3,7 +3,8 @@
 
 import type { Ship } from "../../game/ship"
 import { canPlace, componentById } from "./components"
-import type { ShipLayer } from "./layers"
+import type { Cell, Grid } from "./grid"
+import { SHIP_LAYERS, type ShipLayer } from "./layers"
 
 export interface Legality {
     ok: boolean
@@ -104,4 +105,90 @@ export function bestThrusterFacing(ship: Ship, col: number, row: number, facing:
     const wanted = ((facing % 4) + 4) % 4
 
     return options.includes(wanted) ? wanted : options[0] ?? wanted
+}
+
+/**
+ * Whether a block can be taken off the ship.
+ *
+ * Only the hull has anything to protect: it carries everything else, and it is
+ * the only layer whose blocks have to stay in one piece.
+ */
+export function canEraseAt(ship: Ship, layer: ShipLayer, col: number, row: number): Legality {
+    // Erasing empty space is a no-op, not an offence - a drag crosses plenty of it
+    if (!ship.layers[layer].has(col, row)) return { ok: true }
+
+    if (layer !== "hull") return { ok: true }
+
+    for (const above of SHIP_LAYERS) {
+        if (above === "hull") continue
+        if (ship.layers[above].has(col, row)) {
+            return { ok: false, reason: `a ${above} block sits on this one` }
+        }
+    }
+
+    if (splitsHull(ship.layers.hull, col, row)) {
+        return { ok: false, reason: "A ship must be one whole object with no floating pieces" }
+    }
+
+    return { ok: true }
+}
+
+/** "col,row", for the visited set. Cold path, so a string key is fine here. */
+function positionKey(col: number, row: number): string {
+    return `${col},${row}`
+}
+
+/**
+ * True when removing one cell would leave hull the rest cannot reach.
+ *
+ * A flood fill from any surviving cell: reaching fewer than survive means the
+ * removal cut the hull into pieces. Hulls run to a few hundred cells, so one
+ * fill per attempted erase costs nothing worth measuring.
+ */
+function splitsHull(hull: Grid, col: number, row: number): boolean {
+    const remaining = new Set<string>()
+    let start: Cell | null = null
+
+    for (const cell of hull.list) {
+        if (cell.col === col && cell.row === row) continue
+        remaining.add(positionKey(cell.col, cell.row))
+        start ??= cell
+    }
+
+    // Erasing the only block strands nothing, so an empty hull is legal
+    if (start === null) return false
+
+    const seen = new Set<string>([positionKey(start.col, start.row)])
+    const queue: Cell[] = [start]
+
+    while (queue.length > 0) {
+        const at = queue.pop()!
+
+        for (const step of OFFSETS) {
+            const next = { col: at.col + step.col, row: at.row + step.row }
+            const key = positionKey(next.col, next.row)
+
+            if (seen.has(key) || !remaining.has(key)) continue
+            seen.add(key)
+            queue.push(next as Cell)
+        }
+    }
+
+    return seen.size !== remaining.size
+}
+
+/** Whether a whole layer can be emptied. */
+export function canClearLayer(ship: Ship, layer: ShipLayer): Legality {
+    if (layer !== "hull") return { ok: true }
+
+    const riding = SHIP_LAYERS
+        .filter((other) => other !== "hull")
+        .reduce((total, other) => total + ship.layers[other].size, 0)
+
+    if (riding === 0) return { ok: true }
+
+    return {
+        ok: false,
+        reason: `${riding} block${riding === 1 ? "" : "s"} still ride on the hull`,
+    }
 }

@@ -100,7 +100,7 @@ export interface ThrusterStats extends ComponentStats {
 
 export class ThrusterComponent extends Component<ThrusterStats> {
     readonly kind = "thruster"
-    readonly layers = ["coverable"] as const
+    readonly layers = ["components"] as const
 
     constructor(
         readonly id: string,
@@ -116,7 +116,7 @@ export interface StorageStats extends ComponentStats {
 
 export class StorageComponent extends Component<StorageStats> {
     readonly kind = "storage"
-    readonly layers = ["coverable"] as const
+    readonly layers = ["components"] as const
 
     constructor(
         readonly id: string,
@@ -132,7 +132,7 @@ export interface GeneratorStats extends ComponentStats {
 
 export class GeneratorComponent extends Component<GeneratorStats> {
     readonly kind = "generator"
-    readonly layers = ["coverable"] as const
+    readonly layers = ["components"] as const
 
     constructor(
         readonly id: string,
@@ -150,7 +150,7 @@ export interface ProjectorStats extends ComponentStats {
 
 export class ProjectorComponent extends Component<ProjectorStats> {
     readonly kind = "projector"
-    readonly layers = ["placement"] as const
+    readonly layers = ["components"] as const
 
     constructor(
         readonly id: string,
@@ -169,7 +169,7 @@ export interface WeaponStats extends ComponentStats {
 
 export class WeaponComponent extends Component<WeaponStats> {
     readonly kind = "weapon"
-    readonly layers = ["placement"] as const
+    readonly layers = ["components"] as const
 
     constructor(
         readonly id: string,

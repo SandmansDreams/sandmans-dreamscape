@@ -1,6 +1,6 @@
 <script lang="ts">
     import { shapeSvgPath } from "../shapeSVG"
-    import { DEFAULT_BRUSH, type Brush } from "../grid/brush"
+    import { layerFor, type Brush, type BrushTool } from "../grid/brush"
     import { DRAWN_SHAPES } from "../grid/palette"
     import { turnCount, type BlockShape } from "../grid/shapes"
     import { SHIP_LAYERS } from "../grid/layers"
@@ -8,9 +8,10 @@
         canPlace, componentById, componentsOfKind, kindOf, maxLevel, statsFor,
         type ComponentKind,
     } from "../grid/components"
-    import { KIND_LETTER } from "../grid/blockDraw"
-    import type { SelectedCell, ShipInfo } from "../../dev/scenes/ship-builder"
+    import { VIEW_LAYERS, type LayerView, type SelectedCell, type ShipInfo } from "../../dev/scenes/ship-builder"
     
+    import circleFilledIconSRC from "../../assets/icons/SpaceGame-Circle_Filled.png"
+    import circleEmptyIconSRC from "../../assets/icons/SpaceGame-Circle_Empty.png"
     import screwDriverIconSRC from "../../assets/icons/SpaceGame-Screw_Driver.png"
     import eraserIconSRC from "../../assets/icons/SpaceGame-Eraser.png"
     import selectIconSRC from "../../assets/icons/SpaceGame-Select.png"
@@ -20,7 +21,6 @@
     import arrowIconSRC from "../../assets/icons/SpaceGame-Arrow.png"
     import hullIconSRC from "../../assets/icons/SpaceGame-Hull.png"
     import thrusterIconSRC from "../../assets/icons/SpaceGame-Thruster.png"
-    import batteryIconSRC from "../../assets/icons/SpaceGame-Battery.png"
     import storageIconSRC from "../../assets/icons/SpaceGame-Storage.png"
     import generatorIconSRC from "../../assets/icons/SpaceGame-Generator.png"
     import projectorIconSRC from "../../assets/icons/SpaceGame-Projector.png"
@@ -34,19 +34,36 @@
      * are the scene's, rendered here; every control asks for a change and waits
      * to be told what happened, so there is no local copy to fall out of step.
      */
-    let { brush, palette = [], shipInfo = null, selected = null, onPatch, onAction, onUpgrade, onHighlight }: {
+    let { brush, palette = [], shipInfo = null, selected = null, notice = null, layerView = null, onPatch, onAction, onUpgrade, onHighlight, onLayerView }: {
         brush: Brush
         /** Hex colors currently used in the ship, published by the scene. */
         palette?: string[]
         shipInfo?: ShipInfo | null
         /** The block last clicked, or null when that cell is empty. */
         selected?: SelectedCell | null
+        notice?: string | null
+        /** How much of each layer the scene draws. Null until it has published. */
+        layerView?: Record<string, LayerView> | null
         onPatch: (patch: Partial<Brush>) => void
         onAction: (name: string) => void
         onUpgrade: (delta: number) => void
         /** Hex to box on the ship, or null to clear. */
         onHighlight: (hex: string | null) => void
+        onLayerView: (patch: Record<string, LayerView>) => void
     } = $props()
+
+    /** What each control does, in the words someone who has not read the code would use. */
+    const TIPS: Record<string, string> = {
+        build: "Place the selected block",
+        destroy: "Remove blocks. Refuses anything the ship needs",
+        select: "Inspect a block without changing it",
+        undo: "Undo the last stroke",
+        redo: "Redo the last undone stroke",
+        clear: "Empty the current layer",
+        clearAll: "Empty every layer",
+        upload: "Load a ship from a file",
+        download: "Save this ship to a file",
+    }
 
     /** The type under the cursor right now, which outranks everything else. */
     let hoveredType = $state<string | null>(null)
@@ -59,6 +76,77 @@
 
     /** The models available under the brush's category. */
     let types = $derived(componentsOfKind(brushKind))
+
+    /**
+     * The one tooltip for the whole panel, placed from the hovered control's rect.
+     *
+     * A ::after on the button itself is less code but unusable here: every panel
+     * sets `overflow: hidden`, and the ones that matter also carry a `transform`,
+     * which makes them the containing block even for `position: fixed`. The tip
+     * was being drawn inside the toolbar and clipped away. This element lives
+     * outside every panel, so nothing can cut it off.
+     *
+     * Delegated from one listener rather than a handler per button, so adding
+     * `data-tip` to a new control is all anyone has to remember.
+     */
+    let tip = $state<{ text: string; x: number; y: number; below: boolean } | null>(null)
+
+    /**
+     * What the accent picker shows before one has been chosen.
+     *
+     * The brush stores "" for "leave the art alone", which an <input type="color">
+     * cannot display - it needs some hex, and this one is only ever a starting
+     * point for the first drag of the slider.
+     */
+    const DEFAULT_ACCENT_SWATCH = "#ffb347"
+
+    /** Enough room for a two-line tip; below that it flips above the control. */
+    const TIP_ROOM = 70
+
+    function trackTip(event: Event) {
+        const found = (event.target as HTMLElement | null)?.closest?.("[data-tip]")
+        const text = found instanceof HTMLElement ? found.dataset.tip : null
+
+        if (!found || !text) {
+            tip = null
+            return
+        }
+
+        const rect = found.getBoundingClientRect()
+        const below = rect.bottom + TIP_ROOM < window.innerHeight
+
+        tip = {
+            text,
+            x: rect.left + rect.width / 2,
+            y: below ? rect.bottom + 8 : rect.top - 8,
+            below,
+        }
+    }
+
+    /** What each visibility state does when clicked, and what it looks like. */
+    const NEXT_VIEW: Record<LayerView, LayerView> = {
+        full: "dim",
+        dim: "hidden",
+        hidden: "full",
+    }
+
+    const VIEW_TIP: Record<LayerView, string> = {
+        full: "Visible. Click to dim to 15%",
+        dim: "Dimmed to 15%. Click to hide",
+        hidden: "Hidden. Click to show",
+    }
+
+    /** A layer's view, defaulting to full for the frames before the scene publishes. */
+    function viewOf(layer: string): LayerView {
+        return layerView?.[layer] ?? "full"
+    }
+
+    function cycleView(layer: string) {
+        onLayerView({ [layer]: NEXT_VIEW[viewOf(layer)] })
+    }
+
+    /** Which destructive button is armed, if any. */
+    let confirming = $state<string | null>(null)
 
     /**
      * What the bottom of the info panel talks about.
@@ -74,6 +162,17 @@
     /** Requested, not applied. The scene decides, publishes, and this rerenders. */
     function set(patch: Partial<Brush>) {
         onPatch(patch)
+    }
+
+    /**
+     * Switches tool, putting the brush back on a layer it can build on.
+     *
+     * Destroy and select reach every layer, so either can leave the brush on one
+     * its type is not allowed to build on. Coming back to build without fixing
+     * that is what shows a layer as selected and disabled at once.
+     */
+    function selectTool(tool: BrushTool) {
+        set(tool === "build" ? { tool, layer: layerFor(brush.type, brush.layer) } : { tool })
     }
 
     /**
@@ -96,8 +195,10 @@
         const carried = count === turnCount(brush.shape) ? brush.turns % count : 0
 
         // Back to paint, as picking a placement does: choosing a shape while the
-        // brush sits on erase would otherwise light nothing up and do nothing
-        set({ shape, turns: carried, tool: "build" })
+        // brush sits on erase would otherwise light nothing up and do nothing.
+        // The layer comes along for the same reason it does in selectTool - erase
+        // may have left the brush somewhere it cannot build.
+        set({ shape, turns: carried, tool: "build", layer: layerFor(brush.type, brush.layer) })
     }
 
     /** The model a category offers first, which is what its button selects. */
@@ -134,6 +235,31 @@
     function selectKind(kind: ComponentKind) {
         selectType(brushKind === kind ? brush.type : firstTypeOf(kind))
     }
+
+    /**
+     * First click arms, second fires.
+     *
+     * In-panel rather than window.confirm: it matches the rest of the UI, it does
+     * not block the render loop, and it is testable.
+     */
+    function armOrRun(name: string) {
+        if (confirming !== name) {
+            confirming = name
+            return
+        }
+
+        confirming = null
+        onAction(name)
+    }
+
+    // An armed button that stays armed is a trap: come back in a minute and a
+    // single click wipes the ship
+    $effect(() => {
+        if (confirming === null) return
+
+        const timer = setTimeout(() => (confirming = null), 3000)
+        return () => clearTimeout(timer)
+    })
 
     /**
      * One step of orientation.
@@ -204,18 +330,51 @@
 
 <svelte:window onkeydown={onKey} />
 
-<div id="build-ui">
+<!-- mouseover/mouseout rather than enter/leave, and focusin/focusout rather than
+     focus/blur: only the bubbling pairs reach one listener here, and the focus
+     pair is what gives a keyboard the same tips a mouse gets.
+
+     The a11y rule wants the literal onfocus/onblur beside the mouse handlers. It
+     is asking for the right thing and getting the name wrong: focus and blur do
+     not bubble, so on this container they would never fire for the buttons
+     inside, and focusin/focusout already cover the keyboard the rule is
+     protecting. -->
+<!-- svelte-ignore a11y_mouse_events_have_key_events -->
+<div
+    id="build-ui"
+    onmouseover={trackTip}
+    onmouseout={() => (tip = null)}
+    onfocusin={trackTip}
+    onfocusout={() => (tip = null)}
+    role="presentation"
+>
+    <!-- Outside every panel, so no panel's overflow can clip it -->
+    {#if tip}
+        <div
+            id="tip"
+            style={`left: ${tip.x}px; top: ${tip.y}px; transform: translateX(-50%) ${tip.below ? "" : "translateY(-100%)"}`}
+        >
+            {tip.text}
+        </div>
+    {/if}
+
+    <!-- Over the canvas, where the eye already is. A refusal in a corner panel is
+         a refusal nobody reads -->
+    {#if notice}
+        <div id="notice" role="status">{notice}</div>
+    {/if}
+
     <div id="top-panel" class="panel">
         <div class="group">
-            <button class={`icon-button ${brush.tool === "build" ? "active" : ""}`} onclick={() => set({ tool: "build" })}>
+            <button class={`icon-button ${brush.tool === "build" ? "active" : ""}`} onclick={() => selectTool("build")} data-tip={TIPS.build}>
                 <img class="image-icon" src={screwDriverIconSRC} alt="screw-driver.png">
                 BUILD
             </button>
-            <button class={`icon-button ${brush.tool === "destroy" ? "active" : ""}`} onclick={() => set({ tool: "destroy" })}>
+            <button class={`icon-button ${brush.tool === "destroy" ? "active" : ""}`} onclick={() => selectTool("destroy")} data-tip={TIPS.destroy}>
                 <img class="image-icon" src={eraserIconSRC} alt="eraser.png">
                 DESTROY
             </button>
-            <button class={`icon-button ${brush.tool === "select" ? "active" : ""}`} onclick={() => set({ tool: "select" })}>
+            <button class={`icon-button ${brush.tool === "select" ? "active" : ""}`} onclick={() => selectTool("select")} data-tip={TIPS.select}>
                 <img class="image-icon" src={selectIconSRC} alt="select.png">
                 SELECT
             </button>
@@ -224,32 +383,40 @@
         <span class="divider"></span>
 
         <div class="group">
-            <button class="icon-button" onclick={() => onAction("undo")}>
+            <button class="icon-button" onclick={() => onAction("undo")} data-tip={TIPS.undo}>
                 <img class="image-icon" src={undoIconSRC} alt="undo.png">
                 UNDO
             </button>
-            <button class="icon-button" onclick={() => onAction("redo")}>
+            <button class="icon-button" onclick={() => onAction("redo")} data-tip={TIPS.redo}>
                 <img class="image-icon" src={undoIconSRC} style="transform: scaleX(-1)" alt="redo.png">
                 REDO
             </button>
-            <button class="icon-button" onclick={() => onAction("clearLayer")}>
-                <img class="image-icon" src={clearLayerIconSRC} alt="redo.png">
-                CLEAR
+            <button
+                class={`icon-button ${confirming === "clear" ? "arming" : ""}`}
+                onclick={() => armOrRun("clear")}
+                data-tip={TIPS.clear}
+            >
+                <img class="image-icon" src={clearLayerIconSRC} alt="clear.png">
+                {confirming === "clear" ? "YOU SURE?" : "CLEAR"}
             </button>
-            <button class="icon-button" onclick={() => onAction("clearAll")}>
-                <img class="image-icon" src={clearAllIconSRC} alt="redo.png">
-                CLEAR ALL
+            <button
+                class={`icon-button ${confirming === "clearAll" ? "arming" : ""}`}
+                onclick={() => armOrRun("clearAll")}
+                data-tip={TIPS.clearAll}
+            >
+                <img class="image-icon" src={clearAllIconSRC} alt="bomb.png">
+                {confirming === "clearAll" ? "YOU SURE?" : "CLEAR ALL"}
             </button>
         </div>
 
         <span class="divider"></span>
 
         <div class="group">
-            <button class="icon-button" onclick={() => onAction("upload")}>
+            <button class="icon-button" onclick={() => onAction("upload")} data-tip={TIPS.upload}>
                 <img class="image-icon" src={arrowIconSRC} alt="redo.png">
                 UPLOAD
             </button>
-            <button class="icon-button" onclick={() => onAction("download")}>
+            <button class="icon-button" onclick={() => onAction("download")} data-tip={TIPS.download}>
                 <img class="image-icon" src={arrowIconSRC} style="transform: scaleY(-1)" alt="redo.png">
                 DOWNLOAD
             </button>
@@ -257,7 +424,7 @@
     </div>
 
     <div id="draw-panel" class="panel">
-        <div class="heading">PLACEMENTS</div>
+        <div class="heading">COMPONENTS</div>
         <div id="placements">
             <button 
                 class={`icon-button ${picking && brushKind === "hull" ? "active" : ""}`} 
@@ -364,13 +531,33 @@
                 {/each}
             </div>
         {/if}
-        <div class="heading">COLOR</div>
+        <div class="heading">{placingComponent ? "MAIN COLOR" : "COLOR"}</div>
         <input
             id="build-color"
             type="color"
             value={brush.color}
             oninput={(e) => set({ color: e.currentTarget.value })}
         />
+
+        <!-- Only components have an accent: hull art is one colour, and offering a
+             second picker there would imply something the block cannot do -->
+        {#if placingComponent}
+            <div class="heading">ACCENT</div>
+            <input
+                id="build-accent"
+                type="color"
+                value={brush.accentColor === "" ? DEFAULT_ACCENT_SWATCH : brush.accentColor}
+                oninput={(e) => set({ accentColor: e.currentTarget.value })}
+            />
+            <button
+                class="accent-reset"
+                onclick={() => set({ accentColor: "" })}
+                disabled={brush.accentColor === ""}
+                data-tip="Use the colour the art was drawn with"
+            >
+                {brush.accentColor === "" ? "using art's accent" : "reset to art"}
+            </button>
+        {/if}
 
         <div class="heading">EMISSION</div>
         <div class="slider-row">
@@ -418,20 +605,48 @@
 
         <div class="heading">LAYERS</div>
         <div id="layers">
-            {#each SHIP_LAYERS as layer (layer)}
+            {#each VIEW_LAYERS as layer (layer)}
+                {@const isShipLayer = layer !== "markers"}
                 <!-- Disabled rather than hidden: the count is still worth reading,
                      and a row vanishing as you switch types is disorienting -->
-                <button
-                    class={`layer-row ${brush.layer === layer ? "active" : ""}`}
-                    onclick={() => set({ layer })}
-                    disabled={!canPlace(brush.type, layer)}
-                    title={canPlace(brush.type, layer)
-                        ? layer
-                        : `${componentById(brush.type).name} cannot go on ${layer}`}
-                >
-                    <span>{layer}</span>
-                    <span class="count">{shipInfo?.perLayer[layer] ?? 0}</span>
-                </button>
+                <div class="layer-line">
+                    <!-- Its own button, not part of the row: hiding a layer and
+                         building on it are different intentions, and one must not
+                         be a side effect of the other -->
+                    <button
+                        class={`eye ${viewOf(layer) === "hidden" ? "off" : ""}`}
+                        onclick={() => cycleView(layer)}
+                        data-tip={VIEW_TIP[viewOf(layer)]}
+                        aria-label={`${layer} visibility`}
+                    >
+                        <img
+                            class="eye-icon"
+                            class:dim={viewOf(layer) === "dim"}
+                            src={viewOf(layer) === "hidden" ? circleEmptyIconSRC : circleFilledIconSRC}
+                            alt=""
+                        >
+                    </button>
+
+                    {#if isShipLayer}
+                        <button
+                            class={`layer-row ${brush.layer === layer ? "active" : ""}`}
+                            onclick={() => set({ layer })}
+                            disabled={picking && !canPlace(brush.type, layer)}
+                            data-tip={!picking
+                                ? `${brush.tool === "destroy" ? "Erase" : "Inspect"} on the ${layer} layer`
+                                : canPlace(brush.type, layer)
+                                    ? `Build on the ${layer} layer`
+                                    : `${componentById(brush.type).name} cannot go on ${layer}`}
+                        >
+                            <span>{layer}</span>
+                            <span class="count">{shipInfo?.perLayer[layer] ?? 0}</span>
+                        </button>
+                    {:else}
+                        <!-- Not a button: nothing is stored in this layer, so there
+                             is nothing to select and nothing to build on -->
+                        <span class="layer-row static-row">markers</span>
+                    {/if}
+                </div>
             {/each}
         </div>
 
@@ -507,7 +722,7 @@
         color: var(--text-color);
         background: none;
         z-index: 1;
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+        font-family: "Jost", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         /* The panels take the pointer back; everything between belongs to the canvas */
         pointer-events: none;
     }
@@ -588,9 +803,16 @@
         font-size: 11px;
         opacity: .7;
     }
-    .hints b { color: var(--active); }
 
     .icon-button {
+        /* An explicit column, not a label left to wrap past an inline icon: a
+           short label like HULL fits beside a 40px icon in a wider font, so that
+           one button would lay itself out differently from all its neighbours */
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+
         width: 85px;
         height: 85px;
         padding: 3px;
@@ -601,11 +823,11 @@
         margin: 0;
     }
     .image-icon {
-        width: 40px;
-        height: 40px;
+        /* Must be a factor of 16 */
+        width: 48px;
+        height: 48px;
         margin-bottom: 5px;
         image-rendering: pixelated;
-        image-rendering: crisp-edges;
     }
 
     /*~~~ Left: colour, shapes or levels, palette ~~~*/
@@ -617,7 +839,8 @@
         overflow-y: auto;
     }
 
-    #build-color {
+    #build-color,
+    #build-accent {
         display: block;
         width: calc(100% - 12px);
         height: 26px;
@@ -629,8 +852,10 @@
         cursor: pointer;
     }
     /* Strip the native chrome so the swatch fills the control. */
-    #build-color::-webkit-color-swatch-wrapper { padding: 2px; }
-    #build-color::-webkit-color-swatch { border: none; border-radius: 3px; }
+    #build-color::-webkit-color-swatch-wrapper,
+    #build-accent::-webkit-color-swatch-wrapper { padding: 2px; }
+    #build-color::-webkit-color-swatch,
+    #build-accent::-webkit-color-swatch { border: none; border-radius: 3px; }
 
     .slider-row {
         display: flex;
@@ -649,7 +874,6 @@
         font-variant-numeric: tabular-nums;
     }
 
-    #shapes { display: grid; grid-template-columns: repeat(2, 1fr); }
     .shape-swatch {
         border: 1px solid var(--ui-separator);
         border-radius: 0;
@@ -766,6 +990,19 @@
         white-space: nowrap;
     }
 
+    .accent-reset {
+        display: block;
+        width: calc(100% - 12px);
+        margin: 0 6px 6px;
+        padding: .25rem;
+        font-size: 10px;
+        background: transparent;
+        border: 1px solid var(--ui-separator);
+        border-radius: 4px;
+    }
+    .accent-reset:hover:not(:disabled) { background: rgba(0, 191, 255, 0.2); }
+    .accent-reset:disabled { opacity: .45; cursor: default; }
+
     #layers { display: flex; flex-direction: column; }
     .layer-row {
         display: flex;
@@ -843,6 +1080,91 @@
         border-radius: 4px;
     }
     .panel::-webkit-scrollbar-thumb:hover { background: var(--ui-border); }
+
+        #notice {
+        position: absolute;
+        top: 120px;
+        left: 50%;
+        transform: translateX(-50%);
+        pointer-events: none;
+        padding: 8px 14px;
+        font-size: 13px;
+        font-weight: bold;
+        color: #ffd0d0;
+        background: rgba(60, 8, 8, 0.9);
+        border: 2px solid rgba(255, 90, 90, 0.75);
+        border-radius: 6px;
+        z-index: 5;
+    }
+
+    .icon-button.arming {
+        background-color: rgba(255, 90, 90, 0.3);
+        border-color: rgba(255, 90, 90, 0.8);
+        color: #ffd0d0;
+    }
+
+    /* A styled tooltip rather than `title`: the native one waits about a second
+       and cannot be themed, which on a toolbar this dense means you hover, wait,
+       and give up before it appears.
+
+       Fixed and positioned from script, because every panel clips its overflow
+       and the important ones are also a containing block for fixed children -
+       a pseudo-element on the button had nowhere to go but inside the bar. */
+    #tip {
+        position: fixed;
+        z-index: 100;
+        width: max-content;
+        max-width: 190px;
+        padding: 5px 8px;
+        font-size: 11px;
+        font-weight: normal;
+        line-height: 1.35;
+        text-align: center;
+        color: var(--text-color);
+        background: var(--ui-background-dark);
+        border: 1px solid var(--ui-border);
+        border-radius: 4px;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
+        pointer-events: none;
+    }
+
+    /* One row per layer: the eye acts on what is drawn, the row on what is built */
+    .layer-line { display: flex; align-items: stretch; }
+    .layer-line .layer-row { flex: 1; }
+
+    /* The markers row, which only its eye can act on. Styled to match the others
+       so the column still reads as one list, but plainly not clickable */
+    .static-row {
+        display: flex;
+        align-items: center;
+        font-size: 12px;
+        font-weight: bold;
+        padding: .3rem .5rem;
+        opacity: .7;
+        cursor: default;
+    }
+
+    .eye {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        padding: 0;
+        border-radius: 0;
+        border: 1px solid var(--ui-separator);
+        background: transparent;
+    }
+    .eye:hover { background: rgba(0, 191, 255, 0.2); }
+    .eye.off { opacity: .45; }
+
+    .eye-icon {
+        width: 16px;
+        height: 16px;
+        image-rendering: pixelated;
+    }
+    /* Stands in until a half-filled circle exists: the state it marks is a dimmed
+       layer, so a dimmed icon says the same thing */
+    .eye-icon.dim { opacity: .4; }
 
     /* Firefox, which has no pseudo-elements to style */
     @supports not selector(::-webkit-scrollbar) {

@@ -3,11 +3,14 @@
 import { Color } from "../color"
 import { DEFAULT_FONT } from "../font"
 import type { Vec2 } from "../camera"
-import { kindOf, type ComponentKind } from "./components"
+import { componentById, kindOf, type ComponentKind } from "./components"
 import type { Cell, Grid } from "./grid"
 import { appendShape, type BlockShape } from "./shapes"
 import { appendTriangleOutline } from "./gridOutline"
-import { MeshBuilder } from "../mesh"
+import { FLOATS_PER_VERTEX, MeshBuilder } from "../mesh"
+import { findArt } from "../../assets/components"
+import type { ComponentArt } from "../../game/componentArt"
+import { ART_LAYERS, ART_ROLES, type ArtRole } from "./spriteMesh"
 
 /**
  * Placeholder marks until functional blocks have real art.
@@ -48,6 +51,10 @@ export interface BlockLike {
     type: string
     facing: number
     level: number
+    /** The main tint. Art's `main` role takes this; a plain block is drawn in it. */
+    color: Color
+    /** The accent tint, or null to keep whatever the art was drawn with. */
+    accentColor: Color | null
 }
 
 /** True when this block draws as a placeholder rather than as its own shape. */
@@ -139,25 +146,126 @@ function appendLevelDigit(
     )
 }
 
+/** One quarter turn clockwise about the unit cell's center, in y-down space. */
+function turn(u: number, v: number): [u: number, v: number] {
+    return [1 - v, u]
+}
+
 /**
- * Like appendGridMesh, but components draw as a hexagon carrying their initial
- * and a bar on the edge they face.
+ * A piece of art's triangles, placed at one cell.
  *
- * Temporary: functional blocks have no art yet, and a hexagon reads as "this is
- * a machine, not structure" at any zoom.
+ * The mesh is baked into the 0..1 box a cell occupies, so placing it is a scale
+ * and an offset. Rotation by `facing` is baked here on the CPU, as appendShape
+ * already does for quarter turns - one authored piece serves all four headings
+ * and the GPU needs no new path.
+ *
+ * `main` and `accent` have their colour replaced outright, which is what lets one
+ * turret design serve a whole fleet. `static` keeps what it was drawn with.
+ */
+function appendArt(
+    builder: MeshBuilder,
+    art: ComponentArt,
+    block: BlockLike,
+    x: number,
+    y: number,
+    cellSize: number,
+    fade: number,
+    fadeTo: Color,
+): void {
+    const tint: Record<ArtRole, Color | null> = {
+        static: null,
+        main: block.color,
+        // The art's own accent is the fallback, so an unset cell looks the way the
+        // piece was drawn rather than the way the grid guessed
+        accent: block.accentColor ?? Color.from(art.accentColor),
+    }
+
+    // Layers outermost so base always draws under top, which is the whole reason
+    // the art is split in two
+    for (const layer of ART_LAYERS) {
+        for (const role of ART_ROLES) {
+            const source = art.mesh[layer][role]
+            if (source.length === 0) continue
+
+            const out: number[] = []
+
+            for (let i = 0; i < source.length; i += FLOATS_PER_VERTEX) {
+                let u = source[i]!
+                let v = source[i + 1]!
+                for (let step = 0; step < block.facing; step++) [u, v] = turn(u, v)
+
+                const base = tint[role]
+                    ?? Color.rgb(source[i + 2]!, source[i + 3]!, source[i + 4]!)
+                const { r, g, b } = fade === 0 ? base : base.mix(fadeTo, fade)
+
+                out.push(x + u * cellSize, y + v * cellSize, r, g, b)
+            }
+
+            builder.raw(out)
+        }
+    }
+}
+
+/**
+ * One block, as its own art or as the placeholder.
+ *
+ * The single place that decides how a block looks. The editor's ghost draws
+ * through here too, so what a click promises and what it places cannot drift
+ * apart - they did, and the ghost showed a hexagon over art.
+ */
+export function appendBlock(
+    builder: MeshBuilder,
+    block: BlockLike,
+    x: number,
+    y: number,
+    cellSize: number,
+    fade = 0,
+    fadeTo: Color = Color.BLACK,
+): void {
+    const art = findArt(componentById(block.type), block.level)
+    if (art) {
+        appendArt(builder, art, block, x, y, cellSize, fade, fadeTo)
+        return
+    }
+
+    const { shape, turns, mirrored } = displayBlock(block)
+    const color = fade === 0 ? block.color : block.color.mix(fadeTo, fade)
+
+    appendShape(builder, shape, turns, mirrored, x, y, cellSize, color)
+
+    // The glyph fades with its block, or a dimmed thruster keeps a solid black
+    // T floating on it
+    if (isComponent(block)) {
+        const ink = fade === 0 ? LETTER_COLOR : LETTER_COLOR.mix(fadeTo, fade)
+        appendComponentGlyph(builder, block, x, y, cellSize, ink)
+    }
+}
+
+/**
+ * Every block on a layer, each drawn as its own art where it has any.
+ *
+ * A component with no art falls back to a hexagon carrying its initial and a bar
+ * on the edge it faces, which reads as "this is a machine, not structure" at any
+ * zoom and lets art be authored one piece at a time.
  */
 export function appendLayer(
     builder: MeshBuilder,
     grid: Grid,
     cellSize: number,
     origin: Vec2,
+    /**
+     * How far every colour is washed toward `fadeTo`, 0 drawing the layer as it is.
+     *
+     * A mix rather than an alpha: the vertex format carries no alpha channel and
+     * the shader writes 1.0, so fading against the known background is what
+     * "translucent" means here - the same trick the editor's ghost uses.
+     */
+    fade = 0,
+    fadeTo: Color = Color.BLACK,
 ): void {
     for (const cell of grid.list) {
         const { x, y } = cellCorner(cell, cellSize, origin)
-        const { shape, turns, mirrored } = displayBlock(cell)
-
-        appendShape(builder, shape, turns, mirrored, x, y, cellSize, cell.color)
-        if (isComponent(cell)) appendComponentGlyph(builder, cell, x, y, cellSize)
+        appendBlock(builder, cell, x, y, cellSize, fade, fadeTo)
     }
 }
 

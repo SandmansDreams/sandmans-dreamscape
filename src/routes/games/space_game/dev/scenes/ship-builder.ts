@@ -8,14 +8,14 @@ import { componentById, kindOf, maxLevel } from "../../render/grid/components"
 import type { Cell } from "../../render/grid/grid"
 import { SHIP_LAYERS, type ShipLayer } from "../../render/grid/layers"
 import { appendShape, type BlockShape } from "../../render/grid/shapes"
-import { bestThrusterFacing, canPlaceAt } from "../../render/grid/shipLegality"
+import { bestThrusterFacing, canClearLayer, canEraseAt, canPlaceAt } from "../../render/grid/shipLegality"
 import { Mesh, MeshBuilder, VERTEX_LAYOUT } from "../../render/mesh"
 import type { SceneContext, SceneInstance } from "../../render/scene"
 import { MESH_2D } from "../../render/shaders/mesh2d"
 import { Pipeline } from "../../render/webgpu/pipeline"
 import { Shader } from "../../render/webgpu/shader"
 import type { ActionsOf, SearchColumn, SettingsSchema, ValuesOf } from "../../settings/settings"
-import { appendComponentGlyph, appendLayer, displayBlock, isComponent, type BlockLike } from "../../render/grid/blockDraw"
+import { appendBlock, appendLayer, displayBlock, type BlockLike } from "../../render/grid/blockDraw"
 import { loadBrush, saveBrush, type Brush } from "../../render/grid/brush"
 import type { DevSceneDefinition } from "../DevScene"
 import { downloadText, uploadText } from "../../download"
@@ -30,6 +30,22 @@ const HIGHLIGHT_COLOR = Color.from("#ffe14d")
 
 /** How far the ghost is washed out. 0 is solid, 1 is invisible. */
 const GHOST_FADE = 0.72
+
+/**
+ * How far a dimmed layer is washed toward the background.
+ *
+ * 0.85 leaves roughly the 15% of the original colour the button promises. There
+ * is no alpha in the vertex format, so this mix against a known background is
+ * what translucency means here.
+ */
+const DIM_FADE = 0.85
+
+/** How strongly a protected block is tinted red. */
+const PROTECTED_TINT = 0.45
+const PROTECTED_COLOR = Color.from("#ff3b3b")
+
+/** How long a refusal stays on screen before it dismisses itself, in seconds. */
+const NOTICE_SECONDS = 5
 const BACKGROUND = Color.rgb(0.05, 0.05, 0.07)
 
 const CELL = 32
@@ -105,6 +121,36 @@ export interface SelectedCell {
     mass: number
 }
 
+/**
+ * How much of a layer is drawn.
+ *
+ * Three states rather than a checkbox: "dim" is what you want while building on
+ * top of a hull you need to see but not read, and it is one click away from
+ * either of the other two.
+ */
+export const LAYER_VIEWS = ["full", "dim", "hidden"] as const
+export type LayerView = (typeof LAYER_VIEWS)[number]
+
+/**
+ * Everything the visibility panel can switch, ship layers plus the overlays.
+ *
+ * `markers` is not a layer of the ship - nothing is stored in it and nothing can
+ * be built on it. It is every mark the editor draws *about* the ship: the
+ * center of mass, the legal-placement crosses, the protected-block wash, and the
+ * selection and palette-highlight boxes. Grouping them under one switch is the
+ * only way to see a finished hull with nothing on top of it.
+ */
+export type ViewLayer = ShipLayer | "markers"
+
+/**
+ * The visibility rows, top of the stack first.
+ *
+ * Reversed against SHIP_LAYERS deliberately: that array is draw order, bottom
+ * up, and a panel that lists the topmost thing last reads upside down next to
+ * the ship it describes. Markers lead because they draw over everything.
+ */
+export const VIEW_LAYERS: readonly ViewLayer[] = ["markers", ...[...SHIP_LAYERS].reverse()]
+
 /** The running totals the info panel reads. */
 export interface ShipInfo {
     name: string
@@ -126,6 +172,9 @@ function ghostCell(brush: Brush, facing: number): BlockLike {
         type: brush.type,
         level: brush.level,
         facing,
+        color: Color.from(brush.color),
+        // Empty means "leave the art's accent alone", the same as a placed cell
+        accentColor: brush.accentColor === "" ? null : Color.from(brush.accentColor),
     }
 }
 
@@ -156,11 +205,11 @@ function appendCellBorder(
 }
 
 /** A small cross at a cell's center. Line geometry, so it shares the line pipeline. */
-function appendMark(out: number[], col: number, row: number, origin: Vec2): void {
+function appendMark(out: number[], col: number, row: number, origin: Vec2, color: Color): void {
     const x = (col - origin.x) * CELL + CELL / 2
     const y = (row - origin.y) * CELL + CELL / 2
     const arm = CELL * 0.22
-    const { r, g, b } = MARK_COLOR
+    const { r, g, b } = color
 
     out.push(x - arm, y, r, g, b, x + arm, y, r, g, b)
     out.push(x, y - arm, r, g, b, x, y + arm, r, g, b)
@@ -181,6 +230,9 @@ class ShipBuilder implements SceneInstance<EditorValues> {
     private readonly meshes = new Map<ShipLayer, Mesh>()
     private marks: Mesh | null = null
     private marksKey = ""
+    /** Red wash over blocks the destroy tool would refuse. */
+    private protectedBoxes: Mesh | null = null
+    private protectedKey = ""
     private hover: Mesh | null = null
     private ghost: Mesh | null = null
     /** The center-of-mass cross, rebuilt whenever the geometry moves it. */
@@ -229,6 +281,22 @@ class ShipBuilder implements SceneInstance<EditorValues> {
     private readonly undoStack: Snapshot[] = []
     private readonly redoStack: Snapshot[] = []
 
+    /** Whether this stroke has already taken its snapshot. Reset on every press. */
+    private strokeEdited = false
+
+    /** The refusal currently on screen, so an unchanged one is not republished. */
+    private notice: string | null = null
+    /** Seconds the current refusal has been up, which is what dismisses it. */
+    private noticeAge = 0
+
+    /** How much of each layer is drawn. A view setting, so it is not on the brush. */
+    private layerView: Record<ViewLayer, LayerView> = {
+        markers: "full",
+        hull: "full",
+        components: "full",
+        cosmetic: "full",
+    }
+
     /**
      * Everything a button can ask for, by name.
      *
@@ -239,8 +307,17 @@ class ShipBuilder implements SceneInstance<EditorValues> {
     private readonly commands: Record<string, () => void> = {
         undo: () => this.undo(),
         redo: () => this.redo(),
-        clearLayer: () => this.mutate(() => this.ship.layers[this.brush.layer].clear()),
-        clearAll: () => this.mutate(() => { for (const grid of this.ship.layersOf()) grid.clear() }),
+        clearLayer: () => {
+            const legal = canClearLayer(this.ship, this.brush.layer)
+            if (!legal.ok) return this.notify(legal.reason ?? "that layer cannot be cleared")
+
+            this.mutate(() => this.ship.layers[this.brush.layer].clear())
+            this.notify(null)
+        },
+        clearAll: () => {
+            this.mutate(() => { for (const grid of this.ship.layersOf()) grid.clear() })
+            this.notify(null)
+        },
         download: () => downloadText(`${this.ship.id}.json`, shipToText(this.ship)),
         upload: () => uploadText((text) => this.load(text)),
         test: () => {},
@@ -280,6 +357,24 @@ class ShipBuilder implements SceneInstance<EditorValues> {
             return
         }
 
+        // A patch, like the brush: the panel changes one layer at a time and has
+        // no business restating the other two
+        if (key === "layerView") {
+            this.layerView = { ...this.layerView, ...(value as Partial<Record<ViewLayer, LayerView>>) }
+            this.context.publish("layerView", this.layerView)
+
+            // A selection that has just been hidden has to go with it, or the
+            // panel keeps describing a block nobody can point at any more
+            if (this.selected && this.layerView[this.selected.layer] === "hidden") {
+                this.selected = null
+            }
+
+            // Nothing in the ship changed, so the geometry revision would not
+            // notice - the meshes have to be asked to rebuild
+            this.builtRevision = -1
+            return
+        }
+
         // Null clears it: the panel sends on enter and again on leave, so the
         // scene never has to guess when a hover ended
         if (key === "highlight") this.highlight = (value as string | null) ?? null
@@ -308,10 +403,12 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         // Published from the constructor, not on the first frame: load() clears the
         // channel before create() runs, so this is the first thing the panel sees
         this.publishBrush()
+        this.context.publish("layerView", this.layerView)
     }
 
-    update(_dt: number, settings: EditorValues): void {
+    update(dt: number, settings: EditorValues): void {
         this.settings = settings
+        this.ageNotice(dt)
         // Cheap to set every frame: the setter early-returns when unchanged, and
         // fitCamera already reads gpu.width, so the camera refits itself
         this.context.gpu.resolutionScale = settings.resolution
@@ -319,9 +416,11 @@ class ShipBuilder implements SceneInstance<EditorValues> {
 
         const [col, row] = this.getGridPositionFromMouse()
 
-        // A snapshot per stroke, not per cell, so one undo reverts a whole drag
+        // A snapshot per stroke, not per cell, so one undo reverts a whole drag -
+        // and not until an edit actually lands, so a refused or empty click costs
+        // nothing
         if (this.input.pointer.pressed()) {
-            this.pushUndo()
+            this.strokeEdited = false
 
             // The press picks the cell the info panel talks about. Doing it on the
             // press rather than the release means painting a block also selects
@@ -349,6 +448,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         if (this.ship.geometryRevision !== this.builtRevision) this.rebuildMeshes()
 
         this.rebuildMarks()
+        this.rebuildProtected()
         this.rebuildCursor(col, row)
         this.rebuildHighlight()
         this.publishSelection()
@@ -372,16 +472,23 @@ class ShipBuilder implements SceneInstance<EditorValues> {
             if (mesh) mesh.draw(frame)
         }
 
+        // Over the ship it describes, under the ghost and the mass mark - it is a
+        // wash on the blocks, not a thing in its own right
+        const markers = !this.markersHidden
+        if (markers && this.protectedBoxes) this.protectedBoxes.draw(frame)
+
+        // The ghost stays: it is where the cursor is, not a mark about the ship,
+        // and losing it would make the build tool feel broken
         if (this.ghost) this.ghost.draw(frame)
-        if (this.massMark) this.massMark.draw(frame)
+        if (markers && this.massMark) this.massMark.draw(frame)
 
         // Lines last, and the legal-cell marks last of all. They are the one thing
         // that has to stay readable over a finished hull, so nothing draws on top.
         frame.setPipeline(this.linePipeline).setBindGroup(0, this.cameraBinding.group)
         if (this.hover) this.hover.draw(frame)
-        if (this.highlightBoxes) this.highlightBoxes.draw(frame)
-        if (this.selectedBox) this.selectedBox.draw(frame)
-        if (this.marks) this.marks.draw(frame)
+        if (markers && this.highlightBoxes) this.highlightBoxes.draw(frame)
+        if (markers && this.selectedBox) this.selectedBox.draw(frame)
+        if (markers && this.marks) this.marks.draw(frame)
 
         this.context.stats.set("blocks", this.ship.layersOf().reduce((sum, g) => sum + g.size, 0))
         this.context.stats.set("undo depth", this.undoStack.length)
@@ -426,6 +533,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         this.input.destroy()
         for (const mesh of this.meshes.values()) mesh.destroy()
         this.marks?.destroy()
+        this.protectedBoxes?.destroy()
         this.hover?.destroy()
         this.ghost?.destroy()
         this.massMark?.destroy()
@@ -454,7 +562,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
      * rebuilds once per swatch rather than once per frame.
      */
     private rebuildHighlight(): void {
-        const key = `${this.highlight ?? ""}|${this.ship.geometryRevision}`
+        const key = `${this.highlight ?? ""}|${this.ship.geometryRevision}|${this.layerView.markers}`
         if (key === this.highlightKey) return
         this.highlightKey = key
 
@@ -464,7 +572,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
 
         const wanted = this.highlight.toLowerCase()
         const out: number[] = []
-        const { r, g, b } = HIGHLIGHT_COLOR
+        const { r, g, b } = this.markerInk(HIGHLIGHT_COLOR)
 
         for (const grid of this.ship.layersOf()) {
             for (const cell of grid.list) {
@@ -487,16 +595,19 @@ class ShipBuilder implements SceneInstance<EditorValues> {
      * that it takes the topmost occupied layer, which is what makes a hull block
      * selectable while the brush is set to place thrusters.
      */
-    private pickAt(col: number, row: number): { col: number; row: number; layer: ShipLayer } {
-        if (this.ship.layers[this.brush.layer].has(col, row)) {
-            return { col, row, layer: this.brush.layer }
-        }
+    private pickAt(col: number, row: number): { col: number; row: number; layer: ShipLayer } | null {
+        // Nothing on a layer you cannot see: the outline would sit around empty
+        // space, and the level buttons would edit a block with nothing on screen
+        // to show for it
+        if (this.layerView[this.brush.layer] === "hidden") return null
 
-        for (const layer of [...SHIP_LAYERS].reverse()) {
-            if (this.ship.layers[layer].has(col, row)) return { col, row, layer }
-        }
-
-        // Nothing there: remember the cell anyway so the panel can say so
+        // The chosen layer and nothing else. Falling through to whatever else
+        // happened to be under the cursor meant clicking bare hull while holding a
+        // thruster selected the hull, and the panel then described a block on a
+        // layer you were not working on - with the level buttons wired to it.
+        //
+        // The cell is returned even when it is empty, so the panel can say so
+        // rather than keeping the last selection alive.
         return { col, row, layer: this.brush.layer }
     }
 
@@ -513,7 +624,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         const cell = at ? this.ship.layers[at.layer].get(at.col, at.row) : undefined
 
         const key = cell && at
-            ? `${at.layer},${at.col},${at.row},${cell.shape},${cell.type},${cell.level},${cell.turns},${cell.mirrored},${cell.facing},${cell.color.hex}`
+            ? `${at.layer},${at.col},${at.row},${cell.shape},${cell.type},${cell.level},${cell.turns},${cell.mirrored},${cell.facing},${cell.color.hex},${this.layerView.markers}`
             : ""
 
         if (key === this.selectionKey) return
@@ -522,7 +633,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         // The outline is what ties the info panel to a block on screen - without
         // it the panel describes a cell you have no way to point at
         this.selectedBox?.destroy()
-        this.selectedBox = cell && at ? this.buildCellBox(at.col, at.row, SELECTED_COLOR, "selected") : null
+        this.selectedBox = cell && at ? this.buildCellBox(at.col, at.row, this.markerInk(SELECTED_COLOR), "selected") : null
 
         if (!cell || !at) {
             this.context.publish("selected", null)
@@ -575,21 +686,57 @@ class ShipBuilder implements SceneInstance<EditorValues> {
             level,
             facing: cell.facing,
             color: cell.color,
+            accentColor: cell.accentColor,
             emission: cell.emission,
         })
     }
 
     /*~~~ Editing ~~~*/
+    /**
+     * Snapshots the ship, once, before the first change of a stroke.
+     *
+     * Called by each edit rather than by the press, so clicking empty space,
+     * repainting an identical block or being refused outright leaves the undo
+     * stack alone. A drag still costs exactly one step, because the flag survives
+     * until the next press.
+     */
+    private beginEdit(): void {
+        if (this.strokeEdited) return
+
+        this.strokeEdited = true
+        this.pushUndo()
+    }
+
     private apply(col: number, row: number): void { // NOTE: May need to change to apply to layer?
         const brush = this.brush
         const grid = this.ship.layers[brush.layer]
+
+        // Before the tool is even considered: a hidden layer takes no edits and no
+        // selections, and a click that quietly does nothing is worse than one that
+        // explains itself
+        if (this.onHiddenLayer) {
+            this.notify(`the ${brush.layer} layer is hidden`)
+            return
+        }
 
         // Selecting is what the press already did. Anything else here would make
         // "look at this block" destructive.
         if (brush.tool === "select") return
 
         if (brush.tool === "destroy") {
+            // An empty cell is not an edit, and a drag crosses plenty of them
+            if (!grid.has(col, row)) return
+
+            const legal = canEraseAt(this.ship, brush.layer, col, row)
+            if (!legal.ok) {
+                this.notify(legal.reason ?? "that block cannot be erased")
+                return
+            }
+
+            this.beginEdit()
             grid.delete(col, row)
+            // A successful edit is what clears the last refusal
+            this.notify(null)
             return
         }
 
@@ -598,6 +745,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         if (!canPlaceAt(this.ship, brush.layer, col, row, brush.type).ok) return
         if (this.matchesBrush(grid.get(col, row))) return
 
+        this.beginEdit()
         grid.set(col, row, brush.shape, {
             turns: brush.turns,
             mirrored: brush.mirrored,
@@ -605,6 +753,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
             level: Math.min(brush.level, maxLevel(brush.type)),
             facing: this.facingFor(col, row),
             color: Color.from(brush.color),
+            accentColor: brush.accentColor === "" ? null : Color.from(brush.accentColor),
             emission: brush.emission,
         })
     }
@@ -641,6 +790,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
             && cell.facing === brush.facing
             && cell.emission === brush.emission
             && cell.color.hex === brush.color
+            && (cell.accentColor?.hex ?? "") === brush.accentColor
     }
 
     private snapshot(): Snapshot {
@@ -744,8 +894,13 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         this.meshes.clear()
 
         for (const layer of SHIP_LAYERS) {
+            const view = this.layerView[layer]
+            if (view === "hidden") continue
+
             const builder = new MeshBuilder()
-            appendLayer(builder, this.ship.layers[layer], CELL, this.origin)
+            const fade = view === "dim" ? DIM_FADE : 0
+
+            appendLayer(builder, this.ship.layers[layer], CELL, this.origin, fade, BACKGROUND)
             if (builder.vertexCount > 0) this.meshes.set(layer, builder.build(gpu, layer))
         }
 
@@ -775,7 +930,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
             (center.x - this.origin.x) * CELL,
             (center.y - this.origin.y) * CELL,
             CELL * 0.8,
-            MASS_COLOR,
+            this.markerInk(MASS_COLOR),
         )
 
         this.massMark = builder.build(this.context.gpu, "center of mass")
@@ -820,7 +975,8 @@ class ShipBuilder implements SceneInstance<EditorValues> {
      */
     private rebuildMarks(): void {
         const brush = this.brush
-        const key = `${this.ship.geometryRevision}|${brush.layer}|${brush.type}|${brush.facing}|${brush.tool}`
+        const key = `${this.ship.geometryRevision}|${brush.layer}|${brush.type}|${brush.facing}|${brush.tool}|`
+            + `${this.layerView.markers}|${this.layerView[brush.layer]}`
         if (key === this.marksKey) return
         this.marksKey = key
 
@@ -831,19 +987,135 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         // tool is asking. Erasing and selecting act on what is already there.
         if (brush.tool !== "build") return
 
+        // Nothing can go anywhere on a hidden layer, so offering cells would be a
+        // promise the click will refuse
+        if (this.onHiddenLayer) return
+
         const bounds = this.ship.bounds
         const out: number[] = []
 
         for (let row = (bounds?.minRow ?? 0) - MARGIN; row <= (bounds?.maxRow ?? 0) + MARGIN; row++) {
             for (let col = (bounds?.minCol ?? 0) - MARGIN; col <= (bounds?.maxCol ?? 0) + MARGIN; col++) {
                 if (!canPlaceAt(this.ship, brush.layer, col, row, brush.type).ok) continue
-                appendMark(out, col, row, this.origin)
+                appendMark(out, col, row, this.origin, this.markerInk(MARK_COLOR))
             }
         }
 
         if (out.length > 0) {
             this.marks = Mesh.create(this.context.gpu, new Float32Array(out), "legal cells")
         }
+    }
+
+    /**
+     * A red wash over every block the destroy tool would refuse.
+     *
+     * The counterpart to the legal-placement marks: the erase rules are only
+     * discoverable by being refused otherwise, which teaches them one annoyance
+     * at a time. Drawn as each block's own shape rather than a flat square so the
+     * wash lands on the block and not on the empty half of a wedge.
+     */
+    private rebuildProtected(): void {
+        const brush = this.brush
+        // Every view belongs in the key, markers included: hiding the layer above
+        // uncovers hull and dimming the markers repaints the wash, and neither
+        // touches the ship. VIEW_LAYERS rather than SHIP_LAYERS is the whole point
+        // - leaving markers out is what left the red at full strength when dimmed.
+        const views = VIEW_LAYERS.map((layer) => this.layerView[layer]).join(",")
+        const key = `${this.ship.geometryRevision}|${brush.layer}|${brush.tool}|${views}`
+        if (key === this.protectedKey) return
+        this.protectedKey = key
+
+        this.protectedBoxes?.destroy()
+        this.protectedBoxes = null
+
+        // Only the destroy tool is asking "what can come off"
+        if (brush.tool !== "destroy") return
+
+        // Marking blocks on a layer nobody can see would leave a red shape floating
+        // over whatever is behind it
+        if (this.layerView[brush.layer] === "hidden") return
+
+        const builder = new MeshBuilder()
+
+        for (const cell of this.ship.layers[brush.layer].list) {
+            if (canEraseAt(this.ship, brush.layer, cell.col, cell.row).ok) continue
+
+            // The wash draws after every layer, so on a covered block it would land
+            // on whatever sits above and mark the wrong thing entirely
+            if (this.coveredAbove(brush.layer, cell.col, cell.row)) continue
+
+            // The block's own shape, not its art: only hull is ever protected and
+            // hull-plate has no art. Give hull art and this wash becomes a hexagon
+            // over a turret, and wants rebuilding on top of appendBlock instead.
+            const { shape, turns, mirrored } = displayBlock(cell)
+            const x = cell.col * CELL - this.origin.x * CELL
+            const y = cell.row * CELL - this.origin.y * CELL
+
+            // Tinted from the block's own colour, so it reads as a wash over the
+            // block rather than a solid red tile replacing it
+            appendShape(
+                builder, shape, turns, mirrored, x, y, CELL,
+                this.markerInk(cell.color.mix(PROTECTED_COLOR, PROTECTED_TINT)),
+            )
+        }
+
+        if (builder.vertexCount > 0) {
+            this.protectedBoxes = builder.build(this.context.gpu, "protected blocks")
+        }
+    }
+
+    /**
+     * A marker's colour, washed out when the markers layer is dimmed.
+     *
+     * Every mark goes through here rather than reading its constant directly, so
+     * the dim state is one rule instead of five that can drift apart.
+     */
+    private markerInk(base: Color): Color {
+        return this.layerView.markers === "dim" ? base.mix(BACKGROUND, DIM_FADE) : base
+    }
+
+    /**
+     * True when the layer the brush is on cannot be seen.
+     *
+     * Every interaction checks this: editing blocks you have no way to look at is
+     * how a ship ends up with a block nobody remembers placing.
+     */
+    private get onHiddenLayer(): boolean {
+        return this.layerView[this.brush.layer] === "hidden"
+    }
+
+    /** True when the markers layer is switched off entirely. */
+    private get markersHidden(): boolean {
+        return this.layerView.markers === "hidden"
+    }
+
+    /**
+     * True when a block that is actually being drawn sits over this cell.
+     *
+     * "Above" is later in SHIP_LAYERS, which is draw order - the same order that
+     * decides what the eye ends up seeing. A hidden layer covers nothing, so
+     * switching it off exposes the hull beneath and the wash comes back.
+     */
+    private coveredAbove(layer: ShipLayer, col: number, row: number): boolean {
+        const above = SHIP_LAYERS.slice(SHIP_LAYERS.indexOf(layer) + 1)
+
+        return above.some(
+            (other) => this.layerView[other] !== "hidden" && this.ship.layers[other].has(col, row),
+        )
+    }
+
+    /**
+     * Takes a refusal off screen once it has been up long enough to read.
+     *
+     * The clock lives here rather than in the panel because the scene owns the
+     * message: a panel that hid it on its own timer would leave the scene still
+     * holding the string, and repeating the same refusal would publish nothing.
+     */
+    private ageNotice(dt: number): void {
+        if (this.notice === null) return
+
+        this.noticeAge += dt
+        if (this.noticeAge >= NOTICE_SECONDS) this.notify(null)
     }
 
         /**
@@ -855,7 +1127,11 @@ class ShipBuilder implements SceneInstance<EditorValues> {
      */
     private rebuildCursor(col: number, row: number): void {
         const brush = this.brush
-        const legal = canPlaceAt(this.ship, brush.layer, col, row, brush.type).ok
+        // A hidden layer refuses everything, so the cursor reads blocked wherever
+        // it sits rather than promising a placement the click will turn down
+        const legal = !this.onHiddenLayer
+            && canPlaceAt(this.ship, brush.layer, col, row, brush.type).ok
+
         const key = `${col},${row},${this.input.pointer.over},${legal},` +
             `${brush.shape},${brush.turns},${brush.mirrored},${brush.tool},${brush.color},` +
             `${brush.type},${brush.level},${brush.facing},${this.ship.geometryRevision}`
@@ -910,21 +1186,39 @@ class ShipBuilder implements SceneInstance<EditorValues> {
      * as whatever hull shape the brush was last holding.
      */
     private buildGhost(col: number, row: number): Mesh | null {
-        const brush = this.brush
         const builder = new MeshBuilder()
-        const faded = Color.from(brush.color).mix(BACKGROUND, GHOST_FADE)
 
-        const preview = ghostCell(brush, this.facingFor(col, row))
-        const { shape, turns, mirrored } = displayBlock(preview)
-        const x = (col - this.origin.x) * CELL
-        const y = (row - this.origin.y) * CELL
-
-        appendShape(builder, shape, turns, mirrored, x, y, CELL, faded)
-        if (isComponent(preview)) {
-            appendComponentGlyph(builder, preview, x, y, CELL, faded.mix(BACKGROUND, 0.4))
-        }
+        // The same call the ship's own mesh makes, washed out: a preview drawn by
+        // any other path is a preview that can lie about what a click will do
+        appendBlock(
+            builder,
+            ghostCell(this.brush, this.facingFor(col, row)),
+            (col - this.origin.x) * CELL,
+            (row - this.origin.y) * CELL,
+            CELL,
+            GHOST_FADE,
+            BACKGROUND,
+        )
 
         return builder.vertexCount > 0 ? builder.build(this.context.gpu, "ghost") : null
+    }
+
+    /**
+     * Tells the user why something did not happen.
+     *
+     * Guarded on the last value because `apply` runs every frame of a drag -
+     * holding the button over an illegal cell would otherwise publish sixty
+     * identical messages a second.
+     */
+    private notify(reason: string | null): void {
+        // A repeat of the same refusal is still a fresh one: it restarts the clock
+        // without paying to republish an identical string
+        this.noticeAge = 0
+
+        if (reason === this.notice) return
+
+        this.notice = reason
+        this.context.publish("notice", reason)
     }
 }
 

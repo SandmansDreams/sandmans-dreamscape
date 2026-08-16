@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 7,
   "id": "scouter-2",
   "name": "Scouter 2",
   "creator": "SpaceGameCreator",
@@ -21,9 +21,7 @@
       {"c":3,"r":8,"s":"half","p":"3b2626"},
       {"c":4,"r":8,"s":"arc","p":"3b2626"}
     ],
-    "coverable": [],
-    "cosmetic": [],
-    "placement": []
+    "components": [],
+    "cosmetic": []
   }
 }
-

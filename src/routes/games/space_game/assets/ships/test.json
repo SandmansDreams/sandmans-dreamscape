@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 7,
   "id": "test",
   "name": "Test Ship",
   "creator": "SpaceGameCreator",
@@ -52,10 +52,12 @@
       {"c":1,"r":3,"s":"full","p":"424a57"},
       {"c":2,"r":3,"s":"full","p":"424a57"}
     ],
-    "coverable": [
-      {"c":0,"r":1,"s":"full","p":"424a57","k":"generator"},
-      {"c":-1,"r":4,"s":"full","p":"424a57","e":0.8,"k":"thruster","f":2},
-      {"c":1,"r":4,"s":"full","p":"424a57","e":0.8,"k":"thruster","f":2}
+    "components": [
+      {"c":-2,"r":-1,"s":"band","p":"424a57","ty":"autocannon"},
+      {"c":2,"r":-1,"s":"band","p":"424a57","ty":"autocannon"},
+      {"c":0,"r":1,"s":"full","p":"424a57","ty":"fusion-core"},
+      {"c":-1,"r":4,"s":"full","p":"424a57","e":0.8,"ty":"ion-thruster","f":2},
+      {"c":1,"r":4,"s":"full","p":"424a57","e":0.8,"ty":"ion-thruster","f":2}
     ],
     "cosmetic": [
       {"c":0,"r":-3,"s":"centerLine","t":1,"p":"59d9ff","e":1},
@@ -64,11 +66,6 @@
       {"c":0,"r":0,"s":"centerLine","t":1,"p":"59d9ff","e":1},
       {"c":0,"r":1,"s":"centerLine","t":1,"p":"59d9ff","e":1},
       {"c":0,"r":2,"s":"centerLine","t":1,"p":"59d9ff","e":1}
-    ],
-    "placement": [
-      {"c":-2,"r":-1,"s":"band","p":"424a57","k":"weapon"},
-      {"c":2,"r":-1,"s":"band","p":"424a57","k":"weapon"}
     ]
   }
 }
-

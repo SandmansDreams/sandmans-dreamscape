@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { Ship } from "../../game/ship"
-import { canPlaceAt, thrusterFacings } from "./shipLegality"
+import { canClearLayer, canEraseAt, canPlaceAt, thrusterFacings } from "./shipLegality"
 
 function shipWithHull(): Ship {
     const ship = new Ship("t", "T")
@@ -42,20 +42,20 @@ describe("layer rules", () => {
     })
 
     it("refuses a component floating beside the hull", () => {
-        const result = canPlaceAt(shipWithHull(), "placement", 9, 9, "autocannon")
+        const result = canPlaceAt(shipWithHull(), "components", 9, 9, "autocannon")
         expect(result.ok).toBe(false)
         expect(result.reason).toContain("sit on")
     })
 
     it("allows a component on top of a hull block", () => {
-        expect(canPlaceAt(shipWithHull(), "placement", 1, 1, "autocannon").ok).toBe(true)
+        expect(canPlaceAt(shipWithHull(), "components", 1, 1, "autocannon").ok).toBe(true)
     })
 })
 
 describe("thruster edge rule", () => {
     it("allows one within reach of any edge", () => {
         // (1,2) is the bottom row of a 3x3 hull, so south is open one step away
-        expect(canPlaceAt(shipWithHull(), "coverable", 1, 2, "ion-thruster").ok).toBe(true)
+        expect(canPlaceAt(shipWithHull(), "components", 1, 2, "ion-thruster").ok).toBe(true)
     })
 
     it("refuses one buried too deep", () => {
@@ -64,7 +64,7 @@ describe("thruster edge rule", () => {
         // reaches open space within the reach
         ship.layers.hull.fill(0, 0, 6, 6, "full")
 
-        const result = canPlaceAt(ship, "coverable", 3, 3, "ion-thruster")
+        const result = canPlaceAt(ship, "components", 3, 3, "ion-thruster")
         expect(result.ok).toBe(false)
         expect(result.reason).toContain("edge")
     })
@@ -79,6 +79,88 @@ describe("thruster edge rule", () => {
         // A generator may sit anywhere on the hull, however deep
         const ship = new Ship("t", "T")
         ship.layers.hull.fill(0, 0, 2, 5, "full")
-        expect(canPlaceAt(ship, "coverable", 1, 0, "fusion-core").ok).toBe(true)
+        expect(canPlaceAt(ship, "components", 1, 0, "fusion-core").ok).toBe(true)
+    })
+})
+
+describe("canEraseAt", () => {
+    /** A 1x3 bridge: erasing the middle is the classic split. */
+    function bridge(): Ship {
+        const ship = new Ship("t", "T")
+        ship.layers.hull.fill(0, 0, 2, 0, "full")
+        return ship
+    }
+
+    it("refuses an erase that would cut the ship in two", () => {
+        const result = canEraseAt(bridge(), "hull", 1, 0)
+        expect(result.ok).toBe(false)
+        expect(result.reason).toContain("floating")
+    })
+
+    it("allows erasing an end", () => {
+        expect(canEraseAt(bridge(), "hull", 0, 0).ok).toBe(true)
+        expect(canEraseAt(bridge(), "hull", 2, 0).ok).toBe(true)
+    })
+
+    it("allows erasing the middle of a loop, which stays connected", () => {
+        const ship = new Ship("t", "T")
+        ship.layers.hull.fill(0, 0, 2, 2, "full")
+
+        expect(canEraseAt(ship, "hull", 1, 0).ok).toBe(true)
+    })
+
+    it("refuses erasing hull that carries something", () => {
+        const ship = bridge()
+        ship.layers.components.set(0, 0, "full", { type: "ion-thruster" })
+
+        const result = canEraseAt(ship, "hull", 0, 0)
+        expect(result.ok).toBe(false)
+        expect(result.reason).toContain("components")
+    })
+
+    it("allows erasing the last hull block", () => {
+        const ship = new Ship("t", "T")
+        ship.layers.hull.set(0, 0, "full")
+
+        expect(canEraseAt(ship, "hull", 0, 0).ok).toBe(true)
+    })
+
+    it("leaves other layers alone", () => {
+        const ship = bridge()
+        ship.layers.components.set(1, 0, "full", { type: "autocannon" })
+
+        expect(canEraseAt(ship, "components", 1, 0).ok).toBe(true)
+    })
+
+    it("treats erasing empty space as legal", () => {
+        expect(canEraseAt(bridge(), "hull", 9, 9).ok).toBe(true)
+    })
+})
+
+describe("canClearLayer", () => {
+    it("refuses clearing hull with anything on top", () => {
+        const ship = new Ship("t", "T")
+        ship.layers.hull.fill(0, 0, 2, 0, "full")
+        ship.layers.components.set(1, 0, "full", { type: "crate" })
+
+        const result = canClearLayer(ship, "hull")
+        expect(result.ok).toBe(false)
+        expect(result.reason).toContain("1 block")
+    })
+
+    it("allows clearing a bare hull", () => {
+        const ship = new Ship("t", "T")
+        ship.layers.hull.fill(0, 0, 2, 0, "full")
+
+        expect(canClearLayer(ship, "hull").ok).toBe(true)
+    })
+
+    it("never blocks clearing a layer nothing rides on", () => {
+        const ship = new Ship("t", "T")
+        ship.layers.hull.set(0, 0, "full")
+        ship.layers.components.set(0, 0, "full", { type: "crate" })
+
+        expect(canClearLayer(ship, "components").ok).toBe(true)
+        expect(canClearLayer(ship, "cosmetic").ok).toBe(true)
     })
 })

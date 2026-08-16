@@ -1,0 +1,212 @@
+import { describe, expect, it } from "vitest"
+import { Color } from "../color"
+import { MeshBuilder, FLOATS_PER_VERTEX } from "../mesh"
+import { appendBlock, appendLayer, type BlockLike } from "./blockDraw"
+import { Grid } from "./grid"
+
+const RED = Color.rgb(1, 0, 0)
+const BACKGROUND = Color.rgb(0.05, 0.05, 0.07)
+
+/** One solid red cell, which is the simplest thing with a colour to check. */
+function oneRedCell(): Grid {
+    const grid = new Grid()
+    grid.set(0, 0, "full", { color: RED })
+    return grid
+}
+
+/** Every vertex's colour, as [r, g, b] triples. */
+function colorsOf(builder: MeshBuilder): number[][] {
+    const data = builder.toArray()
+    const out: number[][] = []
+
+    for (let i = 0; i < data.length; i += FLOATS_PER_VERTEX) {
+        out.push([data[i + 2]!, data[i + 3]!, data[i + 4]!])
+    }
+
+    return out
+}
+
+describe("appendLayer fade", () => {
+    it("draws the authored colour when nothing is faded", () => {
+        const builder = new MeshBuilder()
+        appendLayer(builder, oneRedCell(), 32, { x: 0, y: 0 })
+
+        for (const [r, g, b] of colorsOf(builder)) {
+            expect(r).toBeCloseTo(1)
+            expect(g).toBeCloseTo(0)
+            expect(b).toBeCloseTo(0)
+        }
+    })
+
+    it("lands on the background at full fade", () => {
+        const builder = new MeshBuilder()
+        appendLayer(builder, oneRedCell(), 32, { x: 0, y: 0 }, 1, BACKGROUND)
+
+        for (const [r, g, b] of colorsOf(builder)) {
+            expect(r).toBeCloseTo(BACKGROUND.r)
+            expect(g).toBeCloseTo(BACKGROUND.g)
+            expect(b).toBeCloseTo(BACKGROUND.b)
+        }
+    })
+
+    it("keeps 15% of the colour at the dim fade", () => {
+        const builder = new MeshBuilder()
+        // 0.85 is what the builder's dim state uses, and 15% of the original is
+        // what its button promises
+        appendLayer(builder, oneRedCell(), 32, { x: 0, y: 0 }, 0.85, BACKGROUND)
+
+        const [r] = colorsOf(builder)[0]!
+        expect(r).toBeCloseTo(1 * 0.15 + BACKGROUND.r * 0.85, 4)
+    })
+
+    it("does not change the geometry it emits", () => {
+        const plain = new MeshBuilder()
+        const faded = new MeshBuilder()
+
+        appendLayer(plain, oneRedCell(), 32, { x: 0, y: 0 })
+        appendLayer(faded, oneRedCell(), 32, { x: 0, y: 0 }, 0.85, BACKGROUND)
+
+        // A fade is a colour, not a shape: hiding a layer is what removes blocks
+        expect(faded.vertexCount).toBe(plain.vertexCount)
+    })
+})
+
+describe("appendLayer art", () => {
+    /** A cell wearing a piece of art, which is what the seam is for. */
+    function turretGrid(facing = 0): Grid {
+        const grid = new Grid("components")
+        grid.set(0, 0, "full", { type: "autocannon", level: 1, facing, color: RED })
+        return grid
+    }
+
+    function bounds(builder: MeshBuilder) {
+        const data = builder.toArray()
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+
+        for (let i = 0; i < data.length; i += FLOATS_PER_VERTEX) {
+            minX = Math.min(minX, data[i]!)
+            maxX = Math.max(maxX, data[i]!)
+            minY = Math.min(minY, data[i + 1]!)
+            maxY = Math.max(maxY, data[i + 1]!)
+        }
+
+        return { minX, minY, maxX, maxY }
+    }
+
+    it("draws art instead of the hexagon placeholder", () => {
+        const withArt = new MeshBuilder()
+        appendLayer(withArt, turretGrid(), 32, { x: 0, y: 0 })
+
+        const noArt = new MeshBuilder()
+        const railgun = new Grid("components")
+        railgun.set(0, 0, "full", { type: "railgun", color: RED })
+        appendLayer(noArt, railgun, 32, { x: 0, y: 0 })
+
+        // The turret is a couple of hundred triangles; a hexagon plus its glyph is
+        // nothing like that many
+        expect(withArt.vertexCount).toBeGreaterThan(noArt.vertexCount * 3)
+    })
+
+    it("keeps the art inside the cell it belongs to", () => {
+        const builder = new MeshBuilder()
+        appendLayer(builder, turretGrid(), 32, { x: 0, y: 0 })
+
+        const box = bounds(builder)
+        expect(box.minX).toBeGreaterThanOrEqual(-0.001)
+        expect(box.minY).toBeGreaterThanOrEqual(-0.001)
+        expect(box.maxX).toBeLessThanOrEqual(32.001)
+        expect(box.maxY).toBeLessThanOrEqual(32.001)
+    })
+
+    it("stays inside the cell when rotated", () => {
+        for (const facing of [1, 2, 3]) {
+            const builder = new MeshBuilder()
+            appendLayer(builder, turretGrid(facing), 32, { x: 0, y: 0 })
+
+            const box = bounds(builder)
+            expect(box.minX).toBeGreaterThanOrEqual(-0.001)
+            expect(box.maxX).toBeLessThanOrEqual(32.001)
+            expect(box.minY).toBeGreaterThanOrEqual(-0.001)
+            expect(box.maxY).toBeLessThanOrEqual(32.001)
+        }
+    })
+
+    it("actually moves the geometry when facing changes", () => {
+        const north = new MeshBuilder()
+        const east = new MeshBuilder()
+        appendLayer(north, turretGrid(0), 32, { x: 0, y: 0 })
+        appendLayer(east, turretGrid(1), 32, { x: 0, y: 0 })
+
+        // Same triangle count, different positions - one file, four headings
+        expect(east.vertexCount).toBe(north.vertexCount)
+        expect([...east.toArray()]).not.toEqual([...north.toArray()])
+    })
+
+    it("tints the main role with the cell's colour", () => {
+        const builder = new MeshBuilder()
+        appendLayer(builder, turretGrid(), 32, { x: 0, y: 0 })
+
+        const data = builder.toArray()
+        let reds = 0
+        for (let i = 0; i < data.length; i += FLOATS_PER_VERTEX) {
+            if (data[i + 2] === 1 && data[i + 3] === 0 && data[i + 4] === 0) reds++
+        }
+
+        expect(reds).toBeGreaterThan(0)
+    })
+})
+
+describe("preview and placement agree", () => {
+    /** What the editor's ghost builds: a block with no coordinates yet. */
+    function preview(type: string, level = 1, facing = 0): BlockLike {
+        return {
+            shape: "full", turns: 0, mirrored: false,
+            type, level, facing,
+            color: RED, accentColor: null,
+        }
+    }
+
+    /** The same block, placed. */
+    function placed(type: string, level = 1, facing = 0): Grid {
+        const grid = new Grid("components")
+        grid.set(0, 0, "full", { type, level, facing, color: RED })
+        return grid
+    }
+
+    // The bug this pins: the ghost drew through its own path and showed a hexagon
+    // over a component whose art the ship was already drawing
+    it.each([
+        ["autocannon", 1],
+        ["autocannon", 5],
+        ["railgun", 1],
+        ["hull-plate", 1],
+    ])("%s L%i previews exactly what it places", (type, level) => {
+        const ghost = new MeshBuilder()
+        const ship = new MeshBuilder()
+
+        appendBlock(ghost, preview(type, level), 0, 0, 32)
+        appendLayer(ship, placed(type, level), 32, { x: 0, y: 0 })
+
+        expect([...ghost.toArray()]).toEqual([...ship.toArray()])
+    })
+
+    it("previews the rotation it will place", () => {
+        const ghost = new MeshBuilder()
+        const ship = new MeshBuilder()
+
+        appendBlock(ghost, preview("autocannon", 3, 2), 0, 0, 32)
+        appendLayer(ship, placed("autocannon", 3, 2), 32, { x: 0, y: 0 })
+
+        expect([...ghost.toArray()]).toEqual([...ship.toArray()])
+    })
+
+    it("previews a level's own art rather than the type's", () => {
+        const one = new MeshBuilder()
+        const five = new MeshBuilder()
+
+        appendBlock(one, preview("autocannon", 1), 0, 0, 32)
+        appendBlock(five, preview("autocannon", 5), 0, 0, 32)
+
+        expect([...one.toArray()]).not.toEqual([...five.toArray()])
+    })
+})

@@ -9,7 +9,7 @@ function sample(): Ship {
     ship.layers.hull.set(0, 0, "full", { color: Color.rgb(0.58, 0.63, 0.7) })
     ship.layers.hull.set(1, 0, "wedge", { turns: 2, color: Color.rgb(0.58, 0.63, 0.7) })
     ship.layers.hull.set(-1, 0, "halfWedge", { mirrored: true, color: Color.rgb(0.26, 0.29, 0.34) })
-    ship.layers.coverable.set(0, 1, "full", {
+    ship.layers.components.set(0, 1, "full", {
         type: "ion-thruster",
         facing: 2,
         emission: 0.8,
@@ -79,7 +79,7 @@ describe("round trip", () => {
         expect(ship.id).toBe("test")
         expect(ship.name).toBe("Test Ship")
 
-        const thruster = ship.layers.coverable.get(0, 1)!
+        const thruster = ship.layers.components.get(0, 1)!
         expect(thruster.type).toBe("ion-thruster")
         expect(thruster.facing).toBe(2)
         expect(thruster.emission).toBe(0.8)
@@ -157,8 +157,8 @@ describe("v5 migration", () => {
     it("turns a category into the first type registered under it", () => {
         const { ship } = readShip(v5())
 
-        expect(ship.layers.coverable.get(0, 1)!.type).toBe("ion-thruster")
-        expect(ship.layers.coverable.get(1, 1)!.type).toBe("crate")
+        expect(ship.layers.components.get(0, 1)!.type).toBe("ion-thruster")
+        expect(ship.layers.components.get(1, 1)!.type).toBe("crate")
     })
 
     it("rescues a category that has since become a type", () => {
@@ -169,7 +169,7 @@ describe("v5 migration", () => {
             layers: { coverable: [{ c: 0, r: 0, s: "full", k: "battery" }] },
         })
 
-        expect(ship.layers.coverable.get(0, 0)!.type).toBe("battery")
+        expect(ship.layers.components.get(0, 0)!.type).toBe("battery")
         expect(warnings.some((w) => w.includes("battery"))).toBe(false)
     })
 
@@ -183,12 +183,12 @@ describe("v5 migration", () => {
         const { ship } = readShip(v5())
 
         expect(ship.layers.hull.size).toBe(1)
-        expect(ship.layers.coverable.size).toBe(2)
+        expect(ship.layers.components.size).toBe(2)
     })
 
     it("carries the migrated cell's stats from its new type", () => {
         const { ship } = readShip(v5())
-        const thruster = ship.layers.coverable.get(0, 1)!
+        const thruster = ship.layers.components.get(0, 1)!
 
         // An ion thruster at level 1, not whatever the old category table said
         expect(thruster.hitPoints).toBe(8)
@@ -200,6 +200,75 @@ describe("v5 migration", () => {
         const { ship: again, warnings } = readShip(shipToJson(ship))
 
         expect(warnings).toEqual([])
-        expect(again.layers.coverable.get(0, 1)!.type).toBe("ion-thruster")
+        expect(again.layers.components.get(0, 1)!.type).toBe("ion-thruster")
+    })
+
+    it("folds both old component layers into one", () => {
+        const { ship, warnings } = readShip({
+            version: 6,
+            layers: {
+                coverable: [{ c: 0, r: 0, s: "full", k: "thruster" }],
+                placement: [{ c: 1, r: 0, s: "full", k: "weapon" }],
+            },
+        })
+
+        expect(ship.layers.components.size).toBe(2)
+        expect(warnings.some((w) => w.includes("unknown layer"))).toBe(false)
+    })
+
+    it("warns when the merge lands two cells on one square", () => {
+        const { warnings } = readShip({
+            version: 6,
+            layers: {
+                coverable: [{ c: 0, r: 0, s: "full", k: "thruster" }],
+                placement: [{ c: 0, r: 0, s: "full", k: "weapon" }],
+            },
+        })
+
+        expect(warnings.some((w) => w.includes("overwritten"))).toBe(true)
+    })
+})
+describe("accent color", () => {
+    it("omits the accent when the art's own is used", () => {
+        const ship = new Ship("t", "T")
+        ship.layers.components.set(0, 0, "full", { type: "autocannon", color: Color.rgb(1, 1, 1) })
+
+        expect(shipToJson(ship).layers.components![0]!.ac).toBeUndefined()
+    })
+
+    it("round-trips an accent that was set", () => {
+        const ship = new Ship("t", "T")
+        ship.layers.components.set(0, 0, "full", {
+            type: "autocannon",
+            color: Color.rgb(1, 1, 1),
+            accentColor: Color.rgb(1, 0.5, 0),
+        })
+
+        const { ship: again, warnings } = shipFromText(shipToText(ship))
+        const cell = again.layers.components.get(0, 0)!
+
+        expect(warnings).toEqual([])
+        expect(cell.accentColor?.hex).toBe(Color.rgb(1, 0.5, 0).hex)
+    })
+
+    it("keeps null distinct from a colour that happens to match", () => {
+        // "use the art's accent" is a real value, not a shade of orange - a reader
+        // that collapsed the two would freeze every turret at whatever it shipped with
+        const ship = new Ship("t", "T")
+        ship.layers.components.set(0, 0, "full", { type: "autocannon", color: Color.rgb(1, 1, 1) })
+
+        const { ship: again } = shipFromText(shipToText(ship))
+        expect(again.layers.components.get(0, 0)!.accentColor).toBeNull()
+    })
+
+    it("warns and falls back when the accent key is missing", () => {
+        const { ship, warnings } = readShip({
+            version: SHIP_FORMAT_VERSION,
+            palette: {},
+            layers: { hull: [{ c: 0, r: 0, s: "full", ac: "nosuch" }] },
+        })
+
+        expect(ship.layers.hull.get(0, 0)!.accentColor).toBeNull()
+        expect(warnings.some((w) => w.includes("nosuch"))).toBe(true)
     })
 })

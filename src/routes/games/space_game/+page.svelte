@@ -15,7 +15,7 @@
     } from "./settings/settings"
     import BuilderUI from "./render/ui/BuilderUI.svelte"
     import { loadBrush, type Brush } from "./render/grid/brush"
-    import type { SelectedCell, ShipInfo } from "./dev/scenes/ship-builder"
+    import type { LayerView, SelectedCell, ShipInfo } from "./dev/scenes/ship-builder"
     import SpriteEditorUI from "./render/ui/SpriteEditorUI.svelte"
     import type { ArtBrush, ArtInfo } from "./dev/scenes/sprite-editor"
 
@@ -46,6 +46,10 @@
     let budgetMs = $state(1000 / 60)
     let statLines = $state<StatEntry[]>([])
     let gpuTimingSupported = $state(true)
+
+    let notice = $state<string | null>(null)
+    /** How much of each layer the scene is drawing. Null until it publishes. */
+    let layerView = $state<Record<string, LayerView> | null>(null)
 
     function formatStat(entry: StatEntry): string {
         // Smoothing is right for milliseconds and wrong for counts: an averaged
@@ -124,6 +128,8 @@
                 if (key === "palette") palette = value as string[]
                 if (key === "shipInfo") shipInfo = value as ShipInfo
                 if (key === "selected") selected = value as SelectedCell | null
+                if (key === "notice") notice = value as string | null
+                if (key === "layerView") layerView = value as Record<string, LayerView>
             })
 
             ticker = setInterval(() => {
@@ -153,7 +159,10 @@
             {palette}
             {shipInfo}
             {selected}
+            {notice}
+            {layerView}
             onPatch={(patch) => runner?.send("brush", patch)}
+            onLayerView={(patch) => runner?.send("layerView", patch)}
             onAction={(name) => runner?.send("action", name)}
             onUpgrade={(delta) => runner?.send("upgrade", delta)}
             onHighlight={(hex) => runner?.send("highlight", hex)}
@@ -219,6 +228,33 @@
 </div>
 
 <style>
+    /*
+     * Both self-hosted, and both variable fonts - one file covers every weight,
+     * so the panels can reach for 300 or 700 without another request.
+     *
+     * Declared here rather than in the site's layout.css: these are the game's
+     * fonts, and a face declared in a page's style block is still global once
+     * that page loads. The site keeps its own type unchanged.
+     *
+     * `font-display: swap` because a UI panel that is invisible until a font
+     * arrives is worse than one that reflows.
+     */
+    @font-face {
+        font-family: "Jost";
+        src: url("/fonts/Jost-Variable.ttf") format("truetype");
+        font-weight: 100 900;
+        font-style: normal;
+        font-display: swap;
+    }
+
+    @font-face {
+        font-family: "JetBrains Mono";
+        src: url("/fonts/JetBrainsMono-Variable.ttf") format("truetype");
+        font-weight: 100 800;
+        font-style: normal;
+        font-display: swap;
+    }
+
     canvas {
         background-color: black;
         position: relative;
@@ -245,6 +281,7 @@
         width: 100vw;
         overscroll-behavior: none;
         overflow: hidden;
+        font-family: Jost, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
     }
 
     #dev-panel {
@@ -259,7 +296,7 @@
            lower loses its clicks to them wherever the two overlap - the panel
            would still be visible, just inert, which reads as a broken control */
         z-index: 4;
-        font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+        font: 12px/1.4 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
         color: #fff;
         background: #070b0ee6;
         backdrop-filter: blur(6px);

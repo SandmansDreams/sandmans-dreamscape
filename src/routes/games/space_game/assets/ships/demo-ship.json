@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 7,
   "id": "demo-ship",
   "name": "Demo Ship",
   "creator": "SpaceGameCreator",
@@ -45,9 +45,7 @@
       {"c":2,"r":8,"s":"half","p":"e07030"},
       {"c":3,"r":8,"s":"half","p":"e07030"}
     ],
-    "coverable": [],
-    "cosmetic": [],
-    "placement": []
+    "components": [],
+    "cosmetic": []
   }
 }
-

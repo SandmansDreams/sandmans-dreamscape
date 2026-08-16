@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 7,
   "id": "scythe-ship",
   "name": "Scythe Ship",
   "creator": "SpaceGameCreator",
@@ -122,9 +122,7 @@
       {"c":9,"r":10,"s":"full","p":"176515"},
       {"c":10,"r":10,"s":"full","p":"176515"}
     ],
-    "coverable": [],
-    "cosmetic": [],
-    "placement": []
+    "components": [],
+    "cosmetic": []
   }
 }
-

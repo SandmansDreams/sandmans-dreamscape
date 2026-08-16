@@ -273,7 +273,7 @@
         width: 100vw;
         color: var(--text-color);
         z-index: 1;
-        font-family: 'Courier New', Courier, monospace;
+        font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
         /* The panels take the pointer back; everything between is the canvas */
         pointer-events: none;
     }

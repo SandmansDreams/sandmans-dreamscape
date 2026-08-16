@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 7,
   "id": "my-ship-2",
   "name": "My Ship 2",
   "creator": "SpaceGameCreator",
@@ -72,9 +72,7 @@
       {"c":-5,"r":6,"s":"arc","t":1,"p":"4e4a68"},
       {"c":4,"r":6,"s":"arc","p":"4e4a68"}
     ],
-    "coverable": [],
-    "cosmetic": [],
-    "placement": []
+    "components": [],
+    "cosmetic": []
   }
 }
-

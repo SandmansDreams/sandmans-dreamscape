@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 7,
   "id": "first-ship",
   "name": "First Ship",
   "creator": "SpaceGameCreator",
@@ -85,9 +85,7 @@
       {"c":5,"r":13,"s":"wedge","p":"842a2a"},
       {"c":6,"r":13,"s":"wedge","t":1,"p":"842a2a"}
     ],
-    "coverable": [],
-    "cosmetic": [],
-    "placement": []
+    "components": [],
+    "cosmetic": []
   }
 }
-

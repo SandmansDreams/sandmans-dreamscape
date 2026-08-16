@@ -54,6 +54,13 @@ export interface Cell {
      * A thruster's facing is a property of the thruster, not of its art.
      */
     facing: number
+    /**
+     * The accent tint, or null to use whatever the art was drawn with.
+     *
+     * Nullable rather than defaulted to a constant: an unset accent should look
+     * like the artist's choice, not like an arbitrary orange the grid invented.
+     */
+    accentColor: Color | null
 }
 
 export interface CellOptions {
@@ -71,6 +78,8 @@ export interface CellOptions {
     mass?: number
     /** 0-3 as N/E/S/W. Not folded by the shape, unlike `turns`. */
     facing?: number
+    /** Null, or omitted, leaves the art's own accent alone. */
+    accentColor?: Color | null
 }
 
 /** Inclusive cell indices. */
@@ -171,6 +180,9 @@ export class Grid {
             // Wrapped to 0-3 but NOT folded by the shape: a component's facing is
             // its own property, not a consequence of whatever art represents it
             facing: (((options.facing ?? 0) % 4) + 4) % 4,
+            // ?? would turn an explicit null into the default, and null is the
+            // meaningful value here - it is how a cell says "use the art's accent"
+            accentColor: options.accentColor === undefined ? null : options.accentColor,
         }
 
         this.cells.set(cellKey(col, row), cell)

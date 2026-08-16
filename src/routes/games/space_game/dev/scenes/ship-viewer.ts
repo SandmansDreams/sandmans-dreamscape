@@ -61,29 +61,28 @@ const SETTINGS = {
         // showing every ship beats one that silently stops at the eighth
         limit: 50,
     },
-    getShip:   { type: "button", label: "Download Ship" },
+    getShip:    { type: "button", label: "Download Ship" },
 
     viewSeparator: { type: "separator", label: "Views"},
 
-    flat:      { type: "checkbox", label: "Flat", default: true },
-    lit:       { type: "checkbox", label: "Lit", default: true },
-    wire:      { type: "checkbox", label: "Wireframe", default: true },
+    flat:       { type: "checkbox", label: "Flat", default: true },
+    lit:        { type: "checkbox", label: "Lit", default: true },
+    wire:       { type: "checkbox", label: "Wireframe", default: true },
 
     pickerSeparator: { type: "separator", label: "Settings"},
 
     resolution: { type: "range", label: "Resolution", default: 1, min: 0.05, max: 1, step: 0.05 },
-    spacing:   { type: "range", label: "Spacing", default: 1.0, min: 0, max: 3.0, step: 0.1 },
-    origin:    { type: "selection", label: "Origin", default: "mass", options: ["mass", "bounds"], display: "segmented" },
-    spin:      { type: "range", label: "Spin", default: 0.2, min: 0, max: 2, step: 0.05 },
-    wireColor: { type: "color", label: "Wireframe Color", default: DEFAULT_WIREFRAME_COLOR.hex},
+    spacing:    { type: "range", label: "Spacing", default: 1.0, min: 0, max: 3.0, step: 0.1 },
+    origin:     { type: "selection", label: "Origin", default: "mass", options: ["mass", "bounds"], display: "segmented" },
+    spin:       { type: "range", label: "Spin", default: 0.2, min: 0, max: 2, step: 0.05 },
+    wireColor:  { type: "color", label: "Wireframe Color", default: DEFAULT_WIREFRAME_COLOR.hex},
 
     layersSeperator: { type: "separator", label: "Render Layers"},
 
-    hull:      { type: "checkbox", label: "Hull", default: true },
-    coverable: { type: "checkbox", label: "Coverable", default: true },
-    cosmetic:  { type: "checkbox", label: "Cosmetic", default: true },
-    placement: { type: "checkbox", label: "Placement", default: true },
-    markers:   { type: "checkbox", label: "Markers", default: true },
+    hull:       { type: "checkbox", label: "Hull", default: true },
+    components: { type: "checkbox", label: "Components", default: true },
+    cosmetic:   { type: "checkbox", label: "Cosmetic", default: true },
+    markers:    { type: "checkbox", label: "Markers", default: true },
 } as const satisfies SettingsSchema
 
 type ViewerValues = ValuesOf<typeof SETTINGS>

@@ -14,7 +14,7 @@ import { Color } from "../render/color"
 import { Ship } from "./ship"
 import { FALLBACK_COLOR, PaletteWriter, paletteLines, readPalette } from "./palette"
 
-export const SHIP_FORMAT_VERSION = 6
+export const SHIP_FORMAT_VERSION = 7
 
 /**
  * One block.
@@ -36,6 +36,7 @@ export interface ShipCellJson {
     f?: number   // facing
     hp?: number  // hit points override
     ma?: number  // mass override
+    ac?: string  // accent palette key, absent when the art's own accent is used
 }
 
 export interface ShipJson {
@@ -101,6 +102,9 @@ function cellToJson(cell: Cell, layer: ShipLayer, palette: PaletteWriter): ShipC
     if (cell.type !== DEFAULT_TYPE) out.ty = cell.type
     if (cell.level !== 1) out.lv = cell.level
     if (cell.facing !== 0) out.f = cell.facing
+    // Absent means "whatever the art was drawn with", which is a real value and
+    // not the same as any particular colour
+    if (cell.accentColor !== null) out.ac = palette.keyFor(cell.accentColor)
 
     const defaults = statsFor(cell.type, cell.level)
     if (cell.hitPoints !== defaults.hitPoints) out.hp = cell.hitPoints
@@ -207,6 +211,20 @@ function readCell(
         else warnings.push(`${where}: no palette entry "${cell.p}"`)
     }
 
+    let accentColor: Color | null = null
+    if (cell.ac !== undefined) {
+        const found = palette.get(cell.ac)
+        if (found) accentColor = found
+        else warnings.push(`${where}: no palette entry "${cell.ac}" for the accent`)
+    }
+
+    // Two legacy layers merged into one, so cells that never met can now want the
+    // same square. Overwriting is still the outcome - the file is the record -
+    // but doing it silently would hide a genuine loss.
+    if (grid.has(cell.c, cell.r)) {
+        warnings.push(`${where}: (${cell.c}, ${cell.r}) was already taken, overwritten`)
+    }
+
     grid.set(cell.c, cell.r, cell.s as BlockShape, {
         turns: cell.t,
         mirrored: cell.m,
@@ -217,7 +235,25 @@ function readCell(
         hitPoints: cell.hp,
         mass: cell.ma,
         facing: cell.f,
+        accentColor,
     })
+}
+
+/**
+ * Layer names from older files, and where they land now.
+ *
+ * v6 and earlier split components across `coverable` (things a block was allowed
+ * to cover) and `placement` (things it was not). Both fold into one layer.
+ */
+const LEGACY_LAYERS: Record<string, ShipLayer> = {
+    coverable: "components",
+    placement: "components",
+}
+
+/** The layer a file's key names, or null when it names nothing this build has. */
+function resolveLayer(key: string): ShipLayer | null {
+    if (SHIP_LAYERS.includes(key as ShipLayer)) return key as ShipLayer
+    return LEGACY_LAYERS[key] ?? null
 }
 
 /**
@@ -242,12 +278,18 @@ export function readShip(data: unknown): ReadResult {
 
     const palette = readPalette(json.palette, warnings)
 
-    for (const layer of SHIP_LAYERS) {
-        const cells = json.layers?.[layer]
-        if (cells === undefined) continue
+    // Driven by the file's keys rather than by SHIP_LAYERS: a key this build does
+    // not know is the one case worth a warning, and the old loop passed over it
+    // without a word
+    for (const [key, cells] of Object.entries(json.layers ?? {})) {
+        const layer = resolveLayer(key)
+        if (layer === null) {
+            warnings.push(`unknown layer "${key}", skipped`)
+            continue
+        }
 
         if (!Array.isArray(cells)) {
-            warnings.push(`layer "${layer}" is not an array, skipped`)
+            warnings.push(`layer "${key}" is not an array, skipped`)
             continue
         }
 

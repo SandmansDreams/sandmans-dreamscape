@@ -1,6 +1,6 @@
 // What the ship editor is about to place
 
-import { DEFAULT_TYPE, findComponent } from "./components"
+import { canPlace, DEFAULT_TYPE, findComponent } from "./components"
 import { SHIP_LAYERS, type ShipLayer } from "./layers"
 import type { BlockShape } from "./shapes"
 import { loadStore, saveStore } from "../../settings/storage"
@@ -44,6 +44,13 @@ export interface Brush {
     facing: number
     /** Hex, because that is what an <input type="color"> speaks. */
     color: string
+    /**
+     * The accent tint, or "" to leave the art's own accent alone.
+     *
+     * A string rather than a nullable Color because the whole brush is primitives
+     * - that is what makes loadBrush's type check the only validation it needs.
+     */
+    accentColor: string
     emission: number
 }
 
@@ -57,6 +64,7 @@ export const DEFAULT_BRUSH: Brush = {
     level: 1,
     facing: 0,
     color: "#94a1b3",
+    accentColor: "",
     emission: 0,
 }
 
@@ -87,7 +95,28 @@ export function loadBrush(): Brush {
         if (typeof value === typeof DEFAULT_BRUSH[key]) (brush[key] as unknown) = value
     }
 
+    // Only while building: destroy and select reach every layer, so a brush saved
+    // mid-erase on the cosmetic layer should come back to exactly that
+    if (brush.tool === "build") brush.layer = layerFor(brush.type, brush.layer)
+
     return brush
+}
+
+/**
+ * A layer the type is actually allowed on, keeping the stored one when it works.
+ *
+ * Fields are validated one at a time, which cannot catch a pair that is
+ * individually fine and jointly impossible: a stored layer this build no longer
+ * has falls back to hull, and a crate cannot go there. The editor then shows
+ * that layer as selected and disabled at once, and stays wrong until the next
+ * category click puts the two back in step.
+ */
+export function layerFor(type: string, layer: ShipLayer): ShipLayer {
+    if (canPlace(type, layer)) return layer
+
+    // No legal layer at all should be impossible, but a registry mid-edit could
+    // manage it, and a brush is not worth throwing over
+    return SHIP_LAYERS.find((option) => canPlace(type, option)) ?? layer
 }
 
 export function saveBrush(brush: Brush): void {

@@ -108,4 +108,12 @@ export class MeshBuilder {
     build(gpu: GPU, label = "mesh", capacityFloats?: number): Mesh { // Pushes array data to Mesh
         return Mesh.create(gpu, this.toArray(), label, capacityFloats)
     }
+
+    /** Appends already-interleaved vertices, for geometry that arrives pre-coloured. */
+    raw(data: readonly number[]): this {
+        Assert.that(data.length % (FLOATS_PER_VERTEX * 3) === 0, "raw data must be whole triangles")
+
+        for (const value of data) this.data.push(value)
+        return this
+    }
 }

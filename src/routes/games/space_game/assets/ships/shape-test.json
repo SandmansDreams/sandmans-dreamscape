@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 7,
   "id": "shape-test",
   "name": "Shape Test",
   "creator": "SpaceGameCreator",
@@ -57,17 +57,14 @@
       {"c":2,"r":2,"s":"jutWedge","t":2,"p":"bff259"},
       {"c":3,"r":2,"s":"octagon","p":"4dbfa6"}
     ],
-    "coverable": [
-      {"c":-2,"r":0,"s":"full","p":"999999","k":"thruster","f":3},
-      {"c":-1,"r":0,"s":"full","p":"999999","k":"battery"},
-      {"c":1,"r":0,"s":"full","p":"999999","k":"storage","f":2},
-      {"c":2,"r":0,"s":"full","p":"999999","k":"generator","f":1}
+    "components": [
+      {"c":0,"r":-1,"s":"full","p":"999999","ty":"autocannon"},
+      {"c":-2,"r":0,"s":"full","p":"999999","ty":"ion-thruster","f":3},
+      {"c":-1,"r":0,"s":"full","p":"999999","ty":"battery"},
+      {"c":1,"r":0,"s":"full","p":"999999","ty":"crate","f":2},
+      {"c":2,"r":0,"s":"full","p":"999999","ty":"fusion-core","f":1},
+      {"c":0,"r":1,"s":"full","p":"999999","ty":"shield-projector","f":2}
     ],
-    "cosmetic": [],
-    "placement": [
-      {"c":0,"r":-1,"s":"full","p":"999999","k":"weapon"},
-      {"c":0,"r":1,"s":"full","p":"999999","k":"projector","f":2}
-    ]
+    "cosmetic": []
   }
 }
-

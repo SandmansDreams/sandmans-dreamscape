@@ -6,12 +6,10 @@
 export const SHIP_LAYERS = [
     /** The body of the ship, where everything else is placed atop. */
     "hull",
-    /** Things it does not matter if a block covers: thrusters, generators. */
-    "coverable",
-    /** Hull blocks placed purely for looks. Free, and weightless. */
+    /** Every machine: thrusters, generators, storage, weapons, projectors. */
+    "components",
+    /** Blocks placed purely for looks. Free, weightless, and drawn over all. */
     "cosmetic",
-    /** Anything that is neither hull nor coverable. Mainly weapons. */
-    "placement",
 ] as const
 
 export type ShipLayer = typeof SHIP_LAYERS[number]
