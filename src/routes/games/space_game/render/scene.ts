@@ -7,6 +7,7 @@ import type { SettingsSchema, SettingValues } from "../settings/settings"
 import type { Frame } from "./frame"
 import type { GPU } from "./webgpu/gpu"
 import { FrameLoop } from "./loop"
+import { Renderer } from "./renderer"
 import { GpuTimer } from "./timing"
 
 /** Which editing surface a scene wants alongside the canvas, if any. */
@@ -16,6 +17,13 @@ export type SceneUi = "builder" | "sprite" | "flight"
 export interface SceneContext {
     readonly gpu: GPU
     readonly canvas: HTMLCanvasElement
+    /**
+     * The shared shaders, pipelines and camera binding.
+     *
+     * A scene borrows these and must not destroy them: they outlive it, and the
+     * next scene is handed the same ones.
+     */
+    readonly renderer: Renderer
     /**
      * Keyboard and pointer, owned by the page rather than by the scene.
      *
@@ -82,6 +90,7 @@ export class SceneRunner {
 
     private readonly gpu: GPU
     private readonly input: InputService
+    private readonly renderer: Renderer
     private readonly loop = new FrameLoop()
     private readonly timer: GpuTimer
     private readonly channel = new Map<string, unknown>()
@@ -95,6 +104,7 @@ export class SceneRunner {
     constructor(gpu: GPU, input: InputService) {
         this.gpu = gpu
         this.input = input
+        this.renderer = Renderer.create(gpu)
         this.timer = new GpuTimer(gpu)
     }
 
@@ -136,6 +146,7 @@ export class SceneRunner {
         this.instance = definition.create({
             gpu: this.gpu,
             canvas: this.gpu.canvas,
+            renderer: this.renderer,
             input: this.input,
             stats: this.stats,
             publish: (key, value) => {
@@ -166,6 +177,9 @@ export class SceneRunner {
         this.stop()
         this.instance?.dispose()
         this.instance = null
+
+        // After the scene, which may still be holding pipelines it borrowed
+        this.renderer.destroy()
         this.timer.destroy()
     }
 

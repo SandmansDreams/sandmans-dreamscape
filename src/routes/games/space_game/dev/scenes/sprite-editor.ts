@@ -1,16 +1,13 @@
-import { Camera, CameraBinding } from "../../render/camera"
+import { Camera } from "../../render/camera"
 import { Color } from "../../render/color"
 import type { Frame } from "../../render/frame"
 import { ArtGrid, type ArtCell } from "../../render/grid/artGrid"
 import { appendShape, carriedTurns, turnCount, type BlockShape } from "../../render/grid/shapes"
 import { DRAWN_SHAPES } from "../../render/grid/palette"
 import { ART_LAYERS, ART_ROLES, bakeRole, type ArtLayer, type ArtRole } from "../../render/grid/spriteMesh"
-import { FLOATS_PER_VERTEX, Mesh, MeshBuilder, VERTEX_LAYOUT } from "../../render/mesh"
+import { DynamicMesh, FLOATS_PER_VERTEX, Mesh, MeshBuilder } from "../../render/mesh"
 import type { InputService } from "../../input/service"
 import type { SceneContext, SceneInstance } from "../../render/scene"
-import { MESH_2D } from "../../render/shaders/mesh2d"
-import { Pipeline } from "../../render/webgpu/pipeline"
-import { Shader } from "../../render/webgpu/shader"
 import type { ActionsOf, SettingsSchema, ValuesOf } from "../../settings/settings"
 import { artFromText, artToText, emptyArt, ART_GRID, type ComponentArt } from "../../game/componentArt"
 import { downloadText, uploadText } from "../../download"
@@ -24,6 +21,9 @@ function stepThrough<T>(list: readonly T[], current: T, by: number): T {
 
 /** World units per authored cell. The whole canvas is CELL * ART_GRID across. */
 const CELL = 32
+
+/** What a DynamicMesh is written with to say it holds nothing this frame. */
+const EMPTY_MESH = new Float32Array(0)
 
 const LATTICE_COLOR = Color.from("#1e2630")
 const BORDER_COLOR = Color.from("#5b7fa6")
@@ -109,9 +109,6 @@ class SpriteEditor implements SceneInstance<EditorValues> {
     private readonly context: SceneContext
     private readonly input: InputService
     private readonly camera = new Camera()
-    private readonly cameraBinding: CameraBinding
-    private readonly meshPipeline: Pipeline
-    private readonly linePipeline: Pipeline
 
     private art: ComponentArt = emptyArt("new-part", "New Part")
     private brush: ArtBrush = {
@@ -127,9 +124,9 @@ class SpriteEditor implements SceneInstance<EditorValues> {
     }
 
     private readonly meshes = new Map<string, Mesh>()
-    private lattice: Mesh | null = null
-    private hover: Mesh | null = null
-    private ghost: Mesh | null = null
+    private readonly lattice: DynamicMesh
+    private readonly hover: DynamicMesh
+    private readonly ghost: DynamicMesh
 
     private builtKey = ""
     private hoverKey = ""
@@ -178,18 +175,10 @@ class SpriteEditor implements SceneInstance<EditorValues> {
         const gpu = context.gpu
 
         this.input = context.input
-        this.cameraBinding = CameraBinding.create(gpu)
 
-        const shader = Shader.createNow(gpu, MESH_2D, "mesh 2d")
-        const layouts = [this.cameraBinding.layout]
-
-        this.meshPipeline = Pipeline.create(gpu, {
-            label: "sprite solid", shader, layouts, vertexBuffers: [VERTEX_LAYOUT],
-        })
-        this.linePipeline = Pipeline.create(gpu, {
-            label: "sprite lines", shader, layouts, vertexBuffers: [VERTEX_LAYOUT],
-            topology: "line-list",
-        })
+        this.lattice = DynamicMesh.create(gpu, "art lattice")
+        this.hover = DynamicMesh.create(gpu, "art hover")
+        this.ghost = DynamicMesh.create(gpu, "art ghost")
 
         this.publishBrush()
     }
@@ -216,29 +205,29 @@ class SpriteEditor implements SceneInstance<EditorValues> {
         const settings = this.settings
         if (!settings) return
 
-        this.cameraBinding.upload(this.camera, gpu.width, gpu.height)
+        const { camera, mesh: meshPipeline, meshLines: linePipeline } = this.context.renderer
+        camera.upload(this.camera, gpu.width, gpu.height)
 
-        frame.setPipeline(this.meshPipeline).setBindGroup(0, this.cameraBinding.group)
+        frame.setPipeline(meshPipeline).setBindGroup(0, camera.group)
         // Layers outermost so base always draws under top, roles within because
         // each takes its colour differently and has to be uploadable on its own
         for (const layer of ART_LAYERS) {
             for (const role of ART_ROLES) this.meshes.get(meshKey(layer, role))?.draw(frame)
         }
-        this.ghost?.draw(frame)
+        this.ghost.draw(frame)
 
-        frame.setPipeline(this.linePipeline).setBindGroup(0, this.cameraBinding.group)
-        if (settings.lattice) this.lattice?.draw(frame)
-        this.hover?.draw(frame)
+        frame.setPipeline(linePipeline).setBindGroup(0, camera.group)
+        if (settings.lattice) this.lattice.draw(frame)
+        this.hover.draw(frame)
 
         this.context.stats.set("squares", this.squareCount())
     }
 
     dispose(): void {
         for (const mesh of this.meshes.values()) mesh.destroy()
-        this.lattice?.destroy()
-        this.hover?.destroy()
-        this.ghost?.destroy()
-        this.cameraBinding.destroy()
+        this.lattice.destroy()
+        this.hover.destroy()
+        this.ghost.destroy()
     }
 
     /*~~~ Canvas ~~~*/
@@ -555,7 +544,8 @@ class SpriteEditor implements SceneInstance<EditorValues> {
     }
 
     private buildLattice(): void {
-        if (this.lattice) return
+        // Fixed geometry, so once is enough - the grid never changes size
+        if (this.lattice.vertexCount > 0) return
 
         const out: number[] = []
         const span = ART_GRID * CELL
@@ -571,7 +561,7 @@ class SpriteEditor implements SceneInstance<EditorValues> {
             out.push(0, at, r, g, b, span, at, r, g, b)
         }
 
-        this.lattice = Mesh.create(this.context.gpu, new Float32Array(out), "art lattice")
+        this.lattice.write(new Float32Array(out))
     }
 
     private rebuildCursor(col: number, row: number): void {
@@ -584,17 +574,15 @@ class SpriteEditor implements SceneInstance<EditorValues> {
         if (key === this.hoverKey) return
         this.hoverKey = key
 
-        this.hover?.destroy()
-        this.ghost?.destroy()
-        this.hover = null
-        this.ghost = null
+        this.hover.write(EMPTY_MESH)
+        this.ghost.write(EMPTY_MESH)
         if (!this.input.pointer.over) return
 
-        this.hover = this.buildCellBox(col, row, inside ? HOVER_COLOR : BLOCKED_COLOR)
-        if (this.brush.tool === "build" && inside) this.ghost = this.buildGhost(col, row)
+        this.hover.write(this.cellBoxVertices(col, row, inside ? HOVER_COLOR : BLOCKED_COLOR))
+        if (this.brush.tool === "build" && inside) this.ghost.write(this.buildGhost(col, row))
     }
 
-    private buildCellBox(col: number, row: number, color: Color): Mesh {
+    private cellBoxVertices(col: number, row: number, color: Color): Float32Array<ArrayBuffer> {
         const x = col * CELL
         const y = row * CELL
         const { r, g, b } = color
@@ -609,10 +597,10 @@ class SpriteEditor implements SceneInstance<EditorValues> {
         const out: number[] = []
         for (let i = 0; i < box.length; i += 2) out.push(box[i]!, box[i + 1]!, r, g, b)
 
-        return Mesh.create(this.context.gpu, new Float32Array(out), "art hover")
+        return new Float32Array(out)
     }
 
-    private buildGhost(col: number, row: number): Mesh | null {
+    private buildGhost(col: number, row: number): Float32Array<ArrayBuffer> {
         const builder = new MeshBuilder()
 
         appendShape(
@@ -626,7 +614,7 @@ class SpriteEditor implements SceneInstance<EditorValues> {
             this.colorOf(this.brush.role, null).mix(BACKGROUND, GHOST_FADE),
         )
 
-        return builder.vertexCount > 0 ? builder.build(this.context.gpu, "art ghost") : null
+        return builder.toArray()
     }
 
     /**

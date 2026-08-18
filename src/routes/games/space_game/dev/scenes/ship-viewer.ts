@@ -5,13 +5,10 @@ import type { Frame } from "../../render/frame"
 import { SHIP_LAYERS, type ShipLayer } from "../../render/grid/layers"
 import type { Ship } from "../../game/ship"
 import { InstanceBatch } from "../../render/webgpu/instance"
-import { Mesh, MeshBuilder, VERTEX_LAYOUT } from "../../render/mesh"
-import { emptyBindGroupLayout, Pipeline } from "../../render/webgpu/pipeline"
+import { DynamicMesh, Mesh, MeshBuilder } from "../../render/mesh"
+import type { Pipeline } from "../../render/webgpu/pipeline"
 import type { PointerInput } from "../../input/keys"
 import type { SceneContext, SceneInstance } from "../../render/scene"
-import { Shader } from "../../render/webgpu/shader"
-import { INSTANCED_2D } from "../../render/shaders/instanced2d"
-import { MESH_2D } from "../../render/shaders/mesh2d"
 import { type ActionsOf, type SearchColumn, type SettingsSchema, type ValuesOf } from "../../settings/settings"
 import type { DevSceneDefinition } from "../DevScene"
 import { downloadText } from "../../download"
@@ -102,6 +99,34 @@ interface HoverTarget {
     row: number
 }
 
+/** What a DynamicMesh is written with to say it holds nothing this frame. */
+const EMPTY_MESH = new Float32Array(0)
+
+/**
+ * The box around one cell, as line-list vertices in the ship's own space.
+ *
+ * Its own function rather than a method: it reads the hovered cell and the
+ * origin and nothing else about the scene, and a mesh built from two arguments
+ * is easier to trust than one built from the whole viewer.
+ */
+function hoverOutline(target: HoverTarget, origin: Vec2): Float32Array<ArrayBuffer> {
+    const x = (target.col - origin.x) * CELL
+    const y = (target.row - origin.y) * CELL
+    const { r, g, b } = HOVER_COLOR
+
+    const corners = [
+        x, y, x + CELL, y,
+        x + CELL, y, x + CELL, y + CELL,
+        x + CELL, y + CELL, x, y + CELL,
+        x, y + CELL, x, y,
+    ]
+
+    const out: number[] = []
+    for (let i = 0; i < corners.length; i += 2) out.push(corners[i]!, corners[i + 1]!, r, g, b)
+
+    return new Float32Array(out)
+}
+
 /*~~~ Pure helpers ~~~*/
 
 /** A plus sign, so a center is visible against the hull behind it. */
@@ -185,18 +210,25 @@ class ShipViewer implements SceneInstance<ViewerValues> {
     private readonly input: PointerInput
     private settings: ViewerValues | null = null
     private readonly camera = new Camera()
-    private readonly cameraBinding: CameraBinding
-    private readonly instanced: Pipeline // Filled geometry, instanced
-    private readonly onTop: Pipeline     // Filled geometry, one copy (the overlay)
-    private readonly lines: Pipeline     // Line geometry, instanced
+    /*
+     * Borrowed from the renderer rather than built here, so the draw sites below
+     * read the same as they always did. Getters and not fields because these are
+     * not this scene's to hold - the renderer outlives it and hands the next
+     * scene the same four.
+     */
+    private get cameraBinding(): CameraBinding { return this.context.renderer.camera }
+    private get instanced(): Pipeline { return this.context.renderer.instanced }      // Filled geometry, instanced
+    private get onTop(): Pipeline { return this.context.renderer.mesh }               // Filled geometry, one copy (the overlay)
+    private get lines(): Pipeline { return this.context.renderer.instancedLines }     // Line geometry, instanced
+
     private readonly batch: InstanceBatch
     private readonly wireBatch: InstanceBatch
     private readonly hoverBatch: InstanceBatch
 
     private readonly meshes = new Map<ShipLayer, Mesh>()
-    private wireMesh: Mesh | null = null
-    private overlay: Mesh | null = null
-    private hover: Mesh | null = null
+    private readonly wireMesh: DynamicMesh
+    private readonly overlay: DynamicMesh
+    private readonly hover: DynamicMesh
     private hoverKey = ""
 
     private ship: Ship | null = null
@@ -222,30 +254,11 @@ class ShipViewer implements SceneInstance<ViewerValues> {
         const gpu = context.gpu
 
         this.input = context.input.pointer
-        this.cameraBinding = CameraBinding.create(gpu)
-        const instanceLayout = InstanceBatch.layout(gpu)
+        const instanceLayout = context.renderer.instanceLayout
 
-        this.instanced = Pipeline.create(gpu, {
-            label: "ship instanced",
-            shader: Shader.createNow(gpu, INSTANCED_2D, "instanced 2d"),
-            layouts: [this.cameraBinding.layout, emptyBindGroupLayout(gpu), instanceLayout],
-            vertexBuffers: [VERTEX_LAYOUT],
-        })
-
-        this.onTop = Pipeline.create(gpu, {
-            label: "ship overlay",
-            shader: Shader.createNow(gpu, MESH_2D, "mesh 2d"),
-            layouts: [this.cameraBinding.layout],
-            vertexBuffers: [VERTEX_LAYOUT],
-        })
-
-        this.lines = Pipeline.create(gpu, {
-            label: "ship wireframe",
-            shader: Shader.createNow(gpu, INSTANCED_2D, "instanced 2d"),
-            layouts: [this.cameraBinding.layout, emptyBindGroupLayout(gpu), instanceLayout],
-            vertexBuffers: [VERTEX_LAYOUT],
-            topology: "line-list",
-        })
+        this.wireMesh = DynamicMesh.create(gpu, "ship wireframe")
+        this.overlay = DynamicMesh.create(gpu, "ship overlay")
+        this.hover = DynamicMesh.create(gpu, "hover")
 
         this.batch = InstanceBatch.create(gpu, instanceLayout, 1024, "ship-viewer")
 
@@ -292,13 +305,11 @@ class ShipViewer implements SceneInstance<ViewerValues> {
 
 
         this.disposeMeshes()
-        this.overlay?.destroy()
-        this.overlay = null
+        this.overlay.destroy()
 
         this.batch.destroy()
         this.wireBatch.destroy()
         this.hoverBatch.destroy()
-        this.cameraBinding.destroy()
     }
 
     /*~~~ Measuring ~~~*/
@@ -470,29 +481,10 @@ class ShipViewer implements SceneInstance<ViewerValues> {
         this.hoverKey = key
         this.hoverView = target?.view ?? -1
 
-        this.hover?.destroy()
-        this.hover = target ? this.buildHoverMesh(target) : null
+        this.hover.write(target ? hoverOutline(target, this.origin) : EMPTY_MESH)
     }
 
     private hoverView = -1
-
-    private buildHoverMesh(target: HoverTarget): Mesh {
-        const x = (target.col - this.origin.x) * CELL
-        const y = (target.row - this.origin.y) * CELL
-        const { r, g, b } = HOVER_COLOR
-
-        const corners = [
-            x, y, x + CELL, y,
-            x + CELL, y, x + CELL, y + CELL,
-            x + CELL, y + CELL, x, y + CELL,
-            x, y + CELL, x, y,
-        ]
-
-        const out: number[] = []
-        for (let i = 0; i < corners.length; i += 2) out.push(corners[i]!, corners[i + 1]!, r, g, b)
-
-        return Mesh.create(this.context.gpu, new Float32Array(out), "hover")
-    }
 
     /*~~~ Per-frame ~~~*/
 
@@ -540,21 +532,25 @@ class ShipViewer implements SceneInstance<ViewerValues> {
     }
 
     private drawWireframe(frame: Frame): void {
-        if (!this.wireMesh) return
+        // `current` rather than draw(): a batch repeats one mesh and reads its
+        // buffer itself, so it needs the mesh and not a draw call
+        const mesh = this.wireMesh.current
+        if (!mesh) return
 
         frame.setPipeline(this.lines).setBindGroup(0, this.cameraBinding.group)
-        this.wireBatch.draw(frame, this.wireMesh)
+        this.wireBatch.draw(frame, mesh)
     }
 
     private drawHover(frame: Frame): void {
-        if (!this.hover) return
+        const mesh = this.hover.current
+        if (!mesh) return
 
         frame.setPipeline(this.lines).setBindGroup(0, this.cameraBinding.group)
-        this.hoverBatch.draw(frame, this.hover)
+        this.hoverBatch.draw(frame, mesh)
     }
 
     private drawOverlay(frame: Frame): void {
-        if (!this.overlay) return
+        if (this.overlay.vertexCount === 0) return
 
         // Group 0 is re-bound because switching to a pipeline with a different
         // layout is allowed to invalidate what was bound
@@ -579,13 +575,12 @@ class ShipViewer implements SceneInstance<ViewerValues> {
 
         this.disposeMeshes()
         this.buildFlatMesh(ship, this.origin)
-        this.wireMesh = this.buildWireMesh(ship, this.origin, Color.from(settings.wireColor))
-        this.overlay = this.buildOverlayMesh(settings, ship)
+        this.wireMesh.write(this.buildWireMesh(ship, this.origin, Color.from(settings.wireColor)))
+        this.overlay.write(this.buildOverlayMesh(settings, ship))
 
         // The cell it pointed at belongs to the ship that just went away
         this.hoverKey = ""
-        this.hover?.destroy()
-        this.hover = null
+        this.hover.write(EMPTY_MESH)
 
         this.context.stats.set("ship mass", ship.mass)
     }
@@ -594,11 +589,10 @@ class ShipViewer implements SceneInstance<ViewerValues> {
         for (const mesh of this.meshes.values()) mesh.destroy()
         this.meshes.clear()
 
-        // Nulled as well as destroyed, or the field holds a dead handle
-        this.wireMesh?.destroy()
-        this.wireMesh = null
-        this.hover?.destroy()
-        this.hover = null
+        // The two dynamic meshes keep their buffers and simply hold nothing: the
+        // next ship writes into them rather than allocating again
+        this.wireMesh.write(EMPTY_MESH)
+        this.hover.write(EMPTY_MESH)
     }
 
     private buildFlatMesh(ship: Ship, origin: Vec2): void {
@@ -614,7 +608,7 @@ class ShipViewer implements SceneInstance<ViewerValues> {
         }
     }
 
-    private buildWireMesh(ship: Ship, origin: Vec2, color: Color): Mesh | null {
+    private buildWireMesh(ship: Ship, origin: Vec2, color: Color): Float32Array<ArrayBuffer> {
         const outline: number[] = []
 
         // Outlined from the solid mesh's own triangles, so art outlines as the
@@ -625,9 +619,7 @@ class ShipViewer implements SceneInstance<ViewerValues> {
             appendLayerOutline(outline, ship.layers[layer], CELL, origin, color)
         }
 
-        return outline.length === 0
-            ? null
-            : Mesh.create(this.context.gpu, new Float32Array(outline), "ship wireframe")
+        return new Float32Array(outline)
     }
 
     private appendHeaderLabel(builder: MeshBuilder, ship: Ship): void {
@@ -684,7 +676,7 @@ class ShipViewer implements SceneInstance<ViewerValues> {
     }
 
     /** Labels and markers, in one mesh drawn once rather than per instance. */
-    private buildOverlayMesh(settings: ViewerValues, ship: Ship): Mesh | null {
+    private buildOverlayMesh(settings: ViewerValues, ship: Ship): Float32Array<ArrayBuffer> {
         const builder = new MeshBuilder()
 
         this.appendHeaderLabel(builder, ship)
@@ -696,8 +688,7 @@ class ShipViewer implements SceneInstance<ViewerValues> {
             this.appendCenterMarkers(builder, ship, settings.origin, this.viewPoints[still]!)
         }
 
-        this.overlay?.destroy()
-        return builder.vertexCount === 0 ? null : builder.build(this.context.gpu, "ship overlay")
+        return builder.toArray()
     }
 
     private download(): void {

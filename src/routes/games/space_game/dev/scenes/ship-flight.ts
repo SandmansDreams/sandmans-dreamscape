@@ -4,16 +4,15 @@ import {
     bodyAt, bounce, boundingRadius, shipPhysics, step, throttles,
     type Arena, type Body, type Controls, type ShipPhysics,
 } from "../../game/physics"
-import { Camera, CameraBinding } from "../../render/camera"
+import { Camera, type Vec2 } from "../../render/camera"
 import { Color } from "../../render/color"
 import type { Frame } from "../../render/frame"
 import { appendLayer } from "../../render/grid/blockDraw"
-import { FLOATS_PER_VERTEX, Mesh, MeshBuilder, VERTEX_LAYOUT } from "../../render/mesh"
+import { DynamicMesh, FLOATS_PER_VERTEX, Mesh, MeshBuilder } from "../../render/mesh"
+import { InstanceBatch } from "../../render/webgpu/instance"
+import { fadeOf, ParticleField } from "../../game/particles"
 import { InputService } from "../../input/service"
 import type { SceneContext, SceneInstance } from "../../render/scene"
-import { MESH_2D } from "../../render/shaders/mesh2d"
-import { Pipeline } from "../../render/webgpu/pipeline"
-import { Shader } from "../../render/webgpu/shader"
 import type { ActionsOf, SearchColumn, SettingsSchema, ValuesOf } from "../../settings/settings"
 import type { DevSceneDefinition } from "../DevScene"
 
@@ -21,6 +20,30 @@ import type { DevSceneDefinition } from "../DevScene"
 const CELL = 32
 
 const WALL_COLOR = Color.from("#3d6b8c")
+
+/** The opposite push, which is the way the exhaust actually leaves. */
+function negated(vector: Vec2): Vec2 {
+    return { x: -vector.x, y: -vector.y }
+}
+
+/*~~~ Exhaust ~~~*/
+
+/**
+ * How many specks a full-throttle engine makes per second.
+ *
+ * Per engine rather than per ship, so a nine-engine burn looks like nine engines.
+ */
+const EXHAUST_RATE = 90
+
+/** The most specks in the air at once, shared by every engine on the ship. */
+const EXHAUST_CAPACITY = 2400
+
+/** Cells per second, before jitter. Fast enough to leave the ship behind. */
+const EXHAUST_SPEED = 14
+
+const EXHAUST_LIFE = 0.45
+const EXHAUST_SIZE = 0.22
+const EXHAUST_COLOR = Color.from("#ffb347")
 
 const SHIP_COLUMNS: readonly SearchColumn[] = [
     { header: "Ship", cell: (id) => findShip(id)?.name ?? id },
@@ -46,7 +69,8 @@ const SETTINGS = {
 
     flightSep: { type: "separator", label: "Flight" },
 
-    assist: { type: "checkbox", label: "Flight assist", default: true },
+    assist:  { type: "checkbox", label: "Flight assist", default: true },
+    exhaust: { type: "checkbox", label: "Exhaust", default: true },
     reset:  { type: "button", label: "Reset Ship" },
 } as const satisfies SettingsSchema
 
@@ -72,9 +96,6 @@ class ShipFlight implements SceneInstance<FlightValues> {
     private readonly context: SceneContext
     private readonly input: InputService
     private readonly camera = new Camera()
-    private readonly cameraBinding: CameraBinding
-    private readonly meshPipeline: Pipeline
-    private readonly linePipeline: Pipeline
 
     private ship: Ship
     private physics: ShipPhysics
@@ -90,8 +111,22 @@ class ShipFlight implements SceneInstance<FlightValues> {
      */
     private local = new Float32Array(0)
     private frame = new Float32Array(0)
-    private shipMesh: Mesh | null = null
-    private walls: Mesh | null = null
+    private readonly shipMesh: DynamicMesh
+    private readonly walls: DynamicMesh
+
+    /*~~~ Exhaust ~~~*/
+    private readonly exhaust = new ParticleField(EXHAUST_CAPACITY)
+    private readonly exhaustBatch: InstanceBatch
+    /** One quad, repeated once per speck. Built once and never touched again. */
+    private readonly spark: Mesh
+    /**
+     * The fraction of a particle each engine is owed, carried between frames.
+     *
+     * Without it, an engine making 1.5 specks a frame would make one - the half
+     * dropped every frame, so the rate would silently depend on the frame rate.
+     * One entry per thruster, rebuilt with the ship.
+     */
+    private exhaustOwed: number[] = []
 
     private builtShip = ""
     private wallsKey = ""
@@ -111,18 +146,18 @@ class ShipFlight implements SceneInstance<FlightValues> {
         const gpu = context.gpu
 
         this.input = context.input
-        this.cameraBinding = CameraBinding.create(gpu)
+        this.shipMesh = DynamicMesh.create(gpu, "ship")
+        this.walls = DynamicMesh.create(gpu, "arena")
 
-        const shader = Shader.createNow(gpu, MESH_2D, "mesh 2d")
-        const layouts = [this.cameraBinding.layout]
+        // Centered, so an instance's rotate-and-scale works about the speck's
+        // middle rather than dragging it off its own position
+        this.spark = new MeshBuilder()
+            .quad(-0.5, -0.5, 1, 1, Color.WHITE)
+            .build(gpu, "spark")
 
-        this.meshPipeline = Pipeline.create(gpu, {
-            label: "flight solid", shader, layouts, vertexBuffers: [VERTEX_LAYOUT],
-        })
-        this.linePipeline = Pipeline.create(gpu, {
-            label: "flight lines", shader, layouts, vertexBuffers: [VERTEX_LAYOUT],
-            topology: "line-list",
-        })
+        this.exhaustBatch = InstanceBatch.create(
+            gpu, context.renderer.instanceLayout, EXHAUST_CAPACITY, "exhaust",
+        )
 
         // A real ship arrives on the first update; this keeps every field valid
         // until then rather than leaving them undefined
@@ -151,7 +186,10 @@ class ShipFlight implements SceneInstance<FlightValues> {
         this.touching = this.body.velocity.x !== flown.velocity.x
             || this.body.velocity.y !== flown.velocity.y
 
-        this.firing = this.countFiring(controls, before.spin, dt)
+        const firing = throttles(this.physics, controls, before.spin, dt)
+        this.firing = firing.filter((throttle) => throttle > 0).length
+
+        this.updateExhaust(firing, dt, settings)
 
         this.uploadShip()
         this.publishInfo()
@@ -212,6 +250,9 @@ class ShipFlight implements SceneInstance<FlightValues> {
         if (settings.ship === this.builtShip) return
         this.builtShip = settings.ship
 
+        this.exhaust.clear()
+        this.exhaustOwed = []
+
         this.ship = buildShip(settings.ship)
         this.physics = shipPhysics(this.ship)
         this.radius = boundingRadius(this.ship)
@@ -227,10 +268,9 @@ class ShipFlight implements SceneInstance<FlightValues> {
         this.local = builder.toArray()
         this.frame = new Float32Array(this.local)
 
-        this.shipMesh?.destroy()
-        this.shipMesh = this.local.length > 0
-            ? Mesh.create(this.context.gpu, this.frame, "ship")
-            : null
+        // Empty is a state the mesh holds itself, so a ship with no blocks needs no
+        // special case here beyond not building one
+        this.shipMesh.write(this.frame)
     }
 
     /**
@@ -242,7 +282,7 @@ class ShipFlight implements SceneInstance<FlightValues> {
      * nothing; a fleet would want the uniform instead.
      */
     private uploadShip(): void {
-        if (!this.shipMesh || this.local.length === 0) return
+        if (this.local.length === 0) return
 
         const cos = Math.cos(this.body.angle)
         const sin = Math.sin(this.body.angle)
@@ -257,7 +297,7 @@ class ShipFlight implements SceneInstance<FlightValues> {
             this.frame[i + 1] = py + x * sin + y * cos
         }
 
-        this.shipMesh.update(this.frame)
+        this.shipMesh.write(this.frame)
     }
 
     /*~~~ Arena ~~~*/
@@ -285,8 +325,7 @@ class ShipFlight implements SceneInstance<FlightValues> {
         const out: number[] = []
         for (let i = 0; i < corners.length; i += 2) out.push(corners[i]!, corners[i + 1]!, r, g, b)
 
-        this.walls?.destroy()
-        this.walls = Mesh.create(this.context.gpu, new Float32Array(out), "arena")
+        this.walls.write(new Float32Array(out))
     }
 
     /** Fixed on the arena, never on the ship - you watch it fly, you do not ride it. */
@@ -303,17 +342,94 @@ class ShipFlight implements SceneInstance<FlightValues> {
 
     /*~~~ Readout ~~~*/
 
+    /*~~~ Exhaust ~~~*/
+
     /**
-     * How many engines are burning, asked of the same function that fires them.
+     * Spawns exhaust behind every engine that is burning, then ages the field.
      *
-     * Re-running the allocation rather than having `step` report it: the throttles
-     * are a pure function of the state it was given, so asking twice cannot
-     * disagree with what actually happened.
+     * Fed the same throttles the step used rather than its own: a plume that
+     * disagreed with the thrust would be a lie about what the ship is doing.
      */
-    private countFiring(controls: Controls, spin: number, dt: number): number {
-        return throttles(this.physics, controls, spin, dt)
-            .filter((value) => value > 0)
-            .length
+    private updateExhaust(firing: readonly number[], dt: number, settings: FlightValues): void {
+        if (!settings.exhaust) {
+            // Cleared rather than frozen: leaving a plume hanging in space while the
+            // ship flies away looks like a bug, not like a setting
+            this.exhaust.clear()
+            return
+        }
+
+        const cos = Math.cos(this.body.angle)
+        const sin = Math.sin(this.body.angle)
+
+        this.physics.thrusters.forEach((thruster, index) => {
+            const throttle = firing[index] ?? 0
+            const owed = (this.exhaustOwed[index] ?? 0) + EXHAUST_RATE * throttle * dt
+
+            // Whole specks now, the remainder carried to the next frame
+            const count = Math.floor(owed)
+            this.exhaustOwed[index] = owed - count
+            if (count === 0) return
+
+            this.exhaust.emit(count, {
+                at: this.worldOf(thruster.offset, cos, sin),
+                // Exhaust leaves the way the force does not, which is what makes
+                // the ship go the other way in the first place
+                direction: this.worldDirection(negated(thruster.force), cos, sin),
+                speed: EXHAUST_SPEED * throttle,
+                // Inherited, so a plume trails the ship rather than hanging where
+                // the ship was when it fired
+                drift: this.body.velocity,
+                spread: 0.25,
+                speedJitter: 0.35,
+                life: EXHAUST_LIFE * throttle,
+                lifeJitter: 0.3,
+                size: EXHAUST_SIZE,
+                red: EXHAUST_COLOR.r,
+                green: EXHAUST_COLOR.g,
+                blue: EXHAUST_COLOR.b,
+            })
+        })
+
+        this.exhaust.update(dt)
+    }
+
+    /** A point in the ship's own space, in world cells. */
+    private worldOf(local: Vec2, cos: number, sin: number): Vec2 {
+        return {
+            x: this.body.position.x + local.x * cos - local.y * sin,
+            y: this.body.position.y + local.x * sin + local.y * cos,
+        }
+    }
+
+    /** A ship-local direction as a world-space unit vector. */
+    private worldDirection(local: Vec2, cos: number, sin: number): Vec2 {
+        const length = Math.hypot(local.x, local.y) || 1
+
+        return {
+            x: (local.x * cos - local.y * sin) / length,
+            y: (local.x * sin + local.y * cos) / length,
+        }
+    }
+
+    /** Fills the batch from the field. One instance per living speck. */
+    private fillExhaustBatch(): void {
+        this.exhaustBatch.begin().reserve(this.exhaust.count)
+
+        this.exhaust.forEach((particle) => {
+            // Fading the colour rather than the alpha: these draw additively, so
+            // a dimmer speck simply adds less and needs no blend of its own
+            const fade = fadeOf(particle)
+
+            this.exhaustBatch.add(
+                particle.position.x * CELL,
+                particle.position.y * CELL,
+                0,
+                particle.size * CELL,
+                particle.red * fade,
+                particle.green * fade,
+                particle.blue * fade,
+            )
+        })
     }
 
     private publishInfo(): void {
@@ -332,20 +448,30 @@ class ShipFlight implements SceneInstance<FlightValues> {
 
     render(frame: Frame): void {
         const gpu = this.context.gpu
-        this.cameraBinding.upload(this.camera, gpu.width, gpu.height)
+        const { camera, mesh: meshPipeline, meshLines: linePipeline } = this.context.renderer
+        camera.upload(this.camera, gpu.width, gpu.height)
 
-        frame.setPipeline(this.meshPipeline).setBindGroup(0, this.cameraBinding.group)
-        this.shipMesh?.draw(frame)
+        frame.setPipeline(meshPipeline).setBindGroup(0, camera.group)
+        this.shipMesh.draw(frame)
+
+        // Exhaust over the hull: a plume is in front of the nozzle it left, and
+        // additive means it brightens the hull rather than hiding it
+        if (this.exhaust.count > 0) {
+            this.fillExhaustBatch()
+            frame.setPipeline(this.context.renderer.instancedGlow).setBindGroup(0, camera.group)
+            this.exhaustBatch.draw(frame, this.spark)
+        }
 
         // Lines last so a wall stays visible with the ship pressed against it
-        frame.setPipeline(this.linePipeline).setBindGroup(0, this.cameraBinding.group)
-        this.walls?.draw(frame)
+        frame.setPipeline(linePipeline).setBindGroup(0, camera.group)
+        this.walls.draw(frame)
     }
 
     dispose(): void {
-        this.shipMesh?.destroy()
-        this.walls?.destroy()
-        this.cameraBinding.destroy()
+        this.shipMesh.destroy()
+        this.walls.destroy()
+        this.spark.destroy()
+        this.exhaustBatch.destroy()
     }
 }
 

@@ -201,6 +201,12 @@
   },
   "active": "d5971898faa58106",
   "lastOpenFiles": [
+    "game/particles.test.ts",
+    "game/particles.ts",
+    "render/mesh.test.ts",
+    "render/renderer.ts",
+    "_notes/Claude Plans/8 Shared render layer.md",
+    "_notes/Claude Plans/physics-look-good-bak-shimmying-wren.md",
     "input/service.test.ts",
     "assets/components/railgun.json",
     "assets/components/radar-dish.json",
@@ -208,10 +214,6 @@
     "assets/components/fusion-core.json",
     "assets/components/battery.json",
     "assets/components/crate.json",
-    "assets/components/chem-thruster.json",
-    "assets/components/ion-thruster.json",
-    "assets/components/hull-plate.json",
-    "dev/tools/genComponentArt.ts",
     "assets/icons/SpaceGame-Circle_Half.png",
     "assets/icons/SpaceGame-Weapon.png",
     "assets/icons/SpaceGame-Thruster.png",
@@ -247,8 +249,6 @@
     "CLAUDE.md",
     "notes.md",
     "_old/notes.md",
-    "_notes/Claude Plans/3 Bitmap fonts.md",
-    "Untitled.md",
     "How WebGL Works.canvas"
   ]
 }

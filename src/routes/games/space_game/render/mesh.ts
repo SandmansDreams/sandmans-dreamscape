@@ -72,6 +72,93 @@ export class Mesh {
     }
 }
 
+/**
+ * The capacity a buffer should grow to in order to hold `needed` floats.
+ *
+ * Doubling rather than fitting exactly: a mesh that creeps upward by a triangle
+ * a frame would otherwise reallocate every frame. Pure and exported so the
+ * policy can be tested without a GPU, which is the only part of DynamicMesh that
+ * can be.
+ */
+export function grownCapacity(current: number, needed: number): number {
+    return Math.max(needed, current * 2)
+}
+
+/**
+ * A mesh whose contents change but whose buffer should not.
+ *
+ * `Mesh.update` refuses data past the capacity the mesh was created with, which
+ * is why callers that rebuild have been destroying and recreating instead - a
+ * fresh GPU buffer every frame for a hover box that follows the cursor. This
+ * keeps its buffer and reallocates only when the data genuinely outgrows it.
+ *
+ * Empty is a real state rather than a null mesh: writing nothing draws nothing,
+ * so callers need no nullable field, no `?.destroy()` before each rebuild and no
+ * `?.` at the draw site.
+ */
+export class DynamicMesh {
+    private readonly gpu: GPU
+    private readonly label: string
+
+    // Null until the first non-empty write: a zero-byte buffer is not a thing
+    // WebGPU will make, and a mesh that is never written should cost nothing
+    private mesh: Mesh | null = null
+    private capacityFloats = 0
+
+    private constructor(gpu: GPU, label: string) {
+        this.gpu = gpu
+        this.label = label
+    }
+
+    static create(gpu: GPU, label = "dynamic mesh"): DynamicMesh {
+        return new DynamicMesh(gpu, label)
+    }
+
+    get vertexCount(): number {
+        return this.mesh?.vertexCount ?? 0
+    }
+
+    /** Replaces the contents. Reallocates only when the data does not fit. */
+    write(data: Float32Array<ArrayBuffer>): void {
+        if (data.length === 0) {
+            // Nothing to draw, but the buffer is kept - the next write is usually
+            // the same size as the last non-empty one
+            this.mesh?.update(data)
+            return
+        }
+
+        if (this.mesh && data.length <= this.capacityFloats) {
+            this.mesh.update(data)
+            return
+        }
+
+        this.mesh?.destroy()
+        this.capacityFloats = grownCapacity(this.capacityFloats, data.length)
+        this.mesh = Mesh.create(this.gpu, data, this.label, this.capacityFloats)
+    }
+
+    draw(frame: Frame): void {
+        if (this.vertexCount === 0) return
+        this.mesh?.draw(frame)
+    }
+
+    /**
+     * The mesh behind this one, or null while it is empty.
+     *
+     * For callers that draw it through something else - an InstanceBatch repeats
+     * one mesh and reads its buffer directly. Prefer `draw` when drawing plainly.
+     */
+    get current(): Mesh | null {
+        return this.vertexCount === 0 ? null : this.mesh
+    }
+
+    destroy(): void {
+        this.mesh?.destroy()
+        this.mesh = null
+        this.capacityFloats = 0
+    }
+}
+
 // Accumulates tris on the CPU and uploads them once instead of individually (for speed)
 export class MeshBuilder {
     private readonly data: number[] = [] // Flat and interleaved: x, y, r, g, b per vertex

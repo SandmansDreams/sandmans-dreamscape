@@ -1,7 +1,7 @@
 import { buildShip, findShip, SHIPS } from "../../assets/ships"
 import { Ship } from "../../game/ship"
 import { shipFromText, shipToText } from "../../game/shipJson"
-import { Camera, CameraBinding, type Vec2 } from "../../render/camera"
+import { Camera, type Vec2 } from "../../render/camera"
 import { Color } from "../../render/color"
 import type { Frame } from "../../render/frame"
 import { componentById, kindOf, maxLevel } from "../../render/grid/components"
@@ -9,12 +9,9 @@ import type { Cell } from "../../render/grid/grid"
 import { SHIP_LAYERS, type ShipLayer } from "../../render/grid/layers"
 import { appendShape, carriedTurns, turnCount, type BlockShape } from "../../render/grid/shapes"
 import { bestThrusterFacing, canClearLayer, canEraseAt, canPlaceAt } from "../../render/grid/shipLegality"
-import { Mesh, MeshBuilder, VERTEX_LAYOUT } from "../../render/mesh"
+import { DynamicMesh, Mesh, MeshBuilder } from "../../render/mesh"
 import type { InputService } from "../../input/service"
 import type { SceneContext, SceneInstance } from "../../render/scene"
-import { MESH_2D } from "../../render/shaders/mesh2d"
-import { Pipeline } from "../../render/webgpu/pipeline"
-import { Shader } from "../../render/webgpu/shader"
 import type { ActionsOf, SearchColumn, SettingsSchema, ValuesOf } from "../../settings/settings"
 import { appendBlock, appendLayer, displayBlock, type BlockLike } from "../../render/grid/blockDraw"
 import { layerFor, loadBrush, saveBrush, type Brush } from "../../render/grid/brush"
@@ -50,6 +47,9 @@ const NOTICE_SECONDS = 5
 const BACKGROUND = Color.rgb(0.05, 0.05, 0.07)
 
 const CELL = 32
+
+/** What a DynamicMesh is written with to say it holds nothing this frame. */
+const EMPTY_MESH = new Float32Array(0)
 /** How far past the hull to offer cells. Two, so a thruster's reach stays visible. */
 const MARGIN = 2
 
@@ -229,21 +229,18 @@ class ShipBuilder implements SceneInstance<EditorValues> {
     private readonly context: SceneContext
     private readonly input: InputService
     private readonly camera = new Camera()
-    private readonly cameraBinding: CameraBinding
-    private readonly meshPipeline: Pipeline
-    private readonly linePipeline: Pipeline
 
     private ship = new Ship("untitled", "New Ship")
 
     // Meshes
     private readonly meshes = new Map<ShipLayer, Mesh>()
-    private marks: Mesh | null = null
+    private readonly marks: DynamicMesh
     private marksKey = ""
     /** Red wash over blocks the destroy tool would refuse. */
     private protectedBoxes: Mesh | null = null
     private protectedKey = ""
-    private hover: Mesh | null = null
-    private ghost: Mesh | null = null
+    private readonly hover: DynamicMesh
+    private readonly ghost: DynamicMesh
     /** The center-of-mass cross, rebuilt whenever the geometry moves it. */
     private massMark: Mesh | null = null
 
@@ -256,12 +253,12 @@ class ShipBuilder implements SceneInstance<EditorValues> {
      */
     private selected: { col: number; row: number; layer: ShipLayer } | null = null
     private selectionKey = ""
-    private selectedBox: Mesh | null = null
+    private readonly selectedBox: DynamicMesh
 
     /** The palette swatch the pointer is over, as hex, or null when it is not. */
     private highlight: string | null = null
     private highlightKey = ""
-    private highlightBoxes: Mesh | null = null
+    private readonly highlightBoxes: DynamicMesh
 
     /**
      * The one brush there is.
@@ -400,18 +397,12 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         const gpu = context.gpu
 
         this.input = context.input
-        this.cameraBinding = CameraBinding.create(gpu)
 
-        const shader = Shader.createNow(gpu, MESH_2D, "mesh 2d")
-        const layouts = [this.cameraBinding.layout]
-
-        this.meshPipeline = Pipeline.create(gpu, {
-            label: "editor solid", shader, layouts, vertexBuffers: [VERTEX_LAYOUT],
-        })
-        this.linePipeline = Pipeline.create(gpu, {
-            label: "editor lines", shader, layouts, vertexBuffers: [VERTEX_LAYOUT],
-            topology: "line-list",
-        })
+        this.marks = DynamicMesh.create(gpu, "legal cells")
+        this.hover = DynamicMesh.create(gpu, "hover")
+        this.ghost = DynamicMesh.create(gpu, "ghost")
+        this.selectedBox = DynamicMesh.create(gpu, "selected")
+        this.highlightBoxes = DynamicMesh.create(gpu, "colour highlight")
 
         this.camera.zoom = 1
 
@@ -476,11 +467,12 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         const settings = this.settings
         if (!settings) return
 
-        this.cameraBinding.upload(this.camera, gpu.width, gpu.height)
+        const { camera, mesh: meshPipeline, meshLines: linePipeline } = this.context.renderer
+        camera.upload(this.camera, gpu.width, gpu.height)
 
         // Solid geometry first: the ship, then what a click would add to it, then
         // the center-of-mass marker that has to read against both
-        frame.setPipeline(this.meshPipeline).setBindGroup(0, this.cameraBinding.group)
+        frame.setPipeline(meshPipeline).setBindGroup(0, camera.group)
         for (const layer of SHIP_LAYERS) {
             const mesh = this.meshes.get(layer)
             if (mesh) mesh.draw(frame)
@@ -493,16 +485,16 @@ class ShipBuilder implements SceneInstance<EditorValues> {
 
         // The ghost stays: it is where the cursor is, not a mark about the ship,
         // and losing it would make the build tool feel broken
-        if (this.ghost) this.ghost.draw(frame)
+        this.ghost.draw(frame)
         if (markers && this.massMark) this.massMark.draw(frame)
 
         // Lines last, and the legal-cell marks last of all. They are the one thing
         // that has to stay readable over a finished hull, so nothing draws on top.
-        frame.setPipeline(this.linePipeline).setBindGroup(0, this.cameraBinding.group)
-        if (this.hover) this.hover.draw(frame)
-        if (markers && this.highlightBoxes) this.highlightBoxes.draw(frame)
-        if (markers && this.selectedBox) this.selectedBox.draw(frame)
-        if (markers && this.marks) this.marks.draw(frame)
+        frame.setPipeline(linePipeline).setBindGroup(0, camera.group)
+        this.hover.draw(frame)
+        if (markers) this.highlightBoxes.draw(frame)
+        if (markers) this.selectedBox.draw(frame)
+        if (markers) this.marks.draw(frame)
 
         this.context.stats.set("blocks", this.ship.layersOf().reduce((sum, g) => sum + g.size, 0))
         this.context.stats.set("undo depth", this.undoStack.length)
@@ -545,14 +537,13 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         clearTimeout(this.brushSaveTimer)
 
         for (const mesh of this.meshes.values()) mesh.destroy()
-        this.marks?.destroy()
+        this.marks.destroy()
         this.protectedBoxes?.destroy()
-        this.hover?.destroy()
-        this.ghost?.destroy()
+        this.hover.destroy()
+        this.ghost.destroy()
         this.massMark?.destroy()
-        this.selectedBox?.destroy()
-        this.highlightBoxes?.destroy()
-        this.cameraBinding.destroy()
+        this.selectedBox.destroy()
+        this.highlightBoxes.destroy()
     }
 
     /*~~~ Brush ~~~*/
@@ -653,8 +644,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         if (key === this.highlightKey) return
         this.highlightKey = key
 
-        this.highlightBoxes?.destroy()
-        this.highlightBoxes = null
+        this.highlightBoxes.write(EMPTY_MESH)
         if (!this.highlight) return
 
         const wanted = this.highlight.toLowerCase()
@@ -668,9 +658,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
             }
         }
 
-        if (out.length > 0) {
-            this.highlightBoxes = Mesh.create(this.context.gpu, new Float32Array(out), "colour highlight")
-        }
+        this.highlightBoxes.write(new Float32Array(out))
     }
 
     /*~~~ Selection ~~~*/
@@ -719,8 +707,9 @@ class ShipBuilder implements SceneInstance<EditorValues> {
 
         // The outline is what ties the info panel to a block on screen - without
         // it the panel describes a cell you have no way to point at
-        this.selectedBox?.destroy()
-        this.selectedBox = cell && at ? this.buildCellBox(at.col, at.row, this.markerInk(SELECTED_COLOR), "selected") : null
+        this.selectedBox.write(
+            cell && at ? this.cellBoxVertices(at.col, at.row, this.markerInk(SELECTED_COLOR)) : EMPTY_MESH,
+        )
 
         if (!cell || !at) {
             this.context.publish("selected", null)
@@ -1068,8 +1057,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         if (key === this.marksKey) return
         this.marksKey = key
 
-        this.marks?.destroy()
-        this.marks = null
+        this.marks.write(EMPTY_MESH)
 
         // Marks answer "where could this go", which is a question only the paint
         // tool is asking. Erasing and selecting act on what is already there.
@@ -1089,9 +1077,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
             }
         }
 
-        if (out.length > 0) {
-            this.marks = Mesh.create(this.context.gpu, new Float32Array(out), "legal cells")
-        }
+        this.marks.write(new Float32Array(out))
     }
 
     /**
@@ -1227,28 +1213,21 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         if (key === this.hoverKey) return
         this.hoverKey = key
 
-        this.hover?.destroy()
-        this.ghost?.destroy()
-        this.hover = null
-        this.ghost = null
+        this.hover.write(EMPTY_MESH)
+        this.ghost.write(EMPTY_MESH)
         if (!this.input.pointer.over) return
 
-        this.hover = this.buildHoverBox(col, row, legal)
+        this.hover.write(this.cellBoxVertices(col, row, legal ? HOVER_COLOR : BLOCKED_COLOR))
 
         // Nothing to preview when destroying or selecting, nothing to promise on a
         // cell that would refuse the block, and nothing to add on one that already
         // holds exactly this - a ghost over an identical block is just a smudge
         const identical = this.matchesBrush(this.ship.layers[brush.layer].get(col, row))
-        if (brush.tool === "build" && legal && !identical) this.ghost = this.buildGhost(col, row)
-    }
-
-    /** The cell outline, red where the brush would be refused. */
-    private buildHoverBox(col: number, row: number, legal: boolean): Mesh {
-        return this.buildCellBox(col, row, legal ? HOVER_COLOR : BLOCKED_COLOR, "hover")
+        if (brush.tool === "build" && legal && !identical) this.ghost.write(this.buildGhost(col, row))
     }
 
     /** One cell's border as four line segments. */
-    private buildCellBox(col: number, row: number, color: Color, label: string): Mesh {
+    private cellBoxVertices(col: number, row: number, color: Color): Float32Array<ArrayBuffer> {
         const x = (col - this.origin.x) * CELL
         const y = (row - this.origin.y) * CELL
         const { r, g, b } = color
@@ -1263,7 +1242,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         const out: number[] = []
         for (let i = 0; i < box.length; i += 2) out.push(box[i]!, box[i + 1]!, r, g, b)
 
-        return Mesh.create(this.context.gpu, new Float32Array(out), label)
+        return new Float32Array(out)
     }
 
     /**
@@ -1273,7 +1252,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
      * previews as the hexagon and facing bar it will actually become rather than
      * as whatever hull shape the brush was last holding.
      */
-    private buildGhost(col: number, row: number): Mesh | null {
+    private buildGhost(col: number, row: number): Float32Array<ArrayBuffer> {
         const builder = new MeshBuilder()
 
         // The same call the ship's own mesh makes, washed out: a preview drawn by
@@ -1288,7 +1267,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
             BACKGROUND,
         )
 
-        return builder.vertexCount > 0 ? builder.build(this.context.gpu, "ghost") : null
+        return builder.toArray()
     }
 
     /**

@@ -2,12 +2,9 @@ import { Color } from "../../render/color"
 import type { Frame } from "../../render/frame"
 import type { SceneContext, SceneInstance } from "../../render/scene"
 import type { DevSceneDefinition } from "../DevScene"
-import { Camera, CameraBinding } from "../../render/camera"
+import { Camera } from "../../render/camera"
 import { InstanceBatch } from "../../render/webgpu/instance"
-import { Mesh, MeshBuilder, VERTEX_LAYOUT } from "../../render/mesh"
-import { emptyBindGroupLayout, Pipeline } from "../../render/webgpu/pipeline"
-import { Shader } from "../../render/webgpu/shader"
-import { INSTANCED_2D } from "../../render/shaders/instanced2d"
+import { Mesh, MeshBuilder } from "../../render/mesh"
 import { defaultValues, type SettingsSchema, type ValuesOf } from "../../settings/settings"
 
 const SETTINGS = {
@@ -23,8 +20,6 @@ type QuadValues = ValuesOf<typeof SETTINGS>
 class InstancedQuads implements SceneInstance<QuadValues> {
     private readonly context: SceneContext
     private readonly camera = new Camera()
-    private readonly cameraBinding: CameraBinding
-    private readonly pipeline: Pipeline
     private readonly quad: Mesh
     private readonly batch: InstanceBatch
 
@@ -35,23 +30,11 @@ class InstancedQuads implements SceneInstance<QuadValues> {
         this.context = context
         const gpu = context.gpu
 
-        const shader = Shader.createNow(gpu, INSTANCED_2D, "instanced 2d")
-        const instanceLayout = InstanceBatch.layout(gpu)
-        this.cameraBinding = CameraBinding.create(gpu)
-
-        this.pipeline = Pipeline.create(gpu, {
-            label: "instanced 2d",
-            shader,
-            // Group 1 is reserved for materials and is still empty
-            layouts: [this.cameraBinding.layout, emptyBindGroupLayout(gpu), instanceLayout],
-            vertexBuffers: [VERTEX_LAYOUT],
-        })
-
         // 1x1 white, centered, so the instance transform scales about its middle and
         // the instance color comes through unchanged
         this.quad = new MeshBuilder().quad(-0.5, -0.5, 1, 1, Color.WHITE).build(gpu, "unit quad")
 
-        this.batch = InstanceBatch.create(gpu, instanceLayout, 1024, "quads")
+        this.batch = InstanceBatch.create(gpu, context.renderer.instanceLayout, 1024, "quads")
     }
 
     update(dt: number, settings: QuadValues): void {
@@ -86,16 +69,17 @@ class InstancedQuads implements SceneInstance<QuadValues> {
     render(frame: Frame): void {
         const gpu = this.context.gpu
         this.camera.zoom = this.settings.zoom
-        this.cameraBinding.upload(this.camera, gpu.width, gpu.height)
 
-        frame.setPipeline(this.pipeline).setBindGroup(0, this.cameraBinding.group)
+        const { camera, instanced } = this.context.renderer
+        camera.upload(this.camera, gpu.width, gpu.height)
+
+        frame.setPipeline(instanced).setBindGroup(0, camera.group)
         this.batch.draw(frame, this.quad)
     }
 
     dispose(): void {
         this.batch.destroy()
         this.quad.destroy()
-        this.cameraBinding.destroy()
     }
 }
 

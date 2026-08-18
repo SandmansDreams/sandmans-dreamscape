@@ -28,7 +28,7 @@ export function bodyAt(x: number, y: number): Body {
     return { position: { x, y }, velocity: { x: 0, y: 0 }, angle: 0, spin: 0 }
 }
 
-/** One engine, reduced to the two numbers Newton needs from it. */
+/** One engine, reduced to what Newton needs from it and where it sits. */
 export interface Thruster {
     /** Force on the ship at full throttle, in ship-local space. */
     force: Vec2
@@ -36,6 +36,14 @@ export interface Thruster {
     torque: number
     /** True when the builder marked this engine as one the pilot steers with. */
     steering: boolean
+    /**
+     * Where the engine sits, in cells from the center of mass, in ship-local space.
+     *
+     * Newton has no use for it - the torque above already carries the leverage -
+     * but anything drawing the engine does: exhaust has to leave from the nozzle
+     * rather than from the middle of the ship.
+     */
+    offset: Vec2
 }
 
 /**
@@ -105,6 +113,7 @@ function thrustersOf(ship: Ship, center: Vec2): Thruster[] {
                 force, 
                 torque: rx * force.y - ry * force.x,
                 steering: cell.steering,
+                offset: { x: rx, y: ry },
             })
         }
     }

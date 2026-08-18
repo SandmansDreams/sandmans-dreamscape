@@ -1,12 +1,9 @@
-import { Camera, CameraBinding } from "../../render/camera"
+import { Camera } from "../../render/camera"
 import { DEFAULT_FONT } from "../../render/font"
 import type { Frame } from "../../render/frame"
-import { Mesh, MeshBuilder, VERTEX_LAYOUT } from "../../render/mesh"
+import { Mesh, MeshBuilder } from "../../render/mesh"
 import { Color } from "../../render/color"
-import { Pipeline } from "../../render/webgpu/pipeline"
 import type { SceneContext, SceneInstance } from "../../render/scene"
-import { Shader } from "../../render/webgpu/shader"
-import { MESH_2D } from "../../render/shaders/mesh2d"
 import { appendShape, MIRRORABLE_SHAPES, turnCount, type BlockShape } from "../../render/grid/shapes"
 import { DRAWN_SHAPES, shapeColor } from "../../render/grid/palette"
 import { appendBlock, type BlockLike } from "../../render/grid/blockDraw"
@@ -22,6 +19,7 @@ const SETTINGS = {
     gap:     { type: "range", label: "Gap", default: 5, min: 0, max: 5, step: 0.05 },
     palette: { type: "checkbox", label: "Per-shape color", default: false },
     color:   { type: "color", label: "Color", default: "#7fd4ff" },
+    accent:  { type: "color", label: "Accent", default: "#ffb347" },
 } as const satisfies SettingsSchema
 
 type ChartValues = ValuesOf<typeof SETTINGS>
@@ -31,6 +29,12 @@ type ChartMode = ChartValues["mode"]
 
 const BACKDROP_COLOR = Color.rgb(0.10, 0.10, 0.10)
 const LABEL_COLOR = Color.rgb(0.60, 0.60, 0.60)
+
+/** How far a finished view reaches, so the camera can frame it. */
+interface ChartSize {
+    width: number
+    height: number
+}
 
 /** One turn's position inside a block, as rows of turn numbers. */
 type Arrangement = readonly (readonly number[])[]
@@ -127,35 +131,36 @@ function labelColumnWidth(layout: ChartLayout, labels: readonly string[]): numbe
 }
 
 /**
- * A block that exists only to be drawn: one component, at one level and facing.
+ * A block that exists only to be drawn: one component, at one level.
  *
  * Nothing here is on a ship, so there is no cell to borrow - and inventing a
  * column and a row just to satisfy Cell is what BlockLike exists to avoid. The
  * shape fields are ignored, since a component never draws as its shape.
+ *
+ * Facing is fixed north: this sheet is about how a piece changes with its level,
+ * and four headings of each would bury that under rotations.
  */
-function spriteBlock(component: Component, level: number, facing: number, color: Color): BlockLike {
+function spriteBlock(
+    component: Component,
+    level: number,
+    color: Color,
+    accentColor: Color,
+): BlockLike {
     return {
         shape: "full",
         turns: 0,
         mirrored: false,
         type: component.id,
-        facing,
+        facing: 0,
         level,
         color,
-        // Null keeps whatever the artist chose, which is what a sheet should show
-        accentColor: null,
+        accentColor,
     }
 }
 
-/** One row per component per level, since two levels are two pieces of art. */
-function spriteRows(): { component: Component; level: number; label: string }[] {
-    return ART_COMPONENTS.flatMap((component) =>
-        component.levels.map((_, index) => ({
-            component,
-            level: index + 1,
-            label: `${component.id} L${index + 1}`,
-        })),
-    )
+/** The most levels any one component has, which is how many columns the sheet needs. */
+function maxLevelColumns(): number {
+    return ART_COMPONENTS.reduce((most, component) => Math.max(most, component.levels.length), 0)
 }
 
 /*~~~ Emitting ~~~*/
@@ -251,8 +256,6 @@ function appendKeyBlock(
 class ShapeChart implements SceneInstance<ChartValues> {
     private readonly context: SceneContext
     private readonly camera = new Camera()
-    private readonly cameraBinding: CameraBinding
-    private readonly pipeline: Pipeline
 
     private mesh: Mesh | null = null
     private bounds = { left: 0, top: 0, right: 1, bottom: 1 }
@@ -260,17 +263,6 @@ class ShapeChart implements SceneInstance<ChartValues> {
 
     constructor(context: SceneContext) {
         this.context = context
-        const gpu = context.gpu
-
-        const shader = Shader.createNow(gpu, MESH_2D, "mesh 2d")
-        this.cameraBinding = CameraBinding.create(gpu)
-
-        this.pipeline = Pipeline.create(gpu, {
-            label: "shape chart",
-            shader,
-            layouts: [this.cameraBinding.layout],
-            vertexBuffers: [VERTEX_LAYOUT],
-        })
     }
 
     update(_dt: number, settings: ChartValues): void {
@@ -287,22 +279,23 @@ class ShapeChart implements SceneInstance<ChartValues> {
 
         const { left, top, right, bottom } = this.bounds
         this.camera.fit(left, top, right, bottom, gpu.width, gpu.height)
-        this.cameraBinding.upload(this.camera, gpu.width, gpu.height)
 
-        frame.setPipeline(this.pipeline).setBindGroup(0, this.cameraBinding.group)
+        const { camera, mesh: pipeline } = this.context.renderer
+        camera.upload(this.camera, gpu.width, gpu.height)
+
+        frame.setPipeline(pipeline).setBindGroup(0, camera.group)
         this.mesh.draw(frame)
     }
 
     dispose(): void {
         this.mesh?.destroy()
-        this.cameraBinding.destroy()
     }
 
     private rebuild(settings: ChartValues): void {
         const builder = new MeshBuilder()
         const layout = makeLayout(settings)
 
-        const right = settings.view === "sprites"
+        const size = settings.view === "sprites"
             ? this.appendSpriteRows(builder, layout, settings)
             : this.appendShapeRows(builder, layout, settings)
 
@@ -316,28 +309,20 @@ class ShapeChart implements SceneInstance<ChartValues> {
         this.mesh = builder.build(this.context.gpu, "shape chart")
         this.context.stats.set("chart tris", builder.vertexCount / 3)
 
-        const rows = settings.view === "sprites" ? spriteRows().length : DRAWN_SHAPES.length
-        const rowStep = blockHeight(layout, settings.mode) + layout.rowGap
-
         this.bounds = {
             left: 0,
             top: 0,
-            right: Math.max(right, 1),
-            // Trailing rowGap is not part of the chart
-            bottom: Math.max(rowStep + rows * rowStep - layout.rowGap, 1),
+            right: Math.max(size.width, 1),
+            bottom: Math.max(size.height, 1),
         }
     }
 
-    /**
-     * One row per shape, at the turns that shape actually has.
-     *
-     * @returns the chart's right edge
-     */
+    /** One row per shape, at the turns that shape actually has. */
     private appendShapeRows(
         builder: MeshBuilder,
         layout: ChartLayout,
         settings: ChartValues,
-    ): number {
+    ): ChartSize {
         const mode = settings.mode
 
         const labelWidth = labelColumnWidth(layout, DRAWN_SHAPES)
@@ -380,73 +365,83 @@ class ShapeChart implements SceneInstance<ChartValues> {
             }
         })
 
-        return mirroredX + blockW
+        return {
+            width: mirroredX + blockW,
+            // Trailing rowGap is not part of the chart
+            height: firstRowY + DRAWN_SHAPES.length * rowStep - layout.rowGap,
+        }
     }
 
     /**
-     * One row per component per level, four facings across.
+     * One row per component, its levels across.
      *
-     * Facings rather than turns, because that is the axis art actually varies
-     * on - appendBlock bakes the quarter turn per facing, and this is the sheet
-     * that shows whether a piece still reads pointing all four ways. The key at
-     * the top documents the same arrangement; only what the numbers mean changes.
+     * Levels rather than facings: a component's art is authored per level, so
+     * this is the axis that actually shows something new - and it is where a
+     * level quietly falling back to the type's one piece becomes visible.
      *
-     * @returns the chart's right edge
+     * The turn arrangement has no say here. Every row is a single line of cells,
+     * because a level is a step along one axis and stacking it into a square
+     * would invent a second one.
      */
     private appendSpriteRows(
         builder: MeshBuilder,
         layout: ChartLayout,
         settings: ChartValues,
-    ): number {
-        const mode = settings.mode
-        const rows = spriteRows()
-
-        const labelWidth = labelColumnWidth(layout, rows.map((row) => row.label))
-        const blockH = blockHeight(layout, mode)
+    ): ChartSize {
+        const labelWidth = labelColumnWidth(layout, ART_COMPONENTS.map((c) => c.id))
+        const columns = maxLevelColumns()
         const step = layout.cell + layout.gap
-        const rowStep = blockH + layout.rowGap
+        const rowStep = layout.cell + layout.rowGap
 
-        appendKeyBlock(builder, labelWidth, 0, layout, mode)
+        const main = Color.from(settings.color)
+        const accent = Color.from(settings.accent)
 
-        // Always four: a piece of art has no symmetry the chart can know about,
-        // so every heading is a state worth looking at
-        const arrangement = arrangementFor(mode, 4)
-        const ownHeight = arrangement.length * layout.cell + (arrangement.length - 1) * layout.gap
-        const offsetY = (blockH - ownHeight) / 2
+        // Header: which level each column holds, in place of the turn key
+        for (let column = 0; column < columns; column++) {
+            const text = `L${column + 1}`
+            const pixel = layout.headerPixel
 
-        // The main tint every piece is painted in, which is how you check a design
-        // reads in more than one team colour. `palette` has nothing to key on here
-        const color = Color.from(settings.color)
+            DEFAULT_FONT.appendText(
+                builder, text,
+                labelWidth + column * step
+                    + (layout.cell - DEFAULT_FONT.measureText(text, pixel)) / 2,
+                (layout.cell - textHeight(pixel)) / 2,
+                pixel, LABEL_COLOR,
+            )
+        }
 
-        rows.forEach(({ component, level, label }, index) => {
+        ART_COMPONENTS.forEach((component, index) => {
             const y = rowStep + index * rowStep
 
             DEFAULT_FONT.appendText(
-                builder, label, 0,
-                y + (blockH - textHeight(layout.fontPixel)) / 2,
+                builder, component.id, 0,
+                y + (layout.cell - textHeight(layout.fontPixel)) / 2,
                 layout.fontPixel, LABEL_COLOR,
             )
 
-            for (let row = 0; row < arrangement.length; row++) {
-                const facings = arrangement[row]!
+            for (let column = 0; column < columns; column++) {
+                // Past this component's last level the cell is left empty rather
+                // than repeating the highest one: a blank column says "there is no
+                // L4 here", and a copy would say the opposite
+                if (column >= component.levels.length) continue
 
-                for (let column = 0; column < facings.length; column++) {
-                    const x = labelWidth + column * step
-                    const cellY = y + offsetY + row * step
+                const x = labelWidth + column * step
 
-                    // Backdrop first: there is no depth test, so draw order is the
-                    // only thing putting the sprite on top of it
-                    builder.quad(x, cellY, layout.cell, layout.cell, BACKDROP_COLOR)
-                    appendBlock(
-                        builder,
-                        spriteBlock(component, level, facings[column]!, color),
-                        x, cellY, layout.cell,
-                    )
-                }
+                // Backdrop first: there is no depth test, so draw order is the
+                // only thing putting the sprite on top of it
+                builder.quad(x, y, layout.cell, layout.cell, BACKDROP_COLOR)
+                appendBlock(
+                    builder,
+                    spriteBlock(component, column + 1, main, accent),
+                    x, y, layout.cell,
+                )
             }
         })
 
-        return labelWidth + blockWidth(layout, mode)
+        return {
+            width: labelWidth + columns * layout.cell + (columns - 1) * layout.gap,
+            height: rowStep + ART_COMPONENTS.length * rowStep - layout.rowGap,
+        }
     }
 }
 
@@ -456,9 +451,10 @@ const scene: DevSceneDefinition<ChartValues> = {
     description:
         "Shapes: every block shape at the turns it actually has - a full block gets one " +
         "cell, a hexagon two, most four - with a second block for the three shapes where " +
-        "mirroring is not just another rotation. Sprites: every component's art at all " +
-        "four facings, one row per level, painted in the colour picked below. The key at " +
-        "the top says which cell is which.",
+        "mirroring is not just another rotation, and the key at the top says which cell " +
+        "is which turn. Sprites: every component's art, one row each, with its levels " +
+        "across - painted in the main and accent colours picked below, so a design can be " +
+        "checked in more than the one palette it was drawn in.",
     settings: SETTINGS,
     create: (context) => new ShapeChart(context),
 }

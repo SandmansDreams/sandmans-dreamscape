@@ -1,12 +1,9 @@
 import { Color } from "../../render/color"
-import { Camera, CameraBinding } from "../../render/camera"
+import { Camera } from "../../render/camera"
 import { DEFAULT_FONT, FONT_NAMES, fontByName, type BitmapFont } from "../../render/font"
 import type { Frame } from "../../render/frame"
-import { Mesh, MeshBuilder, VERTEX_LAYOUT } from "../../render/mesh"
-import { Pipeline } from "../../render/webgpu/pipeline"
+import { Mesh, MeshBuilder } from "../../render/mesh"
 import type { SceneContext, SceneInstance } from "../../render/scene"
-import { Shader } from "../../render/webgpu/shader"
-import { MESH_2D } from "../../render/shaders/mesh2d"
 import { defaultValues, type SettingsSchema, type ValuesOf } from "../../settings/settings"
 import type { DevSceneDefinition } from "../DevScene"
 
@@ -35,8 +32,6 @@ type FontValues = ValuesOf<typeof SETTINGS>
 class FontTest implements SceneInstance<FontValues> {
     private readonly context: SceneContext
     private readonly camera = new Camera()
-    private readonly cameraBinding: CameraBinding
-    private readonly pipeline: Pipeline
 
     private mesh: Mesh | null = null
     private bounds = { left: 0, top: 0, right: 1, bottom: 1 }
@@ -44,17 +39,6 @@ class FontTest implements SceneInstance<FontValues> {
 
     constructor(context: SceneContext) {
         this.context = context
-        const gpu = context.gpu
-
-        const shader = Shader.createNow(gpu, MESH_2D, "mesh 2d")
-        this.cameraBinding = CameraBinding.create(gpu)
-
-        this.pipeline = Pipeline.create(gpu, {
-            label: "font text",
-            shader,
-            layouts: [this.cameraBinding.layout],
-            vertexBuffers: [VERTEX_LAYOUT],
-        })
     }
 
     update(_dt: number, settings: FontValues): void {
@@ -83,15 +67,15 @@ class FontTest implements SceneInstance<FontValues> {
         // Refit every frame so a window resize reframes the text for free
         const { left, top, right, bottom } = this.bounds
         this.camera.fit(left, top, right, bottom, gpu.width, gpu.height)
-        this.cameraBinding.upload(this.camera, gpu.width, gpu.height)
+        const { camera, mesh: pipeline } = this.context.renderer
+        camera.upload(this.camera, gpu.width, gpu.height)
 
-        frame.setPipeline(this.pipeline).setBindGroup(0, this.cameraBinding.group)
+        frame.setPipeline(pipeline).setBindGroup(0, camera.group)
         this.mesh.draw(frame)
     }
 
     dispose(): void {
         this.mesh?.destroy()
-        this.cameraBinding.destroy()
     }
 
     private rebuild(font: BitmapFont, settings: FontValues): void {
