@@ -311,6 +311,19 @@ export function turnCount(shape: BlockShape): number {
     return TURN_EXCEPTIONS[shape] ?? DEFAULT_TURNS
 }
 
+/**
+ * The rotation a brush keeps when it changes shape.
+ *
+ * Kept only when the new shape turns the same number of ways: carrying turn 3
+ * onto a shape with two of them would silently fold to something the player did
+ * not ask for, and starting from zero is the honest answer. Shared because the
+ * shape trays and the keyboard shortcuts must agree - they are the same gesture.
+ */
+export function carriedTurns(from: BlockShape, to: BlockShape, turns: number): number {
+    const count = turnCount(to)
+    return count === turnCount(from) ? turns % count : 0
+}
+
 /** Total distinct states, mirroring included. */
 export function variantCount(shape: BlockShape): number {
     return turnCount(shape) * (MIRRORABLE_SHAPES.includes(shape) ? 2 : 1)

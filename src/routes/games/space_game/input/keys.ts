@@ -1,7 +1,13 @@
-// Pointer and keyboard state for scenes, polled once per frame rather than pushed
+// Raw device state, polled once per frame rather than pushed
 
-/** True when the event was meant for a text field rather than for the scene. */
-function isTyping(target: EventTarget | null): boolean {
+/**
+ * True when the event was meant for a text field rather than for the game.
+ *
+ * Exported because it is the one guard every input path needs and the one most
+ * easily forgotten: three separate handlers used to restate it, and the day one
+ * of them was written without it, typing a ship name rotated blocks.
+ */
+export function isTyping(target: EventTarget | null): boolean {
     const element = target as HTMLElement | null
     if (!element) return false
     if (element.isContentEditable) return true
@@ -168,8 +174,10 @@ export class PointerInput {
  *
  * Keyed on `event.code` - the physical key - not `event.key`. WASD on a Dvorak
  * layout is still the same four keys under the same four fingers, and `code` is
- * what says so. Shortcuts that mean a letter rather than a position are better
- * handled in the DOM, where the panel already does it.
+ * what says so.
+ *
+ * Nothing above this class should name a code: InputService maps codes to actions
+ * and every caller asks for an action. This is the device, not the bindings.
  */
 export class KeyboardInput {
     /**
@@ -177,9 +185,18 @@ export class KeyboardInput {
      *
      * Opt-in rather than blanket: arrows scroll the page and space scrolls it
      * further, but swallowing every key would break tab, refresh and devtools.
-     * A scene adds what it actually uses - keys.capture.add("Space").
+     * InputService fills this from the `capture` flag on the active actions.
      */
     readonly capture = new Set<string>()
+
+    /**
+     * Called for each fresh press, after the typing guard and the repeat filter.
+     *
+     * Polling covers everything inside the frame loop. This is for the callers
+     * that are not in it - the Svelte page, which would have to sample on a timer
+     * and would miss the edge, because the loop clears edges every frame.
+     */
+    readonly onPress = new Set<(code: string) => void>()
 
     private readonly held = new Set<string>()
     private readonly downEdges = new Set<string>()
@@ -206,6 +223,8 @@ export class KeyboardInput {
 
             this.held.add(event.code)
             this.downEdges.add(event.code)
+
+            for (const listener of this.onPress) listener(event.code)
         })
 
         on("keyup", (event) => {
@@ -235,11 +254,6 @@ export class KeyboardInput {
         return this.upEdges.has(code)
     }
 
-    /** -1, 0 or 1 from a pair of keys, so movement reads as one number. */
-    axis(negative: string, positive: string): number {
-        return (this.isDown(positive) ? 1 : 0) - (this.isDown(negative) ? 1 : 0)
-    }
-
     /** Clears the per-frame edges. Call at the end of update(). */
     endFrame(): void {
         this.downEdges.clear()
@@ -251,31 +265,5 @@ export class KeyboardInput {
         for (const off of this.detach) off()
         this.detach.length = 0
         this.held.clear()
-    }
-}
-
-/**
- * A scene's whole input surface.
- *
- * The two halves stay separate classes - they listen to different targets and
- * need different guards - but they share a lifecycle, and a missed endFrame() is
- * exactly what leaves an edge stuck true forever. One owner, one call.
- */
-export class Input {
-    readonly pointer: PointerInput
-    readonly keys = new KeyboardInput()
-
-    constructor(canvas: HTMLCanvasElement) {
-        this.pointer = new PointerInput(canvas)
-    }
-
-    endFrame(): void {
-        this.pointer.endFrame()
-        this.keys.endFrame()
-    }
-
-    destroy(): void {
-        this.pointer.destroy()
-        this.keys.destroy()
     }
 }

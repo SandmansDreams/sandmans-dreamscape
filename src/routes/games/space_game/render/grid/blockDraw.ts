@@ -207,6 +207,21 @@ function appendArt(
 }
 
 /**
+ * The art this block wears, or null when it draws as geometry instead.
+ *
+ * A hull never wears art even when a file exists for it. Its shape is the whole
+ * point - wedges, arcs and full blocks are what let a hull be a silhouette
+ * rather than a rectangle - and one sprite would paint the same picture over
+ * every one of them. Components are the reverse case: the hexagon was always a
+ * placeholder standing in for art nobody had drawn yet, so art wins there.
+ */
+function artFor(block: BlockLike): ComponentArt | null {
+    if (!isComponent(block)) return null
+
+    return findArt(componentById(block.type), block.level)
+}
+
+/**
  * One block, as its own art or as the placeholder.
  *
  * The single place that decides how a block looks. The editor's ghost draws
@@ -222,7 +237,7 @@ export function appendBlock(
     fade = 0,
     fadeTo: Color = Color.BLACK,
 ): void {
-    const art = findArt(componentById(block.type), block.level)
+    const art = artFor(block)
     if (art) {
         appendArt(builder, art, block, x, y, cellSize, fade, fadeTo)
         return
@@ -266,6 +281,39 @@ export function appendLayer(
     for (const cell of grid.list) {
         const { x, y } = cellCorner(cell, cellSize, origin)
         appendBlock(builder, cell, x, y, cellSize, fade, fadeTo)
+    }
+}
+
+/**
+ * Every block on a layer, outlined from the triangles it actually draws.
+ *
+ * Not appendGridOutline with a shape substitution: that asks what shape a cell
+ * stands in for, and art does not stand in for a shape. Deriving the lines from
+ * the block's own geometry means the two views cannot disagree - a turret
+ * outlines as a turret, and a component still waiting on art outlines as the
+ * hexagon and letter it is drawn as, with no second code path for either.
+ *
+ * Per cell, so one block's edges never cancel against its neighbour's:
+ * cancelling those would give the hull's silhouette instead of a diagram of its
+ * blocks.
+ */
+export function appendLayerOutline(
+    out: number[],
+    grid: Grid,
+    cellSize: number,
+    origin: Vec2,
+    /** One color for every line. Omit to keep each block's own. */
+    color?: Color,
+): void {
+    // One builder reused across cells rather than one per block
+    const scratch = new MeshBuilder()
+
+    for (const cell of grid.list) {
+        const { x, y } = cellCorner(cell, cellSize, origin)
+
+        scratch.clear()
+        appendBlock(scratch, cell, x, y, cellSize)
+        appendTriangleOutline(out, scratch.toArray(), color ?? cell.color)
     }
 }
 

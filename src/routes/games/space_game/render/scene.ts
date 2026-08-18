@@ -1,6 +1,8 @@
 // The harness: owns the frame loop, swaps scenes in and out
 
 import { Stats } from "../dev/performance"
+import type { InputContext } from "../input/actions"
+import type { InputService } from "../input/service"
 import type { SettingsSchema, SettingValues } from "../settings/settings"
 import type { Frame } from "./frame"
 import type { GPU } from "./webgpu/gpu"
@@ -14,6 +16,14 @@ export type SceneUi = "builder" | "sprite" | "flight"
 export interface SceneContext {
     readonly gpu: GPU
     readonly canvas: HTMLCanvasElement
+    /**
+     * Keyboard and pointer, owned by the page rather than by the scene.
+     *
+     * A scene reads actions from it and does nothing else: the runner calls
+     * endFrame once a frame and the page owns its lifetime, so there is no way
+     * for a scene to leak a listener or leave an edge stuck true.
+     */
+    readonly input: InputService
     /** Shared with the dev panel - scenes record their own metrics here. */
     readonly stats: Stats
     /**
@@ -54,6 +64,15 @@ export interface SceneDefinition<V = any> {
     readonly settings?: SettingsSchema
     /** Show the builder panel for this scene. */
     readonly ui?: SceneUi
+    /**
+     * Which set of actions this scene reads, if it reads any.
+     *
+     * Separate from `ui` on purpose: a scene can want the builder panel and a
+     * different set of keys, and a scene with no panel at all can still fly.
+     * Reading an action outside the declared context warns rather than silently
+     * doing nothing.
+     */
+    readonly input?: InputContext
     create(context: SceneContext): SceneInstance<V>
 }
 
@@ -62,6 +81,7 @@ export class SceneRunner {
     clearColor: GPUColor = [0.05, 0.05, 0.07, 1]
 
     private readonly gpu: GPU
+    private readonly input: InputService
     private readonly loop = new FrameLoop()
     private readonly timer: GpuTimer
     private readonly channel = new Map<string, unknown>()
@@ -72,8 +92,9 @@ export class SceneRunner {
     private width = 0
     private height = 0
 
-    constructor(gpu: GPU) {
+    constructor(gpu: GPU, input: InputService) {
         this.gpu = gpu
+        this.input = input
         this.timer = new GpuTimer(gpu)
     }
 
@@ -107,9 +128,15 @@ export class SceneRunner {
         this.stats.clear()
         this.channel.clear()
 
+        // Before create(), so a scene reading an action in its constructor reads the
+        // right context. Null for a scene that binds nothing, which is what stops
+        // the outgoing scene's keys staying live under the incoming one.
+        this.input.setSceneContext(definition.input ?? null)
+
         this.instance = definition.create({
             gpu: this.gpu,
             canvas: this.gpu.canvas,
+            input: this.input,
             stats: this.stats,
             publish: (key, value) => {
                 this.channel.set(key, value)
@@ -176,6 +203,11 @@ export class SceneRunner {
             }
 
             instance.update(dt, this.values)
+
+            // One call for every scene, right after the only thing that reads input.
+            // Scenes used to each own this, and a scene that forgot it left every
+            // key looking held forever.
+            this.input.endFrame()
 
             const frame = this.gpu.beginFrame(this.clearColor, this.timer)
             instance.render(frame)

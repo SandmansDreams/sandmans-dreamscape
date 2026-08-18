@@ -9,10 +9,14 @@ import { Shader } from "../../render/webgpu/shader"
 import { MESH_2D } from "../../render/shaders/mesh2d"
 import { appendShape, MIRRORABLE_SHAPES, turnCount, type BlockShape } from "../../render/grid/shapes"
 import { DRAWN_SHAPES, shapeColor } from "../../render/grid/palette"
+import { appendBlock, type BlockLike } from "../../render/grid/blockDraw"
+import { ART_COMPONENTS, type Component } from "../../render/grid/components"
 import type { SettingsSchema, ValuesOf } from "../../settings/settings"
 import type { DevSceneDefinition } from "../DevScene"
 
 const SETTINGS = {
+    view:    { type: "selection", label: "View", default: "shapes",
+               options: ["shapes", "sprites"], display: "segmented" },
     mode:    { type: "selection", label: "Turns", default: "squares",
                options: ["squares", "lines"], display: "segmented" },
     gap:     { type: "range", label: "Gap", default: 5, min: 0, max: 5, step: 0.05 },
@@ -113,13 +117,45 @@ function textHeight(pixel: number): number {
     return DEFAULT_FONT.glyphHeight * pixel
 }
 
-/** Widest shape name, so the label column fits the longest one. */
-function labelColumnWidth(layout: ChartLayout): number {
+/** Widest row label, so the label column fits the longest one. */
+function labelColumnWidth(layout: ChartLayout, labels: readonly string[]): number {
     let widest = 0
-    for (const shape of DRAWN_SHAPES) {
-        widest = Math.max(widest, DEFAULT_FONT.measureText(shape, layout.fontPixel))
+    for (const label of labels) {
+        widest = Math.max(widest, DEFAULT_FONT.measureText(label, layout.fontPixel))
     }
     return widest + layout.columnGap
+}
+
+/**
+ * A block that exists only to be drawn: one component, at one level and facing.
+ *
+ * Nothing here is on a ship, so there is no cell to borrow - and inventing a
+ * column and a row just to satisfy Cell is what BlockLike exists to avoid. The
+ * shape fields are ignored, since a component never draws as its shape.
+ */
+function spriteBlock(component: Component, level: number, facing: number, color: Color): BlockLike {
+    return {
+        shape: "full",
+        turns: 0,
+        mirrored: false,
+        type: component.id,
+        facing,
+        level,
+        color,
+        // Null keeps whatever the artist chose, which is what a sheet should show
+        accentColor: null,
+    }
+}
+
+/** One row per component per level, since two levels are two pieces of art. */
+function spriteRows(): { component: Component; level: number; label: string }[] {
+    return ART_COMPONENTS.flatMap((component) =>
+        component.levels.map((_, index) => ({
+            component,
+            level: index + 1,
+            label: `${component.id} L${index + 1}`,
+        })),
+    )
 }
 
 /*~~~ Emitting ~~~*/
@@ -263,11 +299,48 @@ class ShapeChart implements SceneInstance<ChartValues> {
     }
 
     private rebuild(settings: ChartValues): void {
-        const layout = makeLayout(settings)
-        const mode = settings.mode
         const builder = new MeshBuilder()
+        const layout = makeLayout(settings)
 
-        const labelWidth = labelColumnWidth(layout)
+        const right = settings.view === "sprites"
+            ? this.appendSpriteRows(builder, layout, settings)
+            : this.appendShapeRows(builder, layout, settings)
+
+        this.mesh?.destroy()
+
+        if (builder.vertexCount === 0) {
+            this.mesh = null
+            return
+        }
+
+        this.mesh = builder.build(this.context.gpu, "shape chart")
+        this.context.stats.set("chart tris", builder.vertexCount / 3)
+
+        const rows = settings.view === "sprites" ? spriteRows().length : DRAWN_SHAPES.length
+        const rowStep = blockHeight(layout, settings.mode) + layout.rowGap
+
+        this.bounds = {
+            left: 0,
+            top: 0,
+            right: Math.max(right, 1),
+            // Trailing rowGap is not part of the chart
+            bottom: Math.max(rowStep + rows * rowStep - layout.rowGap, 1),
+        }
+    }
+
+    /**
+     * One row per shape, at the turns that shape actually has.
+     *
+     * @returns the chart's right edge
+     */
+    private appendShapeRows(
+        builder: MeshBuilder,
+        layout: ChartLayout,
+        settings: ChartValues,
+    ): number {
+        const mode = settings.mode
+
+        const labelWidth = labelColumnWidth(layout, DRAWN_SHAPES)
         const blockW = blockWidth(layout, mode)
         const blockH = blockHeight(layout, mode)
         const mirroredX = labelWidth + blockW + layout.blockGap
@@ -307,23 +380,73 @@ class ShapeChart implements SceneInstance<ChartValues> {
             }
         })
 
-        this.mesh?.destroy()
+        return mirroredX + blockW
+    }
 
-        if (builder.vertexCount === 0) {
-            this.mesh = null
-            return
-        }
+    /**
+     * One row per component per level, four facings across.
+     *
+     * Facings rather than turns, because that is the axis art actually varies
+     * on - appendBlock bakes the quarter turn per facing, and this is the sheet
+     * that shows whether a piece still reads pointing all four ways. The key at
+     * the top documents the same arrangement; only what the numbers mean changes.
+     *
+     * @returns the chart's right edge
+     */
+    private appendSpriteRows(
+        builder: MeshBuilder,
+        layout: ChartLayout,
+        settings: ChartValues,
+    ): number {
+        const mode = settings.mode
+        const rows = spriteRows()
 
-        this.mesh = builder.build(this.context.gpu, "shape chart")
-        this.context.stats.set("chart tris", builder.vertexCount / 3)
+        const labelWidth = labelColumnWidth(layout, rows.map((row) => row.label))
+        const blockH = blockHeight(layout, mode)
+        const step = layout.cell + layout.gap
+        const rowStep = blockH + layout.rowGap
 
-        this.bounds = {
-            left: 0,
-            top: 0,
-            right: Math.max(mirroredX + blockW, 1),
-            // Trailing rowGap is not part of the chart
-            bottom: Math.max(firstRowY + DRAWN_SHAPES.length * rowStep - layout.rowGap, 1),
-        }
+        appendKeyBlock(builder, labelWidth, 0, layout, mode)
+
+        // Always four: a piece of art has no symmetry the chart can know about,
+        // so every heading is a state worth looking at
+        const arrangement = arrangementFor(mode, 4)
+        const ownHeight = arrangement.length * layout.cell + (arrangement.length - 1) * layout.gap
+        const offsetY = (blockH - ownHeight) / 2
+
+        // The main tint every piece is painted in, which is how you check a design
+        // reads in more than one team colour. `palette` has nothing to key on here
+        const color = Color.from(settings.color)
+
+        rows.forEach(({ component, level, label }, index) => {
+            const y = rowStep + index * rowStep
+
+            DEFAULT_FONT.appendText(
+                builder, label, 0,
+                y + (blockH - textHeight(layout.fontPixel)) / 2,
+                layout.fontPixel, LABEL_COLOR,
+            )
+
+            for (let row = 0; row < arrangement.length; row++) {
+                const facings = arrangement[row]!
+
+                for (let column = 0; column < facings.length; column++) {
+                    const x = labelWidth + column * step
+                    const cellY = y + offsetY + row * step
+
+                    // Backdrop first: there is no depth test, so draw order is the
+                    // only thing putting the sprite on top of it
+                    builder.quad(x, cellY, layout.cell, layout.cell, BACKDROP_COLOR)
+                    appendBlock(
+                        builder,
+                        spriteBlock(component, level, facings[column]!, color),
+                        x, cellY, layout.cell,
+                    )
+                }
+            }
+        })
+
+        return labelWidth + blockWidth(layout, mode)
     }
 }
 
@@ -331,9 +454,11 @@ const scene: DevSceneDefinition<ChartValues> = {
     id: "shape-chart",
     name: "Shape Chart",
     description:
-        "Every block shape at the turns it actually has - a full block gets one cell, a " +
-        "hexagon two, most four - with a second block for the three shapes where mirroring " +
-        "is not just another rotation. The key at the top says which cell is which turn.",
+        "Shapes: every block shape at the turns it actually has - a full block gets one " +
+        "cell, a hexagon two, most four - with a second block for the three shapes where " +
+        "mirroring is not just another rotation. Sprites: every component's art at all " +
+        "four facings, one row per level, painted in the colour picked below. The key at " +
+        "the top says which cell is which.",
     settings: SETTINGS,
     create: (context) => new ShapeChart(context),
 }

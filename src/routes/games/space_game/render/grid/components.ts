@@ -259,6 +259,27 @@ for (const component of REGISTRY) {
 /** What a cell is when its file says nothing. */
 export const DEFAULT_TYPE = "hull-plate"
 
+/**
+ * Every component the game knows about, in registration order.
+ *
+ * For callers that have to cover the whole set rather than look one up - the art
+ * coverage test being the reason it exists. Derived from the registry, so a
+ * component added below is a component they see.
+ */
+export const ALL_COMPONENTS: readonly Component[] = REGISTRY
+
+/**
+ * Every component that draws as authored art.
+ *
+ * Hulls are excluded because they draw as their shape instead - see `artFor` in
+ * blockDraw. Kept here rather than as a filter at the call site so the art
+ * coverage test still fails the moment a new *component* arrives with no art,
+ * which is the whole reason that test exists.
+ */
+export const ART_COMPONENTS: readonly Component[] = REGISTRY.filter(
+    (component) => component.kind !== "hull",
+)
+
 /** The component with this id, or null. For readers, which want to warn. */
 export function findComponent(id: string): Component | null {
     return BY_ID.get(id) ?? null

@@ -271,55 +271,9 @@
         return () => clearTimeout(timer)
     })
 
-    /**
-     * One step of orientation.
-     *
-     * A component draws as a hexagon, so turning its art means nothing - what
-     * points somewhere is its facing. Structure has no facing, so it turns.
-     */
-    function rotate() {
-        if (placingComponent) {
-            set({ facing: (brush.facing + 1) % 4 })
-            return
-        }
-
-        set({ turns: (brush.turns + 1) % turnCount(brush.shape) })
-    }
-
-    /** Cycles 1..max and wraps, so one key reaches every level of the current type. */
-    function cycleLevel() {
-        set({ level: (brush.level % maxLevel(brush.type)) + 1 })
-    }
-
-    function step<T>(list: readonly T[], current: T, by: number): T {
-        const index = list.indexOf(current)
-        return list[(index + by + list.length) % list.length]!
-    }
-
     /** 1..max for a type, which is how far it upgrades. */
     function levelsOf(type: string): number[] {
         return Array.from({ length: maxLevel(type) }, (_, index) => index + 1)
-    }
-
-    function onKey(event: KeyboardEvent) {
-        // Typing a ship name must not rotate blocks and change layers
-        const target = event.target as HTMLElement | null
-        if (target?.isContentEditable) return
-        if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return
-
-        switch (event.key) {
-            case "r": case "R": rotate(); break
-            case "m": case "M": set({ mirrored: !brush.mirrored }); break
-            case "l": case "L": cycleLevel(); break
-            case "ArrowLeft": selectShape(step(DRAWN_SHAPES, brush.shape, -1)); break
-            case "ArrowRight": selectShape(step(DRAWN_SHAPES, brush.shape, 1)); break
-            case "ArrowUp": set({ layer: step(SHIP_LAYERS, brush.layer, -1) }); break
-            case "ArrowDown": set({ layer: step(SHIP_LAYERS, brush.layer, 1) }); break
-            default: return
-        }
-
-        // Arrows scroll the page otherwise
-        event.preventDefault()
     }
 
     /**
@@ -337,8 +291,6 @@
         return shape === brush.shape && brush.mirrored
     }
 </script>
-
-<svelte:window onkeydown={onKey} />
 
 <!-- mouseover/mouseout rather than enter/leave, and focusin/focusout rather than
      focus/blur: only the bubbling pairs reach one listener here, and the focus

@@ -68,39 +68,11 @@
         set({ shape, turns: carried, tool: "build" })
     }
 
-    function rotate() {
-        set({ turns: (brush.turns + 1) % turnCount(brush.shape) })
-    }
-
-    function step<T>(list: readonly T[], current: T, by: number): T {
-        const index = list.indexOf(current)
-        return list[(index + by + list.length) % list.length]!
-    }
-
     /** True while the brush would place what the shape tray is showing. */
     let picking = $derived(brush.tool === "build")
 
     /** Colours already on the piece, so one can be picked back up without matching hexes by eye. */
     let palette = $derived(info?.palette ?? [])
-
-    function onKey(event: KeyboardEvent) {
-        const target = event.target as HTMLElement | null
-        if (target?.isContentEditable) return
-        if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return
-
-        switch (event.key) {
-            case "r": case "R": rotate(); break
-            case "m": case "M": set({ mirrored: !brush.mirrored }); break
-            case "ArrowLeft": selectShape(step(DRAWN_SHAPES, brush.shape, -1)); break
-            case "ArrowRight": selectShape(step(DRAWN_SHAPES, brush.shape, 1)); break
-            case "ArrowUp": set({ role: step(ART_ROLES, brush.role, -1) }); break
-            case "ArrowDown": set({ role: step(ART_ROLES, brush.role, 1) }); break
-            case "l": case "L": set({ layer: step(ART_LAYERS, brush.layer, 1) }); break
-            default: return
-        }
-
-        event.preventDefault()
-    }
 
     /** Only the selected shape previews its live orientation. */
     function swatchTurns(shape: BlockShape): number {
@@ -111,8 +83,6 @@
         return shape === brush.shape && brush.mirrored
     }
 </script>
-
-<svelte:window onkeydown={onKey} />
 
 <div id="sprite-ui">
     <div id="top-panel" class="panel">

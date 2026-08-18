@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { Color } from "../color"
 import { MeshBuilder, FLOATS_PER_VERTEX } from "../mesh"
 import { appendBlock, appendLayer, type BlockLike } from "./blockDraw"
+import { appendShape } from "./shapes"
 import { Grid } from "./grid"
 
 const RED = Color.rgb(1, 0, 0)
@@ -26,16 +27,32 @@ function colorsOf(builder: MeshBuilder): number[][] {
     return out
 }
 
-describe("appendLayer fade", () => {
-    it("draws the authored colour when nothing is faded", () => {
-        const builder = new MeshBuilder()
-        appendLayer(builder, oneRedCell(), 32, { x: 0, y: 0 })
+/** The same layer drawn twice, once plain and once faded, vertex for vertex. */
+function fadedAgainstPlain(fade: number): { plain: number[][]; faded: number[][] } {
+    const plain = new MeshBuilder()
+    const faded = new MeshBuilder()
 
-        for (const [r, g, b] of colorsOf(builder)) {
-            expect(r).toBeCloseTo(1)
-            expect(g).toBeCloseTo(0)
-            expect(b).toBeCloseTo(0)
-        }
+    appendLayer(plain, oneRedCell(), 32, { x: 0, y: 0 })
+    appendLayer(faded, oneRedCell(), 32, { x: 0, y: 0 }, fade, BACKGROUND)
+
+    return { plain: colorsOf(plain), faded: colorsOf(faded) }
+}
+
+describe("appendLayer fade", () => {
+    /*
+     * Compared against the unfaded draw rather than against a colour written into
+     * the test. A block draws as its component's art, and art carries static
+     * squares that keep the shade they were drawn with - so "every vertex is the
+     * cell's colour" stopped being true the day the hull plate got art, while
+     * "every vertex moved the same fraction toward the background" is the thing
+     * the fade actually promises.
+     */
+    it("draws the authored colour when nothing is faded", () => {
+        const { plain, faded } = fadedAgainstPlain(0)
+
+        expect(faded).toEqual(plain)
+        // The cell's own colour reaches the vertices it recolours
+        expect(plain.some(([r, g, b]) => r === 1 && g === 0 && b === 0)).toBe(true)
     })
 
     it("lands on the background at full fade", () => {
@@ -50,13 +67,19 @@ describe("appendLayer fade", () => {
     })
 
     it("keeps 15% of the colour at the dim fade", () => {
-        const builder = new MeshBuilder()
         // 0.85 is what the builder's dim state uses, and 15% of the original is
         // what its button promises
-        appendLayer(builder, oneRedCell(), 32, { x: 0, y: 0 }, 0.85, BACKGROUND)
+        const { plain, faded } = fadedAgainstPlain(0.85)
 
-        const [r] = colorsOf(builder)[0]!
-        expect(r).toBeCloseTo(1 * 0.15 + BACKGROUND.r * 0.85, 4)
+        expect(faded).toHaveLength(plain.length)
+
+        plain.forEach(([r, g, b], index) => {
+            const [fr, fg, fb] = faded[index]!
+
+            expect(fr).toBeCloseTo(r! * 0.15 + BACKGROUND.r * 0.85, 4)
+            expect(fg).toBeCloseTo(g! * 0.15 + BACKGROUND.g * 0.85, 4)
+            expect(fb).toBeCloseTo(b! * 0.15 + BACKGROUND.b * 0.85, 4)
+        })
     })
 
     it("does not change the geometry it emits", () => {
@@ -93,18 +116,32 @@ describe("appendLayer art", () => {
         return { minX, minY, maxX, maxY }
     }
 
-    it("draws art instead of the hexagon placeholder", () => {
+    it("draws art for a component and plain geometry for a hull", () => {
         const withArt = new MeshBuilder()
         appendLayer(withArt, turretGrid(), 32, { x: 0, y: 0 })
 
-        const noArt = new MeshBuilder()
-        const railgun = new Grid("components")
-        railgun.set(0, 0, "full", { type: "railgun", color: RED })
-        appendLayer(noArt, railgun, 32, { x: 0, y: 0 })
+        const hull = new MeshBuilder()
+        appendLayer(hull, oneRedCell(), 32, { x: 0, y: 0 })
 
-        // The turret is a couple of hundred triangles; a hexagon plus its glyph is
-        // nothing like that many
-        expect(withArt.vertexCount).toBeGreaterThan(noArt.vertexCount * 3)
+        // The turret is a couple of hundred triangles; a full block is two
+        expect(withArt.vertexCount).toBeGreaterThan(hull.vertexCount * 3)
+    })
+
+    it("never dresses a hull in art, whatever files exist", () => {
+        const block: BlockLike = {
+            shape: "wedge", turns: 0, mirrored: false,
+            type: "hull-plate", facing: 0, level: 1, color: RED, accentColor: null,
+        }
+
+        const drawn = new MeshBuilder()
+        appendBlock(drawn, block, 0, 0, 32)
+
+        const shape = new MeshBuilder()
+        appendShape(shape, "wedge", 0, false, 0, 0, 32, RED)
+
+        // Identical vertex for vertex: a hull is its shape and nothing else, so a
+        // hull-plate art file appearing in the folder must change nothing here
+        expect([...drawn.toArray()]).toEqual([...shape.toArray()])
     })
 
     it("keeps the art inside the cell it belongs to", () => {

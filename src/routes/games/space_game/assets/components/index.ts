@@ -3,6 +3,15 @@ import type { Component } from "../../render/grid/components"
 
 const files = import.meta.glob<unknown>("./*.json", { eager: true, import: "default" })
 
+/**
+ * The raw files by path, so a test can re-read them and check what they warned.
+ *
+ * The parsed pieces below drop their warnings on the floor - by design, since a
+ * console line is all a running game can do with one. A test wants to assert
+ * there were none.
+ */
+export const ART_FILES: Readonly<Record<string, unknown>> = files
+
 const byId = new Map<string, ComponentArt>()
 
 for (const [path, data] of Object.entries(files)) {

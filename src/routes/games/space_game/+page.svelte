@@ -5,6 +5,7 @@
     import type { StatEntry } from "./dev/performance"
     import SettingsPanel from "./dev/DevSettingsPanel.svelte"
     import { GPU } from "./render/webgpu/gpu"
+    import { InputService } from "./input/service"
     import { SceneRunner, type SceneDefinition } from "./render/scene"
     import {
         loadSceneId,
@@ -115,12 +116,20 @@
         const target = canvas
         Assert.exists(target, "canvas")
 
+        // Built before the GPU, and outside the async block, so the page owns it for
+        // its whole life rather than per scene. Every key in the game resolves
+        // through this one service.
+        const input = new InputService({ canvas: target })
+        const offDevPanel = input.onGlobalPress((action) => {
+            if (action === "global.devPanel") devMode = !devMode
+        })
+
         let created: SceneRunner | null = null
         let ticker: ReturnType<typeof setInterval> | undefined
 
         void (async () => {
             const gpu = await GPU.create(target)
-            created = new SceneRunner(gpu)
+            created = new SceneRunner(gpu, input)
             gpuTimingSupported = created.gpuTimingSupported
 
             // Assigning this is what lets the load effect above build the first scene
@@ -151,15 +160,14 @@
         return () => {
             clearInterval(ticker)
             clearTimeout(saveTimer)
+            offDevPanel()
             created?.dispose()
+            // After the runner, which stops the loop that reads it
+            input.destroy()
             runner = null
         }
     })
 </script>
-
-<svelte:window onkeydown={(e) => {
-    if (e.key === "`") devMode = !devMode
-}} />
 
 <div id="container">
     {#if scene?.ui === "builder"}

@@ -12,8 +12,7 @@
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"test": "vitest run",
 		"test:watch": "vitest",
-		"shapes": "tsx src/routes/games/space_game/engine/dev/asciiShapes.ts",
-		"convert-hull": "tsx src/routes/games/space_game/engine/dev/convertHull.ts"
+		"art": "tsx src/routes/games/space_game/dev/tools/genComponentArt.ts"
 	},
 	"devDependencies": {
 		"@fontsource/fira-mono": "^5.2.7",

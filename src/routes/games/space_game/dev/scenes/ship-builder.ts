@@ -7,19 +7,20 @@ import type { Frame } from "../../render/frame"
 import { componentById, kindOf, maxLevel } from "../../render/grid/components"
 import type { Cell } from "../../render/grid/grid"
 import { SHIP_LAYERS, type ShipLayer } from "../../render/grid/layers"
-import { appendShape, type BlockShape } from "../../render/grid/shapes"
+import { appendShape, carriedTurns, turnCount, type BlockShape } from "../../render/grid/shapes"
 import { bestThrusterFacing, canClearLayer, canEraseAt, canPlaceAt } from "../../render/grid/shipLegality"
 import { Mesh, MeshBuilder, VERTEX_LAYOUT } from "../../render/mesh"
+import type { InputService } from "../../input/service"
 import type { SceneContext, SceneInstance } from "../../render/scene"
 import { MESH_2D } from "../../render/shaders/mesh2d"
 import { Pipeline } from "../../render/webgpu/pipeline"
 import { Shader } from "../../render/webgpu/shader"
 import type { ActionsOf, SearchColumn, SettingsSchema, ValuesOf } from "../../settings/settings"
 import { appendBlock, appendLayer, displayBlock, type BlockLike } from "../../render/grid/blockDraw"
-import { loadBrush, saveBrush, type Brush } from "../../render/grid/brush"
+import { layerFor, loadBrush, saveBrush, type Brush } from "../../render/grid/brush"
+import { DRAWN_SHAPES } from "../../render/grid/palette"
 import type { DevSceneDefinition } from "../DevScene"
 import { downloadText, uploadText } from "../../download"
-import { Input } from "../../game/input"
 
 const HOVER_COLOR = Color.from("#ffffff")
 const BLOCKED_COLOR = Color.from("#ff5a5a")
@@ -91,6 +92,12 @@ type Snapshot = Record<ShipLayer, Cell[]>
 function slug(name: string): string {
     const clean = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
     return clean === "" ? "untitled" : clean
+}
+
+/** The next entry in a list, wrapping at both ends. */
+function stepThrough<T>(list: readonly T[], current: T, by: number): T {
+    const index = list.indexOf(current)
+    return list[(index + by + list.length) % list.length]!
 }
 
 /** A ship's footprint as "columns x rows", or "-" for one with no blocks at all. */
@@ -220,7 +227,7 @@ function appendMark(out: number[], col: number, row: number, origin: Vec2, color
 
 class ShipBuilder implements SceneInstance<EditorValues> {
     private readonly context: SceneContext
-    private readonly input: Input
+    private readonly input: InputService
     private readonly camera = new Camera()
     private readonly cameraBinding: CameraBinding
     private readonly meshPipeline: Pipeline
@@ -341,8 +348,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
      */
     receive(key: string, value: unknown): void {
         if (key === "brush") {
-            this.brush = { ...this.brush, ...(value as Partial<Brush>) }
-            this.publishBrush()
+            this.patchBrush(value as Partial<Brush>)
             return
         }
 
@@ -393,7 +399,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         this.context = context
         const gpu = context.gpu
 
-        this.input = new Input(context.canvas)
+        this.input = context.input
         this.cameraBinding = CameraBinding.create(gpu)
 
         const shader = Shader.createNow(gpu, MESH_2D, "mesh 2d")
@@ -422,6 +428,8 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         // fitCamera already reads gpu.width, so the camera refits itself
         this.context.gpu.resolutionScale = settings.resolution
         this.syncIdentity(settings)
+
+        this.readShortcuts()
 
         const [col, row] = this.getGridPositionFromMouse()
 
@@ -461,9 +469,6 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         this.rebuildCursor(col, row)
         this.rebuildHighlight()
         this.publishSelection()
-
-        // Last: everything above reads the edges and deltas this clears
-        this.input.endFrame()
     }
 
     render(frame: Frame): void {
@@ -539,7 +544,6 @@ class ShipBuilder implements SceneInstance<EditorValues> {
 
         clearTimeout(this.brushSaveTimer)
 
-        this.input.destroy()
         for (const mesh of this.meshes.values()) mesh.destroy()
         this.marks?.destroy()
         this.protectedBoxes?.destroy()
@@ -554,6 +558,80 @@ class ShipBuilder implements SceneInstance<EditorValues> {
     /*~~~ Brush ~~~*/
 
     /** Hands the panel the new brush and schedules the write to storage. */
+    /**
+     * The keyboard's brush shortcuts.
+     *
+     * Read here rather than in the panel, because the scene is what owns the brush:
+     * the panel used to handle these on a window listener and send a patch back,
+     * which meant the shortcuts were bound to `event.key` letters and broke on any
+     * layout that does not put R where QWERTY does.
+     */
+    private readShortcuts(): void {
+        const input = this.input
+
+        if (input.pressed("builder.rotate")) this.rotateBrush()
+        if (input.pressed("builder.mirror")) this.patchBrush({ mirrored: !this.brush.mirrored })
+
+        // Cycles 1..max and wraps, so one key reaches every level of the type
+        if (input.pressed("builder.cycleLevel")) {
+            this.patchBrush({ level: (this.brush.level % maxLevel(this.brush.type)) + 1 })
+        }
+
+        if (input.pressed("builder.prevShape")) this.stepShape(-1)
+        if (input.pressed("builder.nextShape")) this.stepShape(1)
+
+        if (input.pressed("builder.layerUp")) this.stepLayer(-1)
+        if (input.pressed("builder.layerDown")) this.stepLayer(1)
+    }
+
+    /**
+     * One step of orientation.
+     *
+     * A component draws as its own art or as a hexagon, so turning the art means
+     * nothing - what points somewhere is its facing. Structure has no facing, so
+     * it turns instead.
+     */
+    private rotateBrush(): void {
+        const brush = this.brush
+
+        if (kindOf(brush.type) !== "hull") {
+            this.patchBrush({ facing: (brush.facing + 1) % 4 })
+            return
+        }
+
+        this.patchBrush({ turns: (brush.turns + 1) % turnCount(brush.shape) })
+    }
+
+    private stepShape(by: number): void {
+        const shape = stepThrough(DRAWN_SHAPES, this.brush.shape, by)
+
+        // Back to paint, as picking a shape in the tray does: choosing one while the
+        // brush sits on erase would light nothing up and do nothing. The layer comes
+        // along for the same reason - erase may have left it somewhere it cannot build.
+        this.patchBrush({
+            shape,
+            turns: carriedTurns(this.brush.shape, shape, this.brush.turns),
+            tool: "build",
+            layer: layerFor(this.brush.type, this.brush.layer),
+        })
+    }
+
+    private stepLayer(by: number): void {
+        this.patchBrush({ layer: stepThrough(SHIP_LAYERS, this.brush.layer, by) })
+    }
+
+    /**
+     * Changes the brush and tells the panel, whatever asked for the change.
+     *
+     * One path for the panel's controls and for the keyboard, because they are the
+     * same gesture reached two ways - a shortcut that skipped the publish would
+     * leave the tray showing a shape the brush no longer holds.
+     */
+    private patchBrush(patch: Partial<Brush>): void {
+        this.brush = { ...this.brush, ...patch }
+        this.publishBrush()
+    }
+
     private publishBrush(): void {
         this.context.publish("brush", this.brush)
 
@@ -1278,6 +1356,7 @@ const scene: DevSceneDefinition<EditorValues> = {
         "stroke, not a single block.",
     settings: SETTINGS,
     ui: "builder",
+    input: "builder",
     create: (context) => new ShipBuilder(context),
 }
 

@@ -7,6 +7,7 @@ import type { Ship } from "../../game/ship"
 import { InstanceBatch } from "../../render/webgpu/instance"
 import { Mesh, MeshBuilder, VERTEX_LAYOUT } from "../../render/mesh"
 import { emptyBindGroupLayout, Pipeline } from "../../render/webgpu/pipeline"
+import type { PointerInput } from "../../input/keys"
 import type { SceneContext, SceneInstance } from "../../render/scene"
 import { Shader } from "../../render/webgpu/shader"
 import { INSTANCED_2D } from "../../render/shaders/instanced2d"
@@ -15,10 +16,8 @@ import { type ActionsOf, type SearchColumn, type SettingsSchema, type ValuesOf }
 import type { DevSceneDefinition } from "../DevScene"
 import { downloadText } from "../../download"
 import { shipToText } from "../../game/shipJson"
-import { appendGridOutline } from "../../render/grid/gridOutline"
 import { Color } from "../../render/color"
-import { appendComponentGlyphOutlines, appendLayer, displayBlock } from "../../render/grid/blockDraw"
-import { PointerInput } from "../../game/input"
+import { appendLayer, appendLayerOutline } from "../../render/grid/blockDraw"
 
 const DEFAULT_WIREFRAME_COLOR = Color.from("#00fbff")
 const LABEL_COLOR = Color.from("#797979")
@@ -222,7 +221,7 @@ class ShipViewer implements SceneInstance<ViewerValues> {
         this.context = context
         const gpu = context.gpu
 
-        this.input = new PointerInput(context.canvas)
+        this.input = context.input.pointer
         this.cameraBinding = CameraBinding.create(gpu)
         const instanceLayout = InstanceBatch.layout(gpu)
 
@@ -265,7 +264,6 @@ class ShipViewer implements SceneInstance<ViewerValues> {
         // Before the rebuild guard: that returns early on an unchanged settings
         // key, which would skip every per-frame input read below it
         this.updateHover(settings)
-        this.input.endFrame()
 
         const key = `${DEFAULT_FONT.loaded}|${JSON.stringify(settings)}`
         if (key === this.builtKey) return
@@ -292,7 +290,6 @@ class ShipViewer implements SceneInstance<ViewerValues> {
     dispose(): void {
         this.context.gpu.resolutionScale = 1
 
-        this.input.destroy()
 
         this.disposeMeshes()
         this.overlay?.destroy()
@@ -620,14 +617,12 @@ class ShipViewer implements SceneInstance<ViewerValues> {
     private buildWireMesh(ship: Ship, origin: Vec2, color: Color): Mesh | null {
         const outline: number[] = []
 
+        // Outlined from the solid mesh's own triangles, so art outlines as the
+        // turret it is rather than as the hexagon it used to stand in for.
+        // Glyphs come along for free: appendBlock emits the letter and facing bar
+        // for a component with no art, so they outline in the same pass
         for (const layer of SHIP_LAYERS) {
-            // displayBlock is what the solid mesh uses too, so a component
-            // outlines as the hexagon it is drawn as rather than its own shape
-            appendGridOutline(outline, ship.layers[layer], CELL, origin, color, displayBlock)
-
-            // Letters and facing bars outline the same way, so they ride in this
-            // mesh rather than needing a filled pass of their own
-            appendComponentGlyphOutlines(outline, ship.layers[layer], CELL, origin, color)
+            appendLayerOutline(outline, ship.layers[layer], CELL, origin, color)
         }
 
         return outline.length === 0

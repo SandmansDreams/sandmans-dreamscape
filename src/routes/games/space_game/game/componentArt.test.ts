@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { Color } from "../render/color"
 import { ART_LAYERS, ART_ROLES } from "../render/grid/spriteMesh"
+import { ART_COMPONENTS } from "../render/grid/components"
+import { ART_FILES, findArt } from "../assets/components"
 import { FLOATS_PER_VERTEX } from "../render/mesh"
 import {
     artFromText,
@@ -318,5 +320,50 @@ describe("v1 migration", () => {
         // Clean on the second pass: the migration is a one-way door
         expect(warnings).toEqual([])
         expect(again.layers.base.size).toBe(6)
+    })
+})
+
+describe("art coverage", () => {
+    /**
+     * Every component draws as its own art rather than as the placeholder.
+     *
+     * The failure this catches is a quiet one: a file named for something the
+     * registry does not have loads fine, warns about nothing, and simply never
+     * appears on a ship. Asking the registry rather than listing filenames is
+     * what makes adding a component surface as a failing test here.
+     *
+     * Hulls are not in this list and must not be: they draw as their shape, so
+     * art for one would never be reached.
+     */
+    it("finds art for every component at every level", () => {
+        for (const component of ART_COMPONENTS) {
+            for (let level = 1; level <= component.levels.length; level++) {
+                expect(findArt(component, level), `${component.id} L${level}`).not.toBeNull()
+            }
+        }
+    })
+
+    it("reads every shipped piece without a single warning", () => {
+        for (const [path, data] of Object.entries(ART_FILES)) {
+            const { warnings } = readArt(data)
+            expect(warnings, path).toEqual([])
+        }
+    })
+
+    it("bakes every piece down to triangles it can actually draw", () => {
+        for (const component of ART_COMPONENTS) {
+            const art = findArt(component, 1)!
+            let floats = 0
+
+            for (const layer of ART_LAYERS) {
+                for (const role of ART_ROLES) floats += art.mesh[layer][role].length
+            }
+
+            // Whole vertices, whole triangles, and not an empty piece - an art file
+            // that bakes to nothing is worse than none, because the placeholder
+            // would at least have drawn something
+            expect(floats, component.id).toBeGreaterThan(0)
+            expect(floats % (FLOATS_PER_VERTEX * 3), component.id).toBe(0)
+        }
     })
 })

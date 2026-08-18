@@ -2,9 +2,11 @@ import { Camera, CameraBinding } from "../../render/camera"
 import { Color } from "../../render/color"
 import type { Frame } from "../../render/frame"
 import { ArtGrid, type ArtCell } from "../../render/grid/artGrid"
-import { appendShape, type BlockShape } from "../../render/grid/shapes"
+import { appendShape, carriedTurns, turnCount, type BlockShape } from "../../render/grid/shapes"
+import { DRAWN_SHAPES } from "../../render/grid/palette"
 import { ART_LAYERS, ART_ROLES, bakeRole, type ArtLayer, type ArtRole } from "../../render/grid/spriteMesh"
 import { FLOATS_PER_VERTEX, Mesh, MeshBuilder, VERTEX_LAYOUT } from "../../render/mesh"
+import type { InputService } from "../../input/service"
 import type { SceneContext, SceneInstance } from "../../render/scene"
 import { MESH_2D } from "../../render/shaders/mesh2d"
 import { Pipeline } from "../../render/webgpu/pipeline"
@@ -12,8 +14,13 @@ import { Shader } from "../../render/webgpu/shader"
 import type { ActionsOf, SettingsSchema, ValuesOf } from "../../settings/settings"
 import { artFromText, artToText, emptyArt, ART_GRID, type ComponentArt } from "../../game/componentArt"
 import { downloadText, uploadText } from "../../download"
-import { Input } from "../../game/input"
 import type { DevSceneDefinition } from "../DevScene"
+
+/** The next entry in a list, wrapping at both ends. */
+function stepThrough<T>(list: readonly T[], current: T, by: number): T {
+    const index = list.indexOf(current)
+    return list[(index + by + list.length) % list.length]!
+}
 
 /** World units per authored cell. The whole canvas is CELL * ART_GRID across. */
 const CELL = 32
@@ -100,7 +107,7 @@ function meshKey(layer: ArtLayer, role: ArtRole): string {
 
 class SpriteEditor implements SceneInstance<EditorValues> {
     private readonly context: SceneContext
-    private readonly input: Input
+    private readonly input: InputService
     private readonly camera = new Camera()
     private readonly cameraBinding: CameraBinding
     private readonly meshPipeline: Pipeline
@@ -159,16 +166,7 @@ class SpriteEditor implements SceneInstance<EditorValues> {
 
     receive(key: string, value: unknown): void {
         if (key === "artBrush") {
-            this.brush = { ...this.brush, ...(value as Partial<ArtBrush>) }
-
-            // The tints belong to the piece; the brush is only how they are edited
-            this.art.mainColor = this.brush.mainColor
-            this.art.accentColor = this.brush.accentColor
-
-            this.publishBrush()
-
-            // Neither tint touches the grid, so the mesh key would not notice them
-            this.builtKey = ""
+            this.patchBrush(value as Partial<ArtBrush>)
             return
         }
 
@@ -179,7 +177,7 @@ class SpriteEditor implements SceneInstance<EditorValues> {
         this.context = context
         const gpu = context.gpu
 
-        this.input = new Input(context.canvas)
+        this.input = context.input
         this.cameraBinding = CameraBinding.create(gpu)
 
         const shader = Shader.createNow(gpu, MESH_2D, "mesh 2d")
@@ -201,6 +199,8 @@ class SpriteEditor implements SceneInstance<EditorValues> {
         this.syncIdentity(settings)
         this.frameCanvas()
 
+        this.readShortcuts()
+
         const [col, row] = this.cellUnderCursor()
 
         if (this.input.pointer.pressed()) this.pushUndo()
@@ -209,8 +209,6 @@ class SpriteEditor implements SceneInstance<EditorValues> {
 
         this.rebuildMeshes(settings)
         this.rebuildCursor(col, row)
-
-        this.input.endFrame()
     }
 
     render(frame: Frame): void {
@@ -236,7 +234,6 @@ class SpriteEditor implements SceneInstance<EditorValues> {
     }
 
     dispose(): void {
-        this.input.destroy()
         for (const mesh of this.meshes.values()) mesh.destroy()
         this.lattice?.destroy()
         this.hover?.destroy()
@@ -395,6 +392,67 @@ class SpriteEditor implements SceneInstance<EditorValues> {
     }
 
     /*~~~ Meshes ~~~*/
+
+    /**
+     * The keyboard's brush shortcuts.
+     *
+     * The scene's job for the same reason the builder's are: it owns the brush,
+     * and handling them in the panel meant binding `event.key` letters that move
+     * under a non-QWERTY layout.
+     */
+    private readShortcuts(): void {
+        const input = this.input
+        const brush = this.brush
+
+        if (input.pressed("sprite.rotate")) {
+            this.patchBrush({ turns: (brush.turns + 1) % turnCount(brush.shape) })
+        }
+        if (input.pressed("sprite.mirror")) this.patchBrush({ mirrored: !brush.mirrored })
+        if (input.pressed("sprite.cycleLayer")) {
+            this.patchBrush({ layer: stepThrough(ART_LAYERS, brush.layer, 1) })
+        }
+
+        if (input.pressed("sprite.prevShape")) this.stepShape(-1)
+        if (input.pressed("sprite.nextShape")) this.stepShape(1)
+
+        if (input.pressed("sprite.prevRole")) {
+            this.patchBrush({ role: stepThrough(ART_ROLES, brush.role, -1) })
+        }
+        if (input.pressed("sprite.nextRole")) {
+            this.patchBrush({ role: stepThrough(ART_ROLES, brush.role, 1) })
+        }
+    }
+
+    private stepShape(by: number): void {
+        const shape = stepThrough(DRAWN_SHAPES, this.brush.shape, by)
+
+        // Back to paint, as picking one in the tray does: choosing a shape while the
+        // brush sits on erase would light nothing up and do nothing
+        this.patchBrush({
+            shape,
+            turns: carriedTurns(this.brush.shape, shape, this.brush.turns),
+            tool: "build",
+        })
+    }
+
+    /**
+     * Changes the brush and tells the panel, whatever asked for the change.
+     *
+     * One path for the panel's controls and for the keyboard, because they are the
+     * same gesture reached two ways.
+     */
+    private patchBrush(patch: Partial<ArtBrush>): void {
+        this.brush = { ...this.brush, ...patch }
+
+        // The tints belong to the piece; the brush is only how they are edited
+        this.art.mainColor = this.brush.mainColor
+        this.art.accentColor = this.brush.accentColor
+
+        this.publishBrush()
+
+        // Neither tint touches the grid, so the mesh key would not notice them
+        this.builtKey = ""
+    }
 
     private publishBrush(): void {
         this.context.publish("artBrush", this.brush)
@@ -626,6 +684,7 @@ const scene: DevSceneDefinition<EditorValues> = {
         "gave it, the other two are recoloured by whatever component wears the art.",
     settings: SETTINGS,
     ui: "sprite",
+    input: "sprite",
     create: (context) => new SpriteEditor(context),
 }
 

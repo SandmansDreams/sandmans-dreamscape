@@ -9,12 +9,12 @@ import { Color } from "../../render/color"
 import type { Frame } from "../../render/frame"
 import { appendLayer } from "../../render/grid/blockDraw"
 import { FLOATS_PER_VERTEX, Mesh, MeshBuilder, VERTEX_LAYOUT } from "../../render/mesh"
+import { InputService } from "../../input/service"
 import type { SceneContext, SceneInstance } from "../../render/scene"
 import { MESH_2D } from "../../render/shaders/mesh2d"
 import { Pipeline } from "../../render/webgpu/pipeline"
 import { Shader } from "../../render/webgpu/shader"
 import type { ActionsOf, SearchColumn, SettingsSchema, ValuesOf } from "../../settings/settings"
-import { KeyboardInput } from "../../game/input"
 import type { DevSceneDefinition } from "../DevScene"
 
 /** World units per cell, matching the builder so a ship is the size you drew it. */
@@ -70,7 +70,7 @@ export interface FlightInfo {
 
 class ShipFlight implements SceneInstance<FlightValues> {
     private readonly context: SceneContext
-    private readonly input: KeyboardInput
+    private readonly input: InputService
     private readonly camera = new Camera()
     private readonly cameraBinding: CameraBinding
     private readonly meshPipeline: Pipeline
@@ -110,8 +110,7 @@ class ShipFlight implements SceneInstance<FlightValues> {
         this.context = context
         const gpu = context.gpu
 
-        this.input = new KeyboardInput()
-        this.input.capture.add("KeyZ")
+        this.input = context.input
         this.cameraBinding = CameraBinding.create(gpu)
 
         const shader = Shader.createNow(gpu, MESH_2D, "mesh 2d")
@@ -156,7 +155,6 @@ class ShipFlight implements SceneInstance<FlightValues> {
 
         this.uploadShip()
         this.publishInfo()
-        this.input.endFrame()
     }
 
     /**
@@ -173,7 +171,7 @@ class ShipFlight implements SceneInstance<FlightValues> {
             this.assist = settings.assist
         }
 
-        if (this.input.pressed("KeyZ")) this.assist = !this.assist
+        if (this.input.pressed("flight.toggleAssist")) this.assist = !this.assist
     }
 
     /**
@@ -187,10 +185,10 @@ class ShipFlight implements SceneInstance<FlightValues> {
             // The ship's north is negative y, and axis() already returns -1 for the
             // first key, so W needs no sign correction here
             move: {
-                x: this.input.axis("KeyA", "KeyD"),
-                y: this.input.axis("KeyW", "KeyS"),
+                x: this.input.axis("flight.strafeLeft", "flight.strafeRight"),
+                y: this.input.axis("flight.thrustForward", "flight.thrustBack"),
             },
-            turn: this.input.axis("KeyQ", "KeyE"),
+            turn: this.input.axis("flight.turnLeft", "flight.turnRight"),
             assist: this.assist,
         }
     }
@@ -345,7 +343,6 @@ class ShipFlight implements SceneInstance<FlightValues> {
     }
 
     dispose(): void {
-        this.input.destroy()
         this.shipMesh?.destroy()
         this.walls?.destroy()
         this.cameraBinding.destroy()
@@ -362,6 +359,7 @@ const scene: DevSceneDefinition<FlightValues> = {
         "was built with steering thrusters off its center of mass.",
     settings: SETTINGS,
     ui: "flight",
+    input: "flight",
     create: (context) => new ShipFlight(context),
 }
 
