@@ -9,6 +9,7 @@ import { appendShape, type BlockShape } from "./shapes"
 import { appendTriangleOutline } from "./gridOutline"
 import { FLOATS_PER_VERTEX, MeshBuilder } from "../mesh"
 import { findArt } from "../../assets/components"
+import { appendGlow } from "../glow"
 import type { ComponentArt } from "../../game/componentArt"
 import { ART_LAYERS, ART_ROLES, type ArtRole } from "./spriteMesh"
 
@@ -55,6 +56,13 @@ export interface BlockLike {
     color: Color
     /** The accent tint, or null to keep whatever the art was drawn with. */
     accentColor: Color | null
+    /**
+     * 0 for a surface the light shades, 1 for one that lights itself.
+     *
+     * Optional because a ghost or a swatch has no business having one, and the
+     * lit shader reads absent as zero either way.
+     */
+    emission?: number
 }
 
 /** True when this block draws as a placeholder rather than as its own shape. */
@@ -237,6 +245,11 @@ export function appendBlock(
     fade = 0,
     fadeTo: Color = Color.BLACK,
 ): void {
+    // Named before anything is appended, so art, shape and glyph all inherit it.
+    // This is the one place that knows which cell a triangle belongs to, and the
+    // lit shader treats the direction out to this point as the cell's normal.
+    builder.inCell(x + cellSize / 2, y + cellSize / 2, block.emission)
+
     const art = artFor(block)
     if (art) {
         appendArt(builder, art, block, x, y, cellSize, fade, fadeTo)
@@ -281,6 +294,57 @@ export function appendLayer(
     for (const cell of grid.list) {
         const { x, y } = cellCorner(cell, cellSize, origin)
         appendBlock(builder, cell, x, y, cellSize, fade, fadeTo)
+    }
+}
+
+/**
+ * How far past its own cell an emissive block bleeds, as a multiple of the cell.
+ *
+ * Just over one, because a halo that stops at the cell's edge reads as a brighter
+ * block rather than as a light. Past about 1.5 the neighbours wash out and the
+ * ship stops looking like plates with windows in it.
+ */
+const BLOOM_SPREAD = 0.85
+
+/**
+ * How much of an emissive cell's colour its halo carries at full emission.
+ *
+ * Deliberately low: the cell is already drawn at full brightness by the shading,
+ * and this is the spill around it rather than the light itself.
+ */
+const BLOOM_STRENGTH = 0.12
+
+/**
+ * A soft halo over every cell that lights itself.
+ *
+ * Its own mesh, drawn additively over the hull: bloom is light spilling past an
+ * edge, so it has to be laid over the finished ship rather than shaded into it.
+ * The lit shader already keeps an emissive cell at full brightness; this is only
+ * what leaks out around it.
+ *
+ * No cell channel is recorded, so this mesh cannot be drawn by the lit pipeline -
+ * which is correct, since shading a glow would be lighting a light.
+ */
+export function appendEmissiveBloom(
+    builder: MeshBuilder,
+    grid: Grid,
+    cellSize: number,
+    origin: Vec2,
+    strength = BLOOM_STRENGTH,
+): void {
+    for (const cell of grid.list) {
+        if (cell.emission <= 0) continue
+
+        const { x, y } = cellCorner(cell, cellSize, origin)
+        const amount = Math.min(cell.emission, 1) * strength
+
+        appendGlow(
+            builder,
+            x + cellSize / 2,
+            y + cellSize / 2,
+            cellSize * BLOOM_SPREAD,
+            Color.rgb(cell.color.r * amount, cell.color.g * amount, cell.color.b * amount),
+        )
     }
 }
 

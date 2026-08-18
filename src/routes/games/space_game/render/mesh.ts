@@ -9,6 +9,20 @@ import type { Color } from "./color"
 export const FLOATS_PER_VERTEX = 5 // x, y, r, g, b
 const STRIDE = FLOATS_PER_VERTEX * 4 // Bytes from one vertex to the next
 
+/**
+ * The second, optional channel: cell centre x, cell centre y, emission.
+ *
+ * Its own buffer rather than three more floats on every vertex. Only the lit
+ * pipeline reads it, and the things that would have to invent an answer - glyph
+ * runs, wireframe lines, the arena walls - simply never fill it.
+ *
+ * The centre is in the same space as the positions beside it, so for a ship it
+ * is measured from the hull's centre and is exactly the outward direction the
+ * shading treats as a cell's normal.
+ */
+export const FLOATS_PER_CELL_VERTEX = 3
+const CELL_STRIDE = FLOATS_PER_CELL_VERTEX * 4
+
 // Single source of truth for vertex layout for the game
 export const VERTEX_LAYOUT: GPUVertexBufferLayout = {
     arrayStride: STRIDE,
@@ -19,12 +33,29 @@ export const VERTEX_LAYOUT: GPUVertexBufferLayout = {
     ],
 }
 
+/** Buffer 1, bound only by the lit pipeline. See FLOATS_PER_CELL_VERTEX. */
+export const CELL_VERTEX_LAYOUT: GPUVertexBufferLayout = {
+    arrayStride: CELL_STRIDE,
+    stepMode: "vertex",
+    attributes: [
+        { shaderLocation: 2, offset: 0, format: "float32x3" }, // cell centre xy, emission
+    ],
+}
+
 export class Mesh {
     readonly buffer: Buffer
+    /**
+     * The cell channel, or null on a mesh nobody will light.
+     *
+     * Present exactly when the builder was given cell centres. The lit pipeline
+     * requires it; every other pipeline never looks.
+     */
+    readonly cells: Buffer | null
     vertexCount: number
 
-    private constructor(buffer: Buffer, vertexCount: number) {
+    private constructor(buffer: Buffer, cells: Buffer | null, vertexCount: number) {
         this.buffer = buffer
+        this.cells = cells
         this.vertexCount = vertexCount
     }
 
@@ -32,7 +63,8 @@ export class Mesh {
         gpu: GPU, 
         data: Float32Array<ArrayBuffer>, 
         label = "mesh", 
-        capacityFloats = data.length
+        capacityFloats = data.length,
+        cellData?: Float32Array<ArrayBuffer>,
     ): Mesh {
         // Ensure data fits evenly into buffer and there is enough capacity
         Assert.that(
@@ -47,10 +79,24 @@ export class Mesh {
 
         const vertexCount = data.length / FLOATS_PER_VERTEX
 
-        return new Mesh(buffer, vertexCount)
+        let cells: Buffer | null = null
+        if (cellData && cellData.length > 0) {
+            Assert.that(
+                cellData.length === vertexCount * FLOATS_PER_CELL_VERTEX,
+                `cell data holds ${cellData.length / FLOATS_PER_CELL_VERTEX} vertices, not ${vertexCount}`,
+            )
+
+            // Scaled from the same capacity, so a mesh that can grow its positions
+            // can grow its cells by exactly as much
+            const capacityCells = (capacityFloats / FLOATS_PER_VERTEX) * FLOATS_PER_CELL_VERTEX
+            cells = Buffer.makeVertexBuffer(gpu, capacityCells * 4, `${label} cells`)
+            cells.write(cellData)
+        }
+
+        return new Mesh(buffer, cells, vertexCount)
     }
 
-    update(data: Float32Array<ArrayBuffer>) { // Reupload new data, cant exceed inital capacity
+    update(data: Float32Array<ArrayBuffer>, cellData?: Float32Array<ArrayBuffer>) { // Reupload new data, cant exceed inital capacity
         Assert.that(
             data.length % FLOATS_PER_VERTEX === 0,
             `mesh data length ${data.length} for update is not a multiple of ${FLOATS_PER_VERTEX}`,
@@ -59,6 +105,10 @@ export class Mesh {
         // Capacity assertion not needed here, is written into buffer.write()  
         this.buffer.write(data)
         this.vertexCount = data.length / FLOATS_PER_VERTEX
+
+        // Silently ignored when this mesh has no cell buffer: a caller that wants
+        // one has to say so at create(), where the buffer can actually be made
+        if (this.cells && cellData) this.cells.write(cellData)
     }
 
     draw(frame: Frame): void {
@@ -69,6 +119,7 @@ export class Mesh {
 
     destroy(): void {
         this.buffer.destroy()
+        this.cells?.destroy()
     }
 }
 
@@ -163,8 +214,65 @@ export class DynamicMesh {
 export class MeshBuilder {
     private readonly data: number[] = [] // Flat and interleaved: x, y, r, g, b per vertex
 
+    /**
+     * The cell channel, filled only while a caller has said which cell it is in.
+     *
+     * Kept in lockstep with `data` by every push below rather than by the caller,
+     * because the two buffers disagreeing is a class of bug that would show up as
+     * a hull lit from the wrong direction and nothing else.
+     */
+    private readonly cellData: number[] = []
+    private cellX = 0
+    private cellY = 0
+    private emission = 0
+    private cellsUsed = false
+    private furthestCellSq = 0
+
     get vertexCount(): number {
         return this.data.length / FLOATS_PER_VERTEX
+    }
+
+    /**
+     * Marks every vertex added from now on as belonging to this cell.
+     *
+     * Stateful on purpose. The alternative is threading a centre and an emission
+     * through appendShape, the font and every other producer, none of which knows
+     * what a cell is or wants to.
+     *
+     * @param x centre of the cell, in the same space as the positions being added
+     * @param emission 0 for a surface the light shades, 1 for one that lights itself
+     */
+    inCell(x: number, y: number, emission = 0): this {
+        this.cellX = x
+        this.cellY = y
+        this.emission = emission
+        this.cellsUsed = true
+        this.furthestCellSq = Math.max(this.furthestCellSq, x * x + y * y)
+        return this
+    }
+
+    /**
+     * How far the outermost cell sits from the origin these were built about.
+     *
+     * What the shading wants for "cells this far out take full contrast", and
+     * measurably better than the bounding box's corner: no cell ever sits at the
+     * corner of a hull, so a box measure leaves even the outermost plates short
+     * of full contrast and the whole ship reads flat.
+     */
+    get cellReach(): number {
+        return Math.sqrt(this.furthestCellSq)
+    }
+
+    /** Back to geometry that belongs to no cell - overlays, labels, markers. */
+    outsideCell(): this {
+        return this.inCell(0, 0, 0)
+    }
+
+    /** One cell record per vertex just pushed. */
+    private markVertices(count: number): void {
+        for (let i = 0; i < count; i++) {
+            this.cellData.push(this.cellX, this.cellY, this.emission)
+        }
     }
 
     add(verts: readonly number[], color: Color): this { // Add vertices to mesh, interleaving position and color
@@ -174,6 +282,7 @@ export class MeshBuilder {
             this.data.push(verts[i]!, verts[i + 1]!, ...color.rgb)
         }
 
+        this.markVertices(verts.length / 2)
         return this
     }
 
@@ -185,15 +294,23 @@ export class MeshBuilder {
 
     clear(): this {
         this.data.length = 0
-        return this
+        this.cellData.length = 0
+        this.cellsUsed = false
+        this.furthestCellSq = 0
+        return this.outsideCell()
     }
 
     toArray(): Float32Array<ArrayBuffer> {
         return new Float32Array(this.data)
     }
 
+    /** The cell channel, or an empty array when nothing ever named a cell. */
+    toCellArray(): Float32Array<ArrayBuffer> {
+        return new Float32Array(this.cellsUsed ? this.cellData : [])
+    }
+
     build(gpu: GPU, label = "mesh", capacityFloats?: number): Mesh { // Pushes array data to Mesh
-        return Mesh.create(gpu, this.toArray(), label, capacityFloats)
+        return Mesh.create(gpu, this.toArray(), label, capacityFloats, this.toCellArray())
     }
 
     /** Appends already-interleaved vertices, for geometry that arrives pre-coloured. */
@@ -201,6 +318,8 @@ export class MeshBuilder {
         Assert.that(data.length % (FLOATS_PER_VERTEX * 3) === 0, "raw data must be whole triangles")
 
         for (const value of data) this.data.push(value)
+
+        this.markVertices(data.length / FLOATS_PER_VERTEX)
         return this
     }
 }

@@ -119,7 +119,14 @@ export class InstanceBatch {
         this.upload()
 
         frame.setBindGroup(group, this.group)
-        frame.setVertex(0, mesh.buffer).draw(mesh.vertexCount, this.count)
+        frame.setVertex(0, mesh.buffer)
+
+        // Bound whenever the mesh has one, because only the lit pipeline declares
+        // slot 1 and binding a slot a pipeline does not use is allowed. The
+        // alternative is a second draw method that differs by one line.
+        if (mesh.cells) frame.setVertex(1, mesh.cells)
+
+        frame.draw(mesh.vertexCount, this.count)
         return 1
     }
 

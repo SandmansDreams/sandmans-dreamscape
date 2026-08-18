@@ -7,10 +7,13 @@ import {
 import { Camera, type Vec2 } from "../../render/camera"
 import { Color } from "../../render/color"
 import type { Frame } from "../../render/frame"
-import { appendLayer } from "../../render/grid/blockDraw"
-import { DynamicMesh, FLOATS_PER_VERTEX, Mesh, MeshBuilder } from "../../render/mesh"
+import { appendEmissiveBloom, appendLayer } from "../../render/grid/blockDraw"
+import { DynamicMesh, Mesh, MeshBuilder } from "../../render/mesh"
 import { InstanceBatch } from "../../render/webgpu/instance"
 import { fadeOf, ParticleField } from "../../game/particles"
+import { LightBinding } from "../../render/lighting"
+import { glowDisc } from "../../render/glow"
+import { DEFAULT_SHADING, Light, LightField } from "../../game/lighting"
 import { InputService } from "../../input/service"
 import type { SceneContext, SceneInstance } from "../../render/scene"
 import type { ActionsOf, SearchColumn, SettingsSchema, ValuesOf } from "../../settings/settings"
@@ -45,6 +48,18 @@ const EXHAUST_LIFE = 0.45
 const EXHAUST_SIZE = 0.22
 const EXHAUST_COLOR = Color.from("#ffb347")
 
+/**
+ * An engine's own glow: short-reaching, since it is a nozzle and not a sun.
+ *
+ * Deliberately restrained. A nozzle at full brightness drowned the hull it was
+ * mounted on and read as an explosion rather than a burn, so the drawn blob is
+ * well under half the size and brightness it started at. The exhaust plume is
+ * what should carry the eye; this is the heat behind it.
+ */
+const GLOW_RANGE = 220
+const GLOW_RADIUS = 26
+const GLOW_INTENSITY = 0.35
+
 const SHIP_COLUMNS: readonly SearchColumn[] = [
     { header: "Ship", cell: (id) => findShip(id)?.name ?? id },
     { header: "Creator", cell: (id) => findShip(id)?.creator ?? "" },
@@ -71,6 +86,15 @@ const SETTINGS = {
 
     assist:  { type: "checkbox", label: "Flight assist", default: true },
     exhaust: { type: "checkbox", label: "Exhaust", default: true },
+
+    lightSeparator: { type: "separator", label: "Lighting" },
+
+    lit:            { type: "checkbox", label: "Lit", default: true },
+    lightAngle:     { type: "range", label: "Angle", default: 210, min: 0, max: 360, step: 5 },
+    lightDistance:  { type: "range", label: "Distance", default: 900, min: 100, max: 4000, step: 50 },
+    lightIntensity: { type: "range", label: "Intensity", default: 1.2, min: 0, max: 3, step: 0.05 },
+    lightRange:     { type: "range", label: "Falloff", default: 1600, min: 200, max: 8000, step: 100 },
+    lightColor:     { type: "color", label: "Light Color", default: "#fff3d6" },
     reset:  { type: "button", label: "Reset Ship" },
 } as const satisfies SettingsSchema
 
@@ -98,21 +122,35 @@ class ShipFlight implements SceneInstance<FlightValues> {
     private readonly camera = new Camera()
 
     private ship: Ship
+    /** The last values update() saw, so render() knows which pipeline to use. */
+    private settings: FlightValues | null = null
     private physics: ShipPhysics
     private radius = 0
     private body: Body = bodyAt(0, 0)
 
     /**
-     * The ship's triangles about its own center of mass, built once.
+     * The ship about its own center of mass, built once per ship.
      *
-     * `frame` starts as a copy, so each tick only rewrites the two position floats
-     * per vertex - the colours never move, and re-deriving them sixty times a
-     * second would be most of the work for none of the result.
+     * Static now: an instance carries where it is and which way it is pointing,
+     * so the vertices never move. The CPU pass that used to rewrite every
+     * position each frame is gone with it.
      */
-    private local = new Float32Array(0)
-    private frame = new Float32Array(0)
-    private readonly shipMesh: DynamicMesh
+    private shipMesh: Mesh | null = null
+    /** The halo around cells that light themselves, laid over the finished hull. */
+    private bloomMesh: Mesh | null = null
+    /** Distance to the outermost cell, which is what the shading fades across. */
+    private shadingReach = 1
+    private readonly shipBatch: InstanceBatch
+    private readonly lights: LightBinding
     private readonly walls: DynamicMesh
+
+    /*~~~ Lighting ~~~*/
+    private readonly field = new LightField()
+    private readonly sun = new Light({ position: { x: 0, y: 0 } })
+    /** One per thruster, lit by how hard it is burning. Mounted, so self-excluded. */
+    private engineGlows: Light[] = []
+    private readonly glowBatch: InstanceBatch
+    private readonly glowMesh: Mesh
 
     /*~~~ Exhaust ~~~*/
     private readonly exhaust = new ParticleField(EXHAUST_CAPACITY)
@@ -146,8 +184,14 @@ class ShipFlight implements SceneInstance<FlightValues> {
         const gpu = context.gpu
 
         this.input = context.input
-        this.shipMesh = DynamicMesh.create(gpu, "ship")
         this.walls = DynamicMesh.create(gpu, "arena")
+
+        this.shipBatch = InstanceBatch.create(gpu, context.renderer.instanceLayout, 4, "flight ship")
+        this.glowBatch = InstanceBatch.create(gpu, context.renderer.instanceLayout, 32, "flight glow")
+        this.lights = LightBinding.create(gpu, 4)
+        this.glowMesh = glowDisc().build(gpu, "glow disc")
+
+        this.field.add(this.sun)
 
         // Centered, so an instance's rotate-and-scale works about the speck's
         // middle rather than dragging it off its own position
@@ -166,6 +210,7 @@ class ShipFlight implements SceneInstance<FlightValues> {
     }
 
     update(dt: number, settings: FlightValues): void {
+        this.settings = settings
         this.syncShip(settings)
         this.buildWalls(settings)
         this.fitCamera(settings)
@@ -190,8 +235,7 @@ class ShipFlight implements SceneInstance<FlightValues> {
         this.firing = firing.filter((throttle) => throttle > 0).length
 
         this.updateExhaust(firing, dt, settings)
-
-        this.uploadShip()
+        this.syncLights(settings, firing)
         this.publishInfo()
     }
 
@@ -265,39 +309,44 @@ class ShipFlight implements SceneInstance<FlightValues> {
             appendLayer(builder, grid, CELL, this.ship.centerOfMass)
         }
 
-        this.local = builder.toArray()
-        this.frame = new Float32Array(this.local)
+        this.shadingReach = Math.max(builder.cellReach, 1)
 
-        // Empty is a state the mesh holds itself, so a ship with no blocks needs no
-        // special case here beyond not building one
-        this.shipMesh.write(this.frame)
+        this.shipMesh?.destroy()
+        this.shipMesh = builder.vertexCount > 0
+            ? builder.build(this.context.gpu, "ship")
+            : null
+
+        // Its own mesh rather than more triangles in the ship's: it is drawn
+        // through a different pipeline, over the top, and must never be shaded
+        const bloom = new MeshBuilder()
+        for (const grid of this.ship.layersOf()) {
+            appendEmissiveBloom(bloom, grid, CELL, this.ship.centerOfMass)
+        }
+
+        this.bloomMesh?.destroy()
+        this.bloomMesh = bloom.vertexCount > 0
+            ? bloom.build(this.context.gpu, "ship bloom")
+            : null
     }
 
     /**
-     * Rewrites the ship's positions for where it is now.
+     * Where the ship is and how it is lit, as one instance.
      *
-     * A CPU pass rather than a model transform in the shader: nothing in the
-     * vertex format carries a per-draw uniform, and adding one would touch a
-     * shader every other scene shares. One ship of a few thousand triangles is
-     * nothing; a fleet would want the uniform instead.
+     * Entry 0 of both, since there is one ship - but they are filled together
+     * because the lit shader reads surface `i` for instance `i`, and two loops
+     * that could disagree about the order is exactly the bug worth designing out.
      */
-    private uploadShip(): void {
-        if (this.local.length === 0) return
+    private fillShipBatch(): void {
+        this.shipBatch.begin()
+        this.lights.begin()
 
-        const cos = Math.cos(this.body.angle)
-        const sin = Math.sin(this.body.angle)
-        const px = this.body.position.x * CELL
-        const py = this.body.position.y * CELL
+        const at = { x: this.body.position.x * CELL, y: this.body.position.y * CELL }
+        this.shipBatch.add(at.x, at.y, this.body.angle, 1, 1, 1, 1)
 
-        for (let i = 0; i < this.local.length; i += FLOATS_PER_VERTEX) {
-            const x = this.local[i]!
-            const y = this.local[i + 1]!
-
-            this.frame[i] = px + x * cos - y * sin
-            this.frame[i + 1] = py + x * sin + y * cos
-        }
-
-        this.shipMesh.write(this.frame)
+        // The ship's own engines are excluded by owner, so a burn does not wash
+        // out the hull it is burning from
+        this.lights.add(this.field.sample(at, this.body.angle, this), this.shadingReach)
+        this.lights.upload()
     }
 
     /*~~~ Arena ~~~*/
@@ -341,6 +390,79 @@ class ShipFlight implements SceneInstance<FlightValues> {
     }
 
     /*~~~ Readout ~~~*/
+
+    /*~~~ Lighting ~~~*/
+
+    /**
+     * Puts the sun where the settings say, and an engine glow on every nozzle.
+     *
+     * The glows are owned by this scene, so the ship skips them when shading
+     * itself: a light sitting inside the hull has no direction to speak of, and
+     * its near-field strength would wash the whole sprite out. They still light
+     * anything else, which is the point of having them at all.
+     */
+    private syncLights(settings: FlightValues, firing: readonly number[]): void {
+        const angle = (settings.lightAngle * Math.PI) / 180
+
+        this.sun.position = {
+            x: Math.cos(angle) * settings.lightDistance,
+            y: Math.sin(angle) * settings.lightDistance,
+        }
+        this.sun.color = Color.from(settings.lightColor)
+        this.sun.intensity = settings.lightIntensity
+        this.sun.range = settings.lightRange
+        this.sun.radius = settings.lightDistance * 0.09
+
+        this.lights.setShading(DEFAULT_SHADING)
+        this.syncEngineGlows(firing)
+    }
+
+    private syncEngineGlows(firing: readonly number[]): void {
+        const cos = Math.cos(this.body.angle)
+        const sin = Math.sin(this.body.angle)
+
+        // One per thruster, made once and then only moved: a light per frame
+        // would churn the field every tick for no gain
+        while (this.engineGlows.length < this.physics.thrusters.length) {
+            const glow = new Light({
+                position: { x: 0, y: 0 },
+                color: EXHAUST_COLOR,
+                intensity: 0,
+                range: GLOW_RANGE,
+                radius: GLOW_RADIUS,
+                owner: this,
+            })
+
+            this.engineGlows.push(glow)
+            this.field.add(glow)
+        }
+
+        this.physics.thrusters.forEach((thruster, index) => {
+            const glow = this.engineGlows[index]!
+            const local = this.worldOf(thruster.offset, cos, sin)
+
+            glow.position = { x: local.x * CELL, y: local.y * CELL }
+            glow.intensity = (firing[index] ?? 0) * GLOW_INTENSITY
+        })
+    }
+
+    /** Every light with anything to show, as a soft blob. */
+    private fillGlowBatch(): void {
+        this.glowBatch.begin()
+
+        for (const light of this.field.lights) {
+            if (light.intensity <= 0.01) continue
+
+            const { r, g, b } = light.color
+            const strength = Math.min(light.intensity, 1)
+
+            this.glowBatch.add(
+                light.position.x, light.position.y, 0,
+                light.radius,
+                r * strength, g * strength, b * strength,
+            )
+        }
+    }
 
     /*~~~ Exhaust ~~~*/
 
@@ -448,19 +570,41 @@ class ShipFlight implements SceneInstance<FlightValues> {
 
     render(frame: Frame): void {
         const gpu = this.context.gpu
-        const { camera, mesh: meshPipeline, meshLines: linePipeline } = this.context.renderer
+        const renderer = this.context.renderer
+        const { camera, meshLines: linePipeline } = renderer
+        const settings = this.settings
+
         camera.upload(this.camera, gpu.width, gpu.height)
 
-        frame.setPipeline(meshPipeline).setBindGroup(0, camera.group)
-        this.shipMesh.draw(frame)
+        const ship = this.shipMesh
+        if (ship && settings) {
+            this.fillShipBatch()
 
-        // Exhaust over the hull: a plume is in front of the nozzle it left, and
-        // additive means it brightens the hull rather than hiding it
-        if (this.exhaust.count > 0) {
-            this.fillExhaustBatch()
-            frame.setPipeline(this.context.renderer.instancedGlow).setBindGroup(0, camera.group)
-            this.exhaustBatch.draw(frame, this.spark)
+            // Group 1 is the lighting under the lit pipeline and the empty
+            // material layout under the plain one, so it is bound with the switch
+            if (settings.lit) {
+                frame.setPipeline(renderer.lit)
+                    .setBindGroup(0, camera.group)
+                    .setBindGroup(1, this.lights.group)
+            } else {
+                frame.setPipeline(renderer.instanced).setBindGroup(0, camera.group)
+            }
+
+            this.shipBatch.draw(frame, ship)
         }
+
+        // Glows and exhaust over the hull: a plume is in front of the nozzle it
+        // left, and additive means it brightens the hull rather than hiding it
+        this.fillGlowBatch()
+        this.fillExhaustBatch()
+
+        frame.setPipeline(renderer.instancedGlow).setBindGroup(0, camera.group)
+
+        // The hull's own emissive halo rides the ship's transform, so it is drawn
+        // from the same batch that just placed the ship
+        if (this.bloomMesh) this.shipBatch.draw(frame, this.bloomMesh)
+        if (this.glowBatch.size > 0) this.glowBatch.draw(frame, this.glowMesh)
+        if (this.exhaust.count > 0) this.exhaustBatch.draw(frame, this.spark)
 
         // Lines last so a wall stays visible with the ship pressed against it
         frame.setPipeline(linePipeline).setBindGroup(0, camera.group)
@@ -468,10 +612,15 @@ class ShipFlight implements SceneInstance<FlightValues> {
     }
 
     dispose(): void {
-        this.shipMesh.destroy()
+        this.shipMesh?.destroy()
+        this.bloomMesh?.destroy()
         this.walls.destroy()
         this.spark.destroy()
+        this.glowMesh.destroy()
         this.exhaustBatch.destroy()
+        this.shipBatch.destroy()
+        this.glowBatch.destroy()
+        this.lights.destroy()
     }
 }
 

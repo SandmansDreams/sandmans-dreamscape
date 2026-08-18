@@ -6,6 +6,9 @@ import { SHIP_LAYERS, type ShipLayer } from "../../render/grid/layers"
 import type { Ship } from "../../game/ship"
 import { InstanceBatch } from "../../render/webgpu/instance"
 import { DynamicMesh, Mesh, MeshBuilder } from "../../render/mesh"
+import { LightBinding } from "../../render/lighting"
+import { glowDisc } from "../../render/glow"
+import { DEFAULT_SHADING, Light, LightField } from "../../game/lighting"
 import type { Pipeline } from "../../render/webgpu/pipeline"
 import type { PointerInput } from "../../input/keys"
 import type { SceneContext, SceneInstance } from "../../render/scene"
@@ -14,7 +17,7 @@ import type { DevSceneDefinition } from "../DevScene"
 import { downloadText } from "../../download"
 import { shipToText } from "../../game/shipJson"
 import { Color } from "../../render/color"
-import { appendLayer, appendLayerOutline } from "../../render/grid/blockDraw"
+import { appendEmissiveBloom, appendLayer, appendLayerOutline } from "../../render/grid/blockDraw"
 
 const DEFAULT_WIREFRAME_COLOR = Color.from("#00fbff")
 const LABEL_COLOR = Color.from("#797979")
@@ -72,6 +75,16 @@ const SETTINGS = {
     origin:     { type: "selection", label: "Origin", default: "mass", options: ["mass", "bounds"], display: "segmented" },
     spin:       { type: "range", label: "Spin", default: 0.2, min: 0, max: 2, step: 0.05 },
     wireColor:  { type: "color", label: "Wireframe Color", default: DEFAULT_WIREFRAME_COLOR.hex},
+
+    lightSeparator: { type: "separator", label: "Lighting" },
+
+    lightAngle:     { type: "range", label: "Angle", default: 225, min: 0, max: 360, step: 5 },
+    lightDistance:  { type: "range", label: "Distance", default: 340, min: 60, max: 1200, step: 10 },
+    lightIntensity: { type: "range", label: "Intensity", default: 1, min: 0, max: 2, step: 0.05 },
+    lightRange:     { type: "range", label: "Falloff", default: 900, min: 100, max: 4000, step: 50 },
+    lightColor:     { type: "color", label: "Light Color", default: "#fff3d6" },
+    multiply:       { type: "checkbox", label: "Filter (not add)", default: DEFAULT_SHADING.multiply },
+    showGlow:       { type: "checkbox", label: "Show the light", default: true },
 
     layersSeperator: { type: "separator", label: "Render Layers"},
 
@@ -218,10 +231,19 @@ class ShipViewer implements SceneInstance<ViewerValues> {
      */
     private get cameraBinding(): CameraBinding { return this.context.renderer.camera }
     private get instanced(): Pipeline { return this.context.renderer.instanced }      // Filled geometry, instanced
+    private get litPipeline(): Pipeline { return this.context.renderer.lit }          // Filled geometry, shaded per cell
+    private get glowPipeline(): Pipeline { return this.context.renderer.instancedGlow }
     private get onTop(): Pipeline { return this.context.renderer.mesh }               // Filled geometry, one copy (the overlay)
     private get lines(): Pipeline { return this.context.renderer.instancedLines }     // Line geometry, instanced
 
     private readonly batch: InstanceBatch
+    /** The lit views, kept apart because they draw through a different pipeline. */
+    private readonly litBatch: InstanceBatch
+    private readonly glowBatch: InstanceBatch
+    private readonly lights: LightBinding
+    private readonly glowMesh: Mesh
+    private readonly field = new LightField()
+    private readonly sun = new Light({ position: { x: 0, y: 0 } })
     private readonly wireBatch: InstanceBatch
     private readonly hoverBatch: InstanceBatch
 
@@ -235,6 +257,10 @@ class ShipViewer implements SceneInstance<ViewerValues> {
     private shipSize: Size = { width: 1, height: 1 }
     /** Reach from the origin, which is what frames a view. See shipHalfReach. */
     private shipReach: Size = { width: 0.5, height: 0.5 }
+    /** Distance to the outermost cell, which is what the shading fades across. */
+    private shadingReach = 1
+    /** The halo around cells that light themselves, laid over the finished hull. */
+    private bloomMesh: Mesh | null = null
     private origin: Vec2 = { x: 0, y: 0 }
 
     /** Which views are on, and where each one sits. Same length, same order. */
@@ -255,6 +281,11 @@ class ShipViewer implements SceneInstance<ViewerValues> {
 
         this.input = context.input.pointer
         const instanceLayout = context.renderer.instanceLayout
+
+        this.litBatch = InstanceBatch.create(gpu, instanceLayout, 8, "lit")
+        this.glowBatch = InstanceBatch.create(gpu, instanceLayout, 8, "glow")
+        this.lights = LightBinding.create(gpu, 8)
+        this.glowMesh = glowDisc().build(gpu, "glow disc")
 
         this.wireMesh = DynamicMesh.create(gpu, "ship wireframe")
         this.overlay = DynamicMesh.create(gpu, "ship overlay")
@@ -293,6 +324,7 @@ class ShipViewer implements SceneInstance<ViewerValues> {
         this.fillBatches(settings)
 
         this.drawShipLayers(frame, settings)
+        this.drawGlows(frame)
         this.drawWireframe(frame)
         this.drawHover(frame)
         this.drawOverlay(frame)
@@ -305,11 +337,16 @@ class ShipViewer implements SceneInstance<ViewerValues> {
 
 
         this.disposeMeshes()
+        this.bloomMesh?.destroy()
         this.overlay.destroy()
 
         this.batch.destroy()
+        this.litBatch.destroy()
+        this.glowBatch.destroy()
         this.wireBatch.destroy()
         this.hoverBatch.destroy()
+        this.lights.destroy()
+        this.glowMesh.destroy()
     }
 
     /*~~~ Measuring ~~~*/
@@ -503,32 +540,117 @@ class ShipViewer implements SceneInstance<ViewerValues> {
 
     private fillBatches(settings: ViewerValues): void {
         this.batch.begin()
+        this.litBatch.begin()
         this.wireBatch.begin()
         this.hoverBatch.begin()
+        this.lights.begin()
+
+        this.syncLight(settings)
 
         this.views.forEach((kind, index) => {
             const at = this.viewPoints[index]!
             const rotation = this.viewRotation(kind, settings)
 
             // White tint, so each hull's own per-cell colors pass through unchanged
-            const target = kind === "wire" ? this.wireBatch : this.batch
+            const target = kind === "wire" ? this.wireBatch : kind === "lit" ? this.litBatch : this.batch
             target.add(at.x, at.y, rotation, 1, 1, 1, 1)
+
+            // Filled in step with litBatch, since entry i is the light on instance i
+            if (kind === "lit") {
+                this.lights.add(this.field.sample(at, rotation), this.shadingReach)
+            }
 
             // The hover box rides the same transform as the view it belongs to,
             // so it stays glued to its cell even while that view spins
             if (index === this.hoverView) this.hoverBatch.add(at.x, at.y, rotation, 1, 1, 1, 1)
         })
+
+        this.lights.upload()
+        this.fillGlowBatch(settings)
+    }
+
+    /**
+     * Puts the one light where the settings say, in the lit view's own frame.
+     *
+     * Placed relative to the lit view rather than the world origin, so sliding
+     * the angle walks the light around the ship it is lighting rather than around
+     * a point off screen.
+     */
+    private syncLight(settings: ViewerValues): void {
+        const lit = this.views.indexOf("lit")
+        const centre = lit >= 0 ? this.viewPoints[lit]! : { x: 0, y: 0 }
+        const angle = (settings.lightAngle * Math.PI) / 180
+
+        this.sun.position = {
+            x: centre.x + Math.cos(angle) * settings.lightDistance,
+            y: centre.y + Math.sin(angle) * settings.lightDistance,
+        }
+        this.sun.color = Color.from(settings.lightColor)
+        this.sun.intensity = settings.lightIntensity
+        this.sun.range = settings.lightRange
+        this.sun.radius = settings.lightDistance * 0.12
+
+        if (this.field.lights.length === 0) this.field.add(this.sun)
+
+        this.lights.setShading({ ...DEFAULT_SHADING, multiply: settings.multiply })
+    }
+
+    /** The light itself, as a soft blob. One instance per light in the field. */
+    private fillGlowBatch(settings: ViewerValues): void {
+        this.glowBatch.begin()
+        if (!settings.showGlow || !settings.lit) return
+
+        for (const light of this.field.lights) {
+            const { r, g, b } = light.color
+
+            this.glowBatch.add(
+                light.position.x, light.position.y, 0,
+                light.radius,
+                r * light.intensity, g * light.intensity, b * light.intensity,
+            )
+        }
     }
 
     private drawShipLayers(frame: Frame, settings: ViewerValues): void {
         frame.setPipeline(this.instanced).setBindGroup(0, this.cameraBinding.group)
+        this.drawLayersWith(frame, this.batch, settings)
 
+        // The lit views, through the pipeline that shades them. Group 1 is the
+        // lighting rather than the empty material layout the unlit pipelines use,
+        // so it has to be bound after the pipeline switch
+        if (this.litBatch.size > 0) {
+            frame.setPipeline(this.litPipeline)
+                .setBindGroup(0, this.cameraBinding.group)
+                .setBindGroup(1, this.lights.group)
+
+            this.drawLayersWith(frame, this.litBatch, settings)
+        }
+    }
+
+    private drawLayersWith(frame: Frame, batch: InstanceBatch, settings: ViewerValues): void {
         for (const layer of SHIP_LAYERS) {
             if (!settings[layer]) continue
 
             const mesh = this.meshes.get(layer)
-            if (mesh) this.batch.draw(frame, mesh)
+            if (mesh) batch.draw(frame, mesh)
         }
+    }
+
+    /** Drawn after the hulls, so a light in front of a ship blooms over it. */
+    private drawGlows(frame: Frame): void {
+        const bloom = this.bloomMesh
+        if (this.glowBatch.size === 0 && !bloom) return
+
+        frame.setPipeline(this.glowPipeline).setBindGroup(0, this.cameraBinding.group)
+
+        // Every view gets its hull's own halo, lit or not - an emissive window is
+        // a property of the ship rather than of how this view draws it
+        if (bloom) {
+            this.batch.draw(frame, bloom)
+            this.litBatch.draw(frame, bloom)
+        }
+
+        if (this.glowBatch.size > 0) this.glowBatch.draw(frame, this.glowMesh)
     }
 
     private drawWireframe(frame: Frame): void {
@@ -597,6 +719,7 @@ class ShipViewer implements SceneInstance<ViewerValues> {
 
     private buildFlatMesh(ship: Ship, origin: Vec2): void {
         const gpu = this.context.gpu
+        this.shadingReach = 0
 
         for (const layer of SHIP_LAYERS) {
             const builder = new MeshBuilder()
@@ -604,8 +727,22 @@ class ShipViewer implements SceneInstance<ViewerValues> {
             // Every layer gets the SAME origin, or they drift apart
             appendLayer(builder, ship.layers[layer], CELL, origin)
 
+            // Across every layer, since a hull is shaded as one object and a
+            // cosmetic fin hanging off it is still part of the silhouette
+            this.shadingReach = Math.max(this.shadingReach, builder.cellReach)
+
             if (builder.vertexCount > 0) this.meshes.set(layer, builder.build(gpu, layer))
         }
+
+        // One mesh for every layer's emissive cells, since it is laid over the
+        // whole ship rather than drawn between its layers
+        const bloom = new MeshBuilder()
+        for (const layer of SHIP_LAYERS) {
+            appendEmissiveBloom(bloom, ship.layers[layer], CELL, origin)
+        }
+
+        this.bloomMesh?.destroy()
+        this.bloomMesh = bloom.vertexCount > 0 ? bloom.build(gpu, "ship bloom") : null
     }
 
     private buildWireMesh(ship: Ship, origin: Vec2, color: Color): Float32Array<ArrayBuffer> {

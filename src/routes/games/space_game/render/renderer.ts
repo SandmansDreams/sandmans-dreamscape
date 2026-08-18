@@ -5,6 +5,9 @@ import { INSTANCED_2D } from "./shaders/instanced2d"
 import { MESH_2D } from "./shaders/mesh2d"
 import { VERTEX_LAYOUT } from "./mesh"
 import { emptyBindGroupLayout, Pipeline } from "./webgpu/pipeline"
+import { LightBinding } from "./lighting"
+import { CELL_VERTEX_LAYOUT } from "./mesh"
+import { LIT_2D } from "./shaders/lit2d"
 import { InstanceBatch } from "./webgpu/instance"
 import type { GPU } from "./webgpu/gpu"
 import { Shader } from "./webgpu/shader"
@@ -44,8 +47,17 @@ export class Renderer {
     /** The layout every InstanceBatch in the project must be created against. */
     readonly instanceLayout: GPUBindGroupLayout
 
-    /** Group 1 is reserved for materials and is still empty. */
+    /**
+     * Group 1 for anything drawn unlit.
+     *
+     * Reserved for materials from the start and empty ever since. The lit
+     * pipeline puts the lighting binding here instead, which is what that
+     * reservation was for.
+     */
     private readonly materialLayout: GPUBindGroupLayout
+
+    /** The layout the lit pipeline expects at group 1. See LightBinding. */
+    readonly lightLayout: GPUBindGroupLayout
 
     private meshShader: Shader | null = null
     private instancedShader: Shader | null = null
@@ -55,17 +67,21 @@ export class Renderer {
     private instancedPipeline: Pipeline | null = null
     private instancedLinesPipeline: Pipeline | null = null
     private instancedGlowPipeline: Pipeline | null = null
+    private litPipeline: Pipeline | null = null
+    private litShader: Shader | null = null
 
     private constructor(
         gpu: GPU,
         camera: CameraBinding,
         instanceLayout: GPUBindGroupLayout,
         materialLayout: GPUBindGroupLayout,
+        lightLayout: GPUBindGroupLayout,
     ) {
         this.gpu = gpu
         this.camera = camera
         this.instanceLayout = instanceLayout
         this.materialLayout = materialLayout
+        this.lightLayout = lightLayout
     }
 
     static create(gpu: GPU): Renderer {
@@ -74,7 +90,26 @@ export class Renderer {
             CameraBinding.create(gpu),
             InstanceBatch.layout(gpu),
             emptyBindGroupLayout(gpu),
+            LightBinding.layoutFor(gpu),
         )
+    }
+
+    /**
+     * Instanced hulls, shaded per cell. The default way to draw a ship.
+     *
+     * Takes a second vertex buffer of cell centres, so only meshes built through
+     * appendBlock can be drawn with it - which is the same thing as saying only
+     * meshes made of cells can be lit.
+     */
+    get lit(): Pipeline {
+        this.litPipeline ??= Pipeline.create(this.gpu, {
+            label: "lit 2d",
+            shader: this.lit2d(),
+            layouts: [this.camera.layout, this.lightLayout, this.instanceLayout],
+            vertexBuffers: [VERTEX_LAYOUT, CELL_VERTEX_LAYOUT],
+        })
+
+        return this.litPipeline
     }
 
     /** Triangles in the shared 2D mesh format. What almost every scene draws. */
@@ -164,5 +199,10 @@ export class Renderer {
     private instanced2d(): Shader {
         this.instancedShader ??= Shader.createNow(this.gpu, INSTANCED_2D, "instanced 2d")
         return this.instancedShader
+    }
+
+    private lit2d(): Shader {
+        this.litShader ??= Shader.createNow(this.gpu, LIT_2D, "lit 2d")
+        return this.litShader
     }
 }
