@@ -8,7 +8,7 @@ import { FrameLoop } from "./loop"
 import { GpuTimer } from "./timing"
 
 /** Which editing surface a scene wants alongside the canvas, if any. */
-export type SceneUi = "builder" | "sprite"
+export type SceneUi = "builder" | "sprite" | "flight"
 
 /** Everything the runner hands a scene so it can build itself. */
 export interface SceneContext {

@@ -14,7 +14,7 @@ import { Color } from "../render/color"
 import { Ship } from "./ship"
 import { FALLBACK_COLOR, PaletteWriter, paletteLines, readPalette } from "./palette"
 
-export const SHIP_FORMAT_VERSION = 7
+export const SHIP_FORMAT_VERSION = 8
 
 /**
  * One block.
@@ -37,6 +37,7 @@ export interface ShipCellJson {
     hp?: number  // hit points override
     ma?: number  // mass override
     ac?: string  // accent palette key, absent when the art's own accent is used
+    st?: boolean // steering thruster; absent means yes
 }
 
 export interface ShipJson {
@@ -110,6 +111,9 @@ function cellToJson(cell: Cell, layer: ShipLayer, palette: PaletteWriter): ShipC
     if (cell.hitPoints !== defaults.hitPoints) out.hp = cell.hitPoints
     // Cosmetic mass is forced to 0 on the way back in, so writing it is noise
     if (layer !== "cosmetic" && cell.mass !== defaults.mass) out.ma = cell.mass
+    // Written only when false: absent has to keep meaning "steers", or every v7
+    // ship silently loses the ability to turn
+    if (!cell.steering) out.st = false
 
     return out
 }
@@ -235,6 +239,7 @@ function readCell(
         hitPoints: cell.hp,
         mass: cell.ma,
         facing: cell.f,
+        steering: cell.st,
         accentColor,
     })
 }

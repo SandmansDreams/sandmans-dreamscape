@@ -88,6 +88,31 @@ describe("round trip", () => {
         expect(ship.layers.hull.get(1, 0)!.turns).toBe(2)
     })
 
+    it("carries a thruster kept out of the steering group", () => {
+        const ship = sample()
+        ship.layers.components.set(0, 2, "full", { type: "ion-thruster", steering: false })
+
+        const { ship: read } = shipFromText(shipToText(ship))
+
+        expect(read.layers.components.get(0, 2)!.steering).toBe(false)
+        // The default survives untouched alongside it
+        expect(read.layers.components.get(0, 1)!.steering).toBe(true)
+    })
+
+    it("reads a file written before steering existed as all-steering", () => {
+        // v7 and earlier have no `st` key, and absent has to keep meaning yes -
+        // otherwise every ship on disk quietly loses the ability to turn
+        const { ship, warnings } = readShip({
+            version: SHIP_FORMAT_VERSION,
+            id: "old", name: "Old", creator: "",
+            palette: {},
+            layers: { components: [{ c: 0, r: 0, s: "full", ty: "ion-thruster", f: 2 }] },
+        })
+
+        expect(warnings).toEqual([])
+        expect(ship.layers.components.get(0, 0)!.steering).toBe(true)
+    })
+
     it("writes one cell per line", () => {
         const hullLines = shipToText(sample())
             .split("\n")

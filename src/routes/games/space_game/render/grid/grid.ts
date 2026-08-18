@@ -55,6 +55,15 @@ export interface Cell {
      */
     facing: number
     /**
+     * Whether this engine is one the pilot turns the ship with.
+     *
+     * Thrusters only; every other block carries it and nothing reads it. A
+     * property of the thruster rather than something derived from where it sits:
+     * an engine off the center of mass *can* turn the ship, but whether it should
+     * spend itself doing that is the builder's call, not geometry's.
+     */
+    steering: boolean
+    /**
      * The accent tint, or null to use whatever the art was drawn with.
      *
      * Nullable rather than defaulted to a constant: an unset accent should look
@@ -78,6 +87,8 @@ export interface CellOptions {
     mass?: number
     /** 0-3 as N/E/S/W. Not folded by the shape, unlike `turns`. */
     facing?: number
+    /** Thrusters only. Defaults to true, so an engine steers until told otherwise. */
+    steering?: boolean
     /** Null, or omitted, leaves the art's own accent alone. */
     accentColor?: Color | null
 }
@@ -181,6 +192,7 @@ export class Grid {
             // its own property, not a consequence of whatever art represents it
             facing: (((options.facing ?? 0) % 4) + 4) % 4,
             // ?? would turn an explicit null into the default, and null is the
+            steering: options.steering ?? true,
             // meaningful value here - it is how a cell says "use the art's accent"
             accentColor: options.accentColor === undefined ? null : options.accentColor,
         }

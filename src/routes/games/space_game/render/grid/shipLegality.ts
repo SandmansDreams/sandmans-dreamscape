@@ -13,7 +13,7 @@ export interface Legality {
 }
 
 /** N, E, S, W - the order `facing` indexes into. */
-const OFFSETS = [
+export const OFFSETS = [
     { col: 0, row: -1 },
     { col: 1, row: 0 },
     { col: 0, row: 1 },

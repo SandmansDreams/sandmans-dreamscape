@@ -11,6 +11,7 @@
     import { VIEW_LAYERS, type LayerView, type SelectedCell, type ShipInfo } from "../../dev/scenes/ship-builder"
     
     import circleFilledIconSRC from "../../assets/icons/SpaceGame-Circle_Filled.png"
+    import circleHalfIconSRC from "../../assets/icons/SpaceGame-Circle_Half.png"
     import circleEmptyIconSRC from "../../assets/icons/SpaceGame-Circle_Empty.png"
     import screwDriverIconSRC from "../../assets/icons/SpaceGame-Screw_Driver.png"
     import eraserIconSRC from "../../assets/icons/SpaceGame-Eraser.png"
@@ -34,7 +35,7 @@
      * are the scene's, rendered here; every control asks for a change and waits
      * to be told what happened, so there is no local copy to fall out of step.
      */
-    let { brush, palette = [], shipInfo = null, selected = null, notice = null, layerView = null, onPatch, onAction, onUpgrade, onHighlight, onLayerView }: {
+    let { brush, palette = [], shipInfo = null, selected = null, notice = null, layerView = null, onPatch, onAction, onUpgrade, onSteering, onHighlight, onLayerView }: {
         brush: Brush
         /** Hex colors currently used in the ship, published by the scene. */
         palette?: string[]
@@ -50,6 +51,8 @@
         /** Hex to box on the ship, or null to clear. */
         onHighlight: (hex: string | null) => void
         onLayerView: (patch: Record<string, LayerView>) => void
+        /** Flips whether the selected thruster is used for turning. */
+        onSteering: (steering: boolean) => void
     } = $props()
 
     /** What each control does, in the words someone who has not read the code would use. */
@@ -128,6 +131,13 @@
         full: "dim",
         dim: "hidden",
         hidden: "full",
+    }
+
+    /** The icon each state wears, so the button says what it is without a label. */
+    const VIEW_ICON: Record<LayerView, string> = {
+        full: circleFilledIconSRC,
+        dim: circleHalfIconSRC,
+        hidden: circleEmptyIconSRC,
     }
 
     const VIEW_TIP: Record<LayerView, string> = {
@@ -619,12 +629,7 @@
                         data-tip={VIEW_TIP[viewOf(layer)]}
                         aria-label={`${layer} visibility`}
                     >
-                        <img
-                            class="eye-icon"
-                            class:dim={viewOf(layer) === "dim"}
-                            src={viewOf(layer) === "hidden" ? circleEmptyIconSRC : circleFilledIconSRC}
-                            alt=""
-                        >
+                        <img class="eye-icon" src={VIEW_ICON[viewOf(layer)]} alt="">
                     </button>
 
                     {#if isShipLayer}
@@ -678,6 +683,21 @@
                 <span class="level">L{selected.level} / {selected.maxLevel}</span>
                 <button onclick={() => onUpgrade(1)} disabled={selected.level >= selected.maxLevel}>+</button>
             </div>
+
+            {#if kindOf(selected.type) === "thruster"}
+                <!-- Q and E fire only these. A main drive mounted off center is
+                     still allowed to be one - it will just turn the ship hard. -->
+                <div id="steer-row">
+                    <span class="level">steering</span>
+                    <button
+                        class={selected.steering ? "active" : ""}
+                        onclick={() => onSteering(!selected.steering)}
+                        data-tip={selected.steering
+                            ? "Turns the ship on Q/E. Click to stop using it to turn"
+                            : "Thrust only. Click to steer with it"}
+                    >{selected.steering ? "ON" : "OFF"}</button>
+                </div>
+            {/if}
         {:else}
             <div class="heading">BLOCK</div>
             <p class="empty">select a block</p>
@@ -1016,14 +1036,14 @@
     .layer-row:hover { background: rgba(0, 191, 255, 0.2); }
     .count { opacity: .6; }
 
-    #level-row {
+    #level-row, #steer-row {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 6px;
         padding: 6px 8px;
     }
-    #level-row button { padding: .1rem .55rem; }
+    #level-row button, #steer-row button { padding: .1rem .55rem; }
     .level { font-size: 13px; font-weight: bold; }
 
     /*~~~ Bottom: functional blocks ~~~*/
@@ -1162,9 +1182,6 @@
         height: 16px;
         image-rendering: pixelated;
     }
-    /* Stands in until a half-filled circle exists: the state it marks is a dimmed
-       layer, so a dimmed icon says the same thing */
-    .eye-icon.dim { opacity: .4; }
 
     /* Firefox, which has no pseudo-elements to style */
     @supports not selector(::-webkit-scrollbar) {

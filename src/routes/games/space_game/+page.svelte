@@ -18,6 +18,8 @@
     import type { LayerView, SelectedCell, ShipInfo } from "./dev/scenes/ship-builder"
     import SpriteEditorUI from "./render/ui/SpriteEditorUI.svelte"
     import type { ArtBrush, ArtInfo } from "./dev/scenes/sprite-editor"
+    import FlightUI from "./render/ui/FlightUI.svelte"
+    import type { FlightInfo } from "./dev/scenes/ship-flight"
 
     const DEV_COLOR = "#87CEEB"
 
@@ -50,14 +52,20 @@
     let notice = $state<string | null>(null)
     /** How much of each layer the scene is drawing. Null until it publishes. */
     let layerView = $state<Record<string, LayerView> | null>(null)
+    /** The flight readout. Null until the scene has published a frame. */
+    let flightInfo = $state<FlightInfo | null>(null)
 
     function formatStat(entry: StatEntry): string {
         // Smoothing is right for milliseconds and wrong for counts: an averaged
         // draw-call count reports values that never actually happened, like 2
         // while it crawls between one scene's 1 and the next scene's 4
-        return entry.unit === "ms"
-            ? `${entry.average.toFixed(2)} ms`
-            : Math.round(entry.latest).toLocaleString()
+        if (entry.unit === "ms") return `${entry.average.toFixed(2)} ms`
+
+        // A physical quantity is neither: rounding a speed of 0.36 to 0 hides the
+        // number entirely, and smoothing it would report a speed the ship never had
+        if (entry.unit === "value") return entry.latest.toFixed(2)
+
+        return Math.round(entry.latest).toLocaleString()
     }
 
     function healthColor(t: number): string {
@@ -130,6 +138,7 @@
                 if (key === "selected") selected = value as SelectedCell | null
                 if (key === "notice") notice = value as string | null
                 if (key === "layerView") layerView = value as Record<string, LayerView>
+                if (key === "flightInfo") flightInfo = value as FlightInfo
             })
 
             ticker = setInterval(() => {
@@ -165,6 +174,7 @@
             onLayerView={(patch) => runner?.send("layerView", patch)}
             onAction={(name) => runner?.send("action", name)}
             onUpgrade={(delta) => runner?.send("upgrade", delta)}
+            onSteering={(steering) => runner?.send("steering", steering)}
             onHighlight={(hex) => runner?.send("highlight", hex)}
         />
     {:else if scene?.ui === "sprite" && artBrush}
@@ -176,6 +186,8 @@
             onPatch={(patch) => runner?.send("artBrush", patch)}
             onAction={(name) => runner?.send("action", name)}
         />
+    {:else if scene?.ui === "flight"}
+        <FlightUI info={flightInfo} />
     {/if}
 
     {#if devMode}

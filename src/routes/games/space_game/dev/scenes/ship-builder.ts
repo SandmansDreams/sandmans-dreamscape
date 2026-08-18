@@ -116,6 +116,8 @@ export interface SelectedCell {
     turns: number
     mirrored: boolean
     facing: number
+    /** Thrusters only. Meaningless on anything else, which is why the panel asks. */
+    steering: boolean
     color: string
     hitPoints: number
     mass: number
@@ -354,6 +356,13 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         // Signed, so one message covers both the up and down arrows in the panel
         if (key === "upgrade") {
             this.changeSelectedLevel(value as number)
+            return
+        }
+
+        // Thrusters only, and the scene checks that rather than trusting the
+        // panel to have hidden the button
+        if (key === "steering") {
+            this.setSelectedSteering(value as boolean)
             return
         }
 
@@ -624,7 +633,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         const cell = at ? this.ship.layers[at.layer].get(at.col, at.row) : undefined
 
         const key = cell && at
-            ? `${at.layer},${at.col},${at.row},${cell.shape},${cell.type},${cell.level},${cell.turns},${cell.mirrored},${cell.facing},${cell.color.hex},${this.layerView.markers}`
+            ? `${at.layer},${at.col},${at.row},${cell.shape},${cell.type},${cell.level},${cell.turns},${cell.mirrored},${cell.facing},${cell.steering},${cell.color.hex},${this.layerView.markers}`
             : ""
 
         if (key === this.selectionKey) return
@@ -652,6 +661,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
             turns: cell.turns,
             mirrored: cell.mirrored,
             facing: cell.facing,
+            steering: cell.steering,
             color: cell.color.hex,
             hitPoints: cell.hitPoints,
             mass: cell.mass,
@@ -1219,6 +1229,38 @@ class ShipBuilder implements SceneInstance<EditorValues> {
 
         this.notice = reason
         this.context.publish("notice", reason)
+    }
+
+        /**
+     * Marks the selected thruster as one the pilot steers with, or not.
+     *
+     * Through set() like the level change, so the revisions move and one path
+     * writes cells - but hit points and mass are passed back in rather than
+     * re-derived, because nothing about steering should cost a block its damage.
+     */
+    private setSelectedSteering(steering: boolean): void {
+        const at = this.selected
+        if (!at) return
+
+        const grid = this.ship.layers[at.layer]
+        const cell = grid.get(at.col, at.row)
+        if (!cell || kindOf(cell.type) !== "thruster") return
+        if (cell.steering === steering) return
+
+        this.pushUndo()
+        grid.set(at.col, at.row, cell.shape, {
+            turns: cell.turns,
+            mirrored: cell.mirrored,
+            type: cell.type,
+            level: cell.level,
+            facing: cell.facing,
+            color: cell.color,
+            accentColor: cell.accentColor,
+            emission: cell.emission,
+            hitPoints: cell.hitPoints,
+            mass: cell.mass,
+            steering,
+        })
     }
 }
 

@@ -1,5 +1,5 @@
 {
-  "version": 7,
+  "version": 8,
   "id": "scooner",
   "name": "Scooner",
   "creator": "Sandman",
@@ -8,7 +8,9 @@
     "68b0b1": [0.407843, 0.690196, 0.694118],
     "8f8f8f": [0.560784, 0.560784, 0.560784],
     "9c9054": [0.611765, 0.564706, 0.329412],
-    "f2d959": [0.94902, 0.85098, 0.34902]
+    "f2d959": [0.94902, 0.85098, 0.34902],
+    "f2d959-1": [0.94902, 0.85098, 0.34902],
+    "ff9500": [1, 0.584314, 0]
   },
   "layers": {
     "hull": [
@@ -89,9 +91,9 @@
     ],
     "components": [
       {"c":0,"r":-10,"s":"quarter","t":3,"m":true,"p":"f2d959","e":1,"ty":"shield-projector"},
-      {"c":-2,"r":-8,"s":"quarter","t":3,"m":true,"p":"f2d959","e":1,"ty":"autocannon"},
+      {"c":-2,"r":-8,"s":"centerLine","t":1,"m":true,"p":"f2d959-1","e":1,"ty":"ion-thruster","ac":"ff9500"},
       {"c":0,"r":-8,"s":"quarter","t":3,"m":true,"p":"f2d959","e":1,"ty":"autocannon","lv":5},
-      {"c":2,"r":-8,"s":"quarter","t":3,"m":true,"p":"f2d959","e":1,"ty":"autocannon"},
+      {"c":2,"r":-8,"s":"centerLine","t":1,"m":true,"p":"f2d959-1","e":1,"ty":"ion-thruster","ac":"ff9500"},
       {"c":-2,"r":-7,"s":"quarter","t":3,"m":true,"p":"f2d959","e":1,"ty":"autocannon","f":3},
       {"c":-1,"r":-7,"s":"full","m":true,"p":"68b0b1","e":1,"ty":"battery","f":2},
       {"c":0,"r":-7,"s":"quarter","t":3,"m":true,"p":"f2d959","e":1,"ty":"autocannon","lv":5},
@@ -102,9 +104,9 @@
       {"c":0,"r":-6,"s":"quarter","t":3,"m":true,"p":"f2d959","e":1,"ty":"autocannon","lv":5},
       {"c":1,"r":-6,"s":"full","m":true,"p":"68b0b1","e":1,"ty":"battery","f":2},
       {"c":2,"r":-6,"s":"quarter","t":3,"m":true,"p":"f2d959","e":1,"ty":"autocannon","f":1},
-      {"c":-2,"r":-5,"s":"quarter","t":3,"m":true,"p":"f2d959","e":1,"ty":"autocannon","f":2},
+      {"c":-2,"r":-5,"s":"centerLine","t":1,"m":true,"p":"f2d959-1","e":1,"ty":"ion-thruster","f":3,"ac":"ff9500"},
       {"c":0,"r":-5,"s":"quarter","t":3,"m":true,"p":"f2d959","e":1,"ty":"autocannon","lv":5,"f":2},
-      {"c":2,"r":-5,"s":"quarter","t":3,"m":true,"p":"f2d959","e":1,"ty":"autocannon","f":2},
+      {"c":2,"r":-5,"s":"centerLine","t":1,"m":true,"p":"f2d959-1","e":1,"ty":"ion-thruster","f":1,"ac":"ff9500"},
       {"c":-1,"r":1,"s":"quarter","t":3,"m":true,"p":"f2d959","e":1,"ty":"crate"},
       {"c":0,"r":1,"s":"quarter","t":3,"m":true,"p":"f2d959","e":1,"ty":"crate"},
       {"c":1,"r":1,"s":"quarter","t":3,"m":true,"p":"f2d959","e":1,"ty":"crate"},

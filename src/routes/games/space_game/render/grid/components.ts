@@ -195,13 +195,13 @@ const REGISTRY: readonly Component[] = [
     ]),
 
     new ThrusterComponent("ion-thruster", "Ion Thruster", [
-        { hitPoints: 8, mass: 2, thrust: 12 },
-        { hitPoints: 14, mass: 3, thrust: 22 },
-        { hitPoints: 22, mass: 4, thrust: 36 },
+        { hitPoints: 8, mass: 2, thrust: 120 },
+        { hitPoints: 14, mass: 3, thrust: 220 },
+        { hitPoints: 22, mass: 4, thrust: 360 },
     ]),
     new ThrusterComponent("chem-thruster", "Chem Thruster", [
-        { hitPoints: 12, mass: 3, thrust: 20 },
-        { hitPoints: 18, mass: 5, thrust: 38 },
+        { hitPoints: 12, mass: 3, thrust: 200 },
+        { hitPoints: 18, mass: 5, thrust: 380 },
     ]),
 
     // Storage carries its cargo's weight too, which is why its mass reads high

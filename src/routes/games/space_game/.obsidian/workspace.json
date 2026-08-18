@@ -11,10 +11,12 @@
             "id": "d5971898faa58106",
             "type": "leaf",
             "state": {
-              "type": "empty",
-              "state": {},
-              "icon": "lucide-file",
-              "title": "New tab"
+              "type": "release-notes",
+              "state": {
+                "currentVersion": "1.13.7"
+              },
+              "icon": "lucide-book-up",
+              "title": "Release Notes 1.13.7"
             }
           }
         ]
@@ -199,18 +201,18 @@
   },
   "active": "d5971898faa58106",
   "lastOpenFiles": [
+    "assets/ships/scooner.json",
+    "assets/ships/scooner (1).json",
+    "dev/scenes/ship-flight-tests.ts.bak",
+    "dev/scenes/ship-flight-tests.ts",
+    "probe.test.ts",
+    "render/ui/FlightUI.svelte",
+    "dev/scenes/ship-flight.ts",
+    "game/physics.ts",
+    "game/physics.test.ts",
+    "game/pysics.ts",
     "assets/components/autocannon-l5.json",
-    "assets/components/autocannon-l4.json",
-    "assets/components/autocannon-l3.json",
-    "assets/components/autocannon-l2.json",
-    "assets/components/autocannon-l1.json",
-    "moveArt.test.ts",
-    "assets/components/index.ts",
-    "assets/components",
-    "render/grid/brush.test.ts",
-    "render/grid/blockDraw.test.ts",
     "assets/icons/SpaceGame-Circle_Half.png",
-    "exportV7.test.ts",
     "assets/icons/SpaceGame-Weapon.png",
     "assets/icons/SpaceGame-Thruster.png",
     "assets/icons/SpaceGame-Storage.png",

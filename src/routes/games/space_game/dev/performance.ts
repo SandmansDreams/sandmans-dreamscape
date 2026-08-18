@@ -1,6 +1,6 @@
 // Collects per-frame metrics for the dev panel
 
-export type StatUnit = "ms" | "count"
+export type StatUnit = "ms" | "count" | "value"
 
 export interface StatEntry {
     name: string
