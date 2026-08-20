@@ -5,6 +5,7 @@ import {
     DEFAULT_TYPE,
     findComponent,
     isComponentKind,
+    type ComponentKind,
     statsFor,
 } from "../render/grid/components"
 import type { Cell, Grid } from "../render/grid/grid"
@@ -74,22 +75,25 @@ function readType(cell: ShipCellJson, where: string, warnings: string[]): string
 
     if (cell.k === undefined) return DEFAULT_TYPE
 
+    // What this build calls the category the file names, if it has been renamed
+    const kind = LEGACY_KINDS[cell.k] ?? cell.k
+
     // A category that has since become a type: `battery` was a kind of its own
     // before storage absorbed it, and the ships that shipped still say so. Tried
     // before the category lookup so nothing has to guess which it meant.
-    if (!isComponentKind(cell.k)) {
-        if (findComponent(cell.k)) return cell.k
+    if (!isComponentKind(kind)) {
+        if (findComponent(kind)) return kind
 
         warnings.push(`${where}: unknown kind "${cell.k}", treated as ${DEFAULT_TYPE}`)
         return DEFAULT_TYPE
     }
 
-    const migrated = componentsOfKind(cell.k)[0]
+    const migrated = componentsOfKind(kind)[0]
     if (migrated) return migrated.id
 
     // A category with no types registered under it: possible only mid-refactor,
     // but silently producing a hull block here would be a lie worth naming
-    warnings.push(`${where}: no component of kind "${cell.k}", treated as ${DEFAULT_TYPE}`)
+    warnings.push(`${where}: no component of kind "${kind}", treated as ${DEFAULT_TYPE}`)
     return DEFAULT_TYPE
 }
 
@@ -242,6 +246,17 @@ function readCell(
         steering: cell.st,
         accentColor,
     })
+}
+
+/**
+ * Category names from older files, and the kind they are now.
+ *
+ * Renaming a category renames it here, not in the files people already have:
+ * v5 and earlier wrote the category into `k`, and without this every crate in
+ * one of those ships would read as an unknown kind and come back as hull.
+ */
+const LEGACY_KINDS: Record<string, ComponentKind> = {
+    storage: "cargo",
 }
 
 /**

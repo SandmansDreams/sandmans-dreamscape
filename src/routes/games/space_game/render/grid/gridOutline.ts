@@ -125,6 +125,55 @@ export function appendGridOutline(
 }
 
 /**
+ * Line segments widened into quads.
+ *
+ * WebGPU has no line width - `lineWidth` went away with WebGL, and a line-list
+ * draw is always one pixel. Anything thicker has to be geometry, so each segment
+ * becomes a rectangle `width` across, in world units, and draws through the
+ * ordinary triangle pipeline instead of the line one.
+ *
+ * @param segments line-list vertices, the same [x, y, r, g, b] pairs the outline
+ *        functions above emit
+ */
+export function thickenSegments(
+    out: number[],
+    segments: readonly number[],
+    width: number,
+): void {
+    const stride = FLOATS_PER_VERTEX * 2
+    const half = width / 2
+
+    for (let i = 0; i + stride <= segments.length; i += stride) {
+        const ax = segments[i]!, ay = segments[i + 1]!
+        const r = segments[i + 2]!, g = segments[i + 3]!, b = segments[i + 4]!
+        const bx = segments[i + 5]!, by = segments[i + 6]!
+
+        const dx = bx - ax
+        const dy = by - ay
+        const length = Math.hypot(dx, dy)
+
+        // A zero-length segment has no direction to be perpendicular to, and
+        // would come out as NaN rather than as nothing
+        if (length === 0) continue
+
+        // The normal, scaled to half the width - the segment is grown equally to
+        // both sides so the line stays centred on where it was
+        const nx = (-dy / length) * half
+        const ny = (dx / length) * half
+
+        out.push(
+            ax + nx, ay + ny, r, g, b,
+            bx + nx, by + ny, r, g, b,
+            bx - nx, by - ny, r, g, b,
+
+            ax + nx, ay + ny, r, g, b,
+            bx - nx, by - ny, r, g, b,
+            ax - nx, ay - ny, r, g, b,
+        )
+    }
+}
+
+/**
  * Outlines any triangle list as line segments.
  *
  * Exposed separately so a caller with its own geometry - glyph runs, say - can

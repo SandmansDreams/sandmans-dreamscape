@@ -74,6 +74,19 @@ export class Ship {
         return total
     }
 
+    /**
+     * Combined revision, which every mutation moves.
+     *
+     * The one to cache against when what is being cached depends on gameplay
+     * rather than on triangles - a steering flag flipping changes nothing about
+     * the mesh, and `geometryRevision` would sit still through it.
+     */
+    get revision(): number {
+        let total = 0
+        for (const grid of this.layersOf()) total += grid.revision
+        return total
+    }
+
     /** Union of every layer's bounds, in cell units. Null when the ship is empty. */
     get bounds(): GridBounds | null {
         let result: GridBounds | null = null

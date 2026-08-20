@@ -6,7 +6,7 @@
 export const SHIP_LAYERS = [
     /** The body of the ship, where everything else is placed atop. */
     "hull",
-    /** Every machine: thrusters, generators, storage, weapons, projectors. */
+    /** Every machine: thrusters, generators, cargo, weapons, projectors. */
     "components",
     /** Blocks placed purely for looks. Free, weightless, and drawn over all. */
     "cosmetic",

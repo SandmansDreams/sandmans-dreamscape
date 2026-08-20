@@ -11,7 +11,7 @@ import { Renderer } from "./renderer"
 import { GpuTimer } from "./timing"
 
 /** Which editing surface a scene wants alongside the canvas, if any. */
-export type SceneUi = "builder" | "sprite" | "flight"
+export type SceneUi = "builder" | "sprite" | "flight" | "viewer"
 
 /** Everything the runner hands a scene so it can build itself. */
 export interface SceneContext {

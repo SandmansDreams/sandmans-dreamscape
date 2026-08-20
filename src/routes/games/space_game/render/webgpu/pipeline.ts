@@ -2,7 +2,7 @@ import { Assert } from "../../assert"
 import type { GPU } from "./gpu"
 import type { Shader } from "./shader"
 
-export type BlendMode = "none" | "alpha" | "additive"
+export type BlendMode = "none" | "alpha" | "additive" | "invert"
 
 export interface PipelineOptions {
     label?: string
@@ -28,6 +28,20 @@ function blendState(mode: BlendMode): GPUBlendState | undefined { // Turns blend
         case "additive":
             return {
                 color: { srcFactor: "src-alpha", dstFactor: "one", operation: "add" },
+                alpha: { srcFactor: "zero", dstFactor: "one", operation: "add" },
+            }
+        case "invert":
+            /*
+             * Photographic negative of whatever is already there.
+             *
+             * src * (1 - dst) + dst * 0, so drawing white gives exactly 1 - dst.
+             * That is what makes a marker readable over any colour at all: it
+             * cannot match its background, because it is defined as the opposite
+             * of it. Draw anything other than white through this and the result
+             * is a tint of the inversion rather than the inversion.
+             */
+            return {
+                color: { srcFactor: "one-minus-dst", dstFactor: "zero", operation: "add" },
                 alpha: { srcFactor: "zero", dstFactor: "one", operation: "add" },
             }
     }

@@ -4,26 +4,47 @@ import { shipFromText, shipToText } from "../../game/shipJson"
 import { Camera, type Vec2 } from "../../render/camera"
 import { Color } from "../../render/color"
 import type { Frame } from "../../render/frame"
-import { componentById, kindOf, maxLevel } from "../../render/grid/components"
+import { canPlace, componentById, componentsOfKind, kindOf, maxLevel, type ComponentKind } from "../../render/grid/components"
 import type { Cell } from "../../render/grid/grid"
 import { SHIP_LAYERS, type ShipLayer } from "../../render/grid/layers"
-import { appendShape, carriedTurns, turnCount, type BlockShape } from "../../render/grid/shapes"
-import { bestThrusterFacing, canClearLayer, canEraseAt, canPlaceAt } from "../../render/grid/shipLegality"
+import { appendShape, carriedTurns, shapeCovers, turnCount, type BlockShape } from "../../render/grid/shapes"
+import { bestThrusterFacing, canClearLayer, canEraseAt, canPlaceAt, nextFacing, thrusterFacings } from "../../render/grid/shipLegality"
+import { turnSignOf } from "../../game/physics"
+import { DEFAULT_SHADING, Light, LightField } from "../../game/lighting"
+import { LightBinding } from "../../render/lighting"
+import { InstanceBatch } from "../../render/webgpu/instance"
 import { DynamicMesh, Mesh, MeshBuilder } from "../../render/mesh"
+import { appendTriangleOutline, thickenSegments } from "../../render/grid/gridOutline"
 import type { InputService } from "../../input/service"
+import { actionsIn, keysFor, specOf, type ActionId } from "../../input/actions"
+import { countKinds, structuralIssues, type Issue, type KindCounts } from "../../game/shipReadiness"
 import type { SceneContext, SceneInstance } from "../../render/scene"
 import type { ActionsOf, SearchColumn, SettingsSchema, ValuesOf } from "../../settings/settings"
-import { appendBlock, appendLayer, displayBlock, type BlockLike } from "../../render/grid/blockDraw"
-import { layerFor, loadBrush, saveBrush, type Brush } from "../../render/grid/brush"
+import {
+    appendBlock, appendEmissiveBloom, appendLayer, blockCovers, displayBlock, type BlockLike,
+} from "../../render/grid/blockDraw"
+import { layerFor, loadBrush, saveBrush, type Brush, type BrushTool } from "../../render/grid/brush"
 import { DRAWN_SHAPES } from "../../render/grid/palette"
 import type { DevSceneDefinition } from "../DevScene"
 import { downloadText, uploadText } from "../../download"
+import { sendShip, shipOf, takeHandoff } from "../handoff"
 
+/**
+ * White, because the hover outline draws through the inverting pipeline.
+ *
+ * There src * (1 - dst) is the whole result, so only pure white comes out as a
+ * true negative of the hull underneath - anything else is a tint of one.
+ */
 const HOVER_COLOR = Color.from("#ffffff")
 const BLOCKED_COLOR = Color.from("#ff5a5a")
+
+/** What the destroy tool outlines a block it would actually remove in. */
+const DELETE_COLOR = Color.from("#ff9b3d")
 const MARK_COLOR = Color.from("#7fe0ff")
 const MASS_COLOR = Color.from("#ff8c1a")
-const SELECTED_COLOR = Color.from("#00ff40")
+const SELECTED_COLOR = Color.from("#00e5ff")
+
+
 const HIGHLIGHT_COLOR = Color.from("#ffe14d")
 
 /** How far the ghost is washed out. 0 is solid, 1 is invisible. */
@@ -42,11 +63,37 @@ const DIM_FADE = 0.85
 const PROTECTED_TINT = 0.45
 const PROTECTED_COLOR = Color.from("#ff3b3b")
 
+/**
+ * The border round a steering engine, by the way it turns the ship.
+ *
+ * A border rather than a wash over the cell: the thing being marked is a nozzle
+ * with art on it, and a fill covers exactly what you were trying to look at.
+ *
+ * Which colour means which is arbitrary; that it matches `Controls.turn` is not.
+ * Green is the engine Q fires and blue the one E fires, taken from the same sign
+ * the allocator matches on, so the marks cannot disagree with the flight sim.
+ */
+const TURN_LEFT_COLOR = Color.from("#3bff6f")
+const TURN_RIGHT_COLOR = Color.from("#3b9bff")
+
+
 /** How long a refusal stays on screen before it dismisses itself, in seconds. */
 const NOTICE_SECONDS = 5
 const BACKGROUND = Color.rgb(0.05, 0.05, 0.07)
 
+/** This scene's own id, for a handoff that has to name where it came from. */
+const SCENE_ID = "ship-builder"
+
 const CELL = 32
+
+/**
+ * How wide every marker outline is drawn, in world units.
+ *
+ * Geometry rather than a line width, because WebGPU has none - see
+ * thickenSegments. Measured against the cell, so an outline keeps its weight
+ * relative to the blocks it is drawn around however far the camera is zoomed.
+ */
+const OUTLINE_WIDTH = CELL * 0.03
 
 /** What a DynamicMesh is written with to say it holds nothing this frame. */
 const EMPTY_MESH = new Float32Array(0)
@@ -72,15 +119,10 @@ const SETTINGS = {
         limit: 50,
     },
 
-    metaSep:    { type: "separator", label: "Metadata" },
-
-    name:       { type: "text", label: "Name", default: "New Ship" },
-    creator:    { type: "text", label: "Creator", default: "Sandman" },
-    
     actionsSep: { type: "separator", label: "Actions" },
     
     resolution: { type: "range", label: "Resolution", default: 1, min: 0.05, max: 1, step: 0.05 },
-    test:       { type: "button", label: "Test Ship (NOT IMPL)" },
+    test:       { type: "button", label: "Test Flight" },
     download:   { type: "button", label: "Download Ship" },
     upload:     { type: "button", label: "Upload Ship" },
 } as const satisfies SettingsSchema
@@ -170,6 +212,10 @@ export interface ShipInfo {
     width: number
     height: number
     perLayer: Record<ShipLayer, number>
+    /** How many of each category, for the download dialog's summary. */
+    perKind: KindCounts
+    /** Everything standing between this ship and a file. Empty means ready. */
+    issues: Issue[]
 }
 
 /** What the brush would place, as the shape of thing blockDraw knows how to draw. */
@@ -186,6 +232,41 @@ function ghostCell(brush: Brush, facing: number): BlockLike {
         accentColor: brush.accentColor === "" ? null : Color.from(brush.accentColor),
     }
 }
+
+/**
+ * The emission a brush places with.
+ *
+ * Only structure takes the player's slider. A component's glow belongs to the
+ * piece - a thruster's nozzle is drawn hot by whoever drew it - so letting the
+ * brush set one would mean the same part glowed differently depending on where
+ * the slider happened to be left. Enforced here rather than only in the panel,
+ * so no other caller can reintroduce it.
+ */
+function emissionFor(brush: Brush): number {
+    return kindOf(brush.type) === "hull" ? brush.emission : 0
+}
+
+/**
+ * The category each first-letter shortcut picks.
+ *
+ * A list rather than six ifs, and paired here rather than derived from the kind
+ * names: the action ids are what a rebinding panel edits, so they have to be
+ * real ids and not strings assembled at runtime.
+ */
+const TOOL_KEYS: readonly (readonly [ActionId, BrushTool])[] = [
+    ["builder.toolBuild", "build"],
+    ["builder.toolDestroy", "destroy"],
+    ["builder.toolSelect", "select"],
+]
+
+const PICK_KEYS: readonly (readonly [ActionId, ComponentKind])[] = [
+    ["builder.pickHull", "hull"],
+    ["builder.pickThruster", "thruster"],
+    ["builder.pickCargo", "cargo"],
+    ["builder.pickGenerator", "generator"],
+    ["builder.pickProjector", "projector"],
+    ["builder.pickWeapon", "weapon"],
+]
 
 /** A plus sign, so a marker stays visible against the hull behind it. */
 function appendCross(builder: MeshBuilder, x: number, y: number, size: number, color: Color): void {
@@ -230,7 +311,9 @@ class ShipBuilder implements SceneInstance<EditorValues> {
     private readonly input: InputService
     private readonly camera = new Camera()
 
-    private ship = new Ship("untitled", "New Ship")
+    // The creator is stated here because the dev panel no longer holds it: with
+    // the field gone, a blank ship would otherwise open as Ship's own "Unknown"
+    private ship = new Ship("untitled", "New Ship", "Sandman")
 
     // Meshes
     private readonly meshes = new Map<ShipLayer, Mesh>()
@@ -239,7 +322,19 @@ class ShipBuilder implements SceneInstance<EditorValues> {
     /** Red wash over blocks the destroy tool would refuse. */
     private protectedBoxes: Mesh | null = null
     private protectedKey = ""
+    /** Green and blue borders round the engines that turn the ship. */
+    private readonly steeringBoxes: DynamicMesh
+    private steeringKey = ""
     private readonly hover: DynamicMesh
+    /**
+     * Whether the hover outline is the inverting one.
+     *
+     * A legal cell draws white through the invert pipeline, so the marker is the
+     * negative of whatever hull it is over and cannot be lost against it. A
+     * refusal keeps its flat red: that colour *is* the message, and inverting it
+     * would leave the refusal looking like any other outline.
+     */
+    private hoverLegal = true
     private readonly ghost: DynamicMesh
     /** The center-of-mass cross, rebuilt whenever the geometry moves it. */
     private massMark: Mesh | null = null
@@ -251,6 +346,21 @@ class ShipBuilder implements SceneInstance<EditorValues> {
      * a block replaces the object in the grid, and a held reference would go
      * stale the moment the info panel changed anything.
      */
+    /** True while the panel has a dialog open over everything. */
+    private modal = false
+
+    /*~~~ Lighting preview ~~~*/
+    /** Off by default: building wants flat, honest colours, not a lit render. */
+    private lit = false
+    private readonly litBatch: InstanceBatch
+    private readonly lights: LightBinding
+    private readonly field = new LightField()
+    private readonly sun = new Light({ position: { x: 0, y: 0 } })
+    /** Distance to the outermost cell, which is what the shading fades across. */
+    private shadingReach = 1
+    /** The halo around cells that light themselves. Only drawn with the preview. */
+    private bloomMesh: Mesh | null = null
+
     private selected: { col: number; row: number; layer: ShipLayer } | null = null
     private selectionKey = ""
     private readonly selectedBox: DynamicMesh
@@ -276,8 +386,6 @@ class ShipBuilder implements SceneInstance<EditorValues> {
     // Compared against each field's previous value rather than against the ship:
     // loading a file changes the ship, and comparing to the ship would let the
     // stale contents of the Name box overwrite it on the very next frame
-    private lastName = ""
-    private lastCreator = ""
     private lastShipId: string | null = null
 
     // The origin never moves. The viewer recenters on mass, which in an editor
@@ -326,7 +434,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         },
         download: () => downloadText(`${this.ship.id}.json`, shipToText(this.ship)),
         upload: () => uploadText((text) => this.load(text)),
-        test: () => {},
+        test: () => this.flyIt(),
     }
 
     readonly actions: Record<ActionsOf<typeof SETTINGS>, () => void> = {
@@ -369,6 +477,23 @@ class ShipBuilder implements SceneInstance<EditorValues> {
             return
         }
 
+        // Raised while a dialog is up, so the shortcuts underneath stop answering
+        if (key === "modal") {
+            this.modal = value === true
+            return
+        }
+
+        if (key === "lit") {
+            this.lit = value === true
+            this.context.publish("lit", this.lit)
+            return
+        }
+
+        if (key === "identity") {
+            this.rename(value as { name?: string; creator?: string })
+            return
+        }
+
         // A patch, like the brush: the panel changes one layer at a time and has
         // no business restating the other two
         if (key === "layerView") {
@@ -398,6 +523,13 @@ class ShipBuilder implements SceneInstance<EditorValues> {
 
         this.input = context.input
 
+        // One instance, because the builder draws one ship and never moves it -
+        // the lit pipeline is instanced, so even a still hull needs a transform
+        this.litBatch = InstanceBatch.create(gpu, context.renderer.instanceLayout, 1, "builder ship")
+        this.lights = LightBinding.create(gpu, 1)
+        this.field.add(this.sun)
+
+        this.steeringBoxes = DynamicMesh.create(gpu, "steering engines")
         this.marks = DynamicMesh.create(gpu, "legal cells")
         this.hover = DynamicMesh.create(gpu, "hover")
         this.ghost = DynamicMesh.create(gpu, "ghost")
@@ -410,6 +542,13 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         // channel before create() runs, so this is the first thing the panel sees
         this.publishBrush()
         this.context.publish("layerView", this.layerView)
+        this.context.publish("lit", this.lit)
+        this.publishKeyGuide()
+
+        // Whatever came back from a test flight, which is the ship that left here
+        // - unsaved edits included, since nothing wrote it to a file in between
+        const returning = takeHandoff()
+        if (returning) this.replaceShip(shipOf(returning), true)
     }
 
     update(dt: number, settings: EditorValues): void {
@@ -430,10 +569,10 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         if (this.input.pointer.pressed()) {
             this.strokeEdited = false
 
-            // The press picks the cell the info panel talks about. Doing it on the
-            // press rather than the release means painting a block also selects
-            // it, which is what you want right after placing one.
-            if (this.input.pointer.over) this.selected = this.pickAt(col, row)
+            // Only the select tool selects. Destroy is about removing what is
+            // under the cursor, and leaving a selection behind afterwards points
+            // the info panel at a block that no longer exists.
+            if (this.input.pointer.over && this.brush.tool === "select") this.selectAt(col, row)
         }
         // pressed() as well as isDown(): a click whose press and release both land
         // between two frames is never "down" when a frame reads it, so at a high
@@ -457,6 +596,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
 
         this.rebuildMarks()
         this.rebuildProtected()
+        this.rebuildSteering()
         this.rebuildCursor(col, row)
         this.rebuildHighlight()
         this.publishSelection()
@@ -470,13 +610,17 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         const { camera, mesh: meshPipeline, meshLines: linePipeline } = this.context.renderer
         camera.upload(this.camera, gpu.width, gpu.height)
 
-        // Solid geometry first: the ship, then what a click would add to it, then
-        // the center-of-mass marker that has to read against both
-        frame.setPipeline(meshPipeline).setBindGroup(0, camera.group)
-        for (const layer of SHIP_LAYERS) {
-            const mesh = this.meshes.get(layer)
-            if (mesh) mesh.draw(frame)
+        // The ship first, lit or flat
+        if (this.lit) this.drawLit(frame)
+        else {
+            frame.setPipeline(meshPipeline).setBindGroup(0, camera.group)
+            for (const layer of SHIP_LAYERS) this.meshes.get(layer)?.draw(frame)
         }
+
+        // Everything from here is a mark *about* the ship rather than the ship, so
+        // it is never shaded - a shadow falling across the legal-cell marks would
+        // make them harder to read for no gain
+        frame.setPipeline(meshPipeline).setBindGroup(0, camera.group)
 
         // Over the ship it describes, under the ghost and the mass mark - it is a
         // wash on the blocks, not a thing in its own right
@@ -488,12 +632,24 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         this.ghost.draw(frame)
         if (markers && this.massMark) this.massMark.draw(frame)
 
-        // Lines last, and the legal-cell marks last of all. They are the one thing
-        // that has to stay readable over a finished hull, so nothing draws on top.
-        frame.setPipeline(linePipeline).setBindGroup(0, camera.group)
-        this.hover.draw(frame)
+        // Outlines are quads now rather than a line list, so they draw through the
+        // solid pipeline. Still last, because they are the one thing that has to
+        // stay readable over a finished hull.
+        if (this.hoverLegal) {
+            frame.setPipeline(this.context.renderer.meshInvert).setBindGroup(0, camera.group)
+            this.hover.draw(frame)
+            frame.setPipeline(meshPipeline).setBindGroup(0, camera.group)
+        } else {
+            this.hover.draw(frame)
+        }
+
+        if (markers) this.steeringBoxes.draw(frame)
         if (markers) this.highlightBoxes.draw(frame)
         if (markers) this.selectedBox.draw(frame)
+
+        // The legal-cell marks are still lines: they are crosses in open space
+        // rather than outlines round anything
+        frame.setPipeline(linePipeline).setBindGroup(0, camera.group)
         if (markers) this.marks.draw(frame)
 
         this.context.stats.set("blocks", this.ship.layersOf().reduce((sum, g) => sum + g.size, 0))
@@ -501,25 +657,82 @@ class ShipBuilder implements SceneInstance<EditorValues> {
     }
 
     private getGridPositionFromMouse(): [col: number, row: number] {
-        const world = this.camera.screenToWorld(this.input.pointer.x, this.input.pointer.y)
-        const col = Math.floor(world.x / CELL + this.origin.x)
-        const row = Math.floor(world.y / CELL + this.origin.y)
+        const { col, row } = this.cursorCell()
         return [col, row]
     }
 
-    /** Keeps the ship's name, creator and filename in step with the fields. */
+    /**
+     * The cell under the pointer, and where in it the pointer is.
+     *
+     * The fraction matters for picking: a half block leaves half its cell empty,
+     * and which half the cursor is over decides whether it hits that block or
+     * whatever is drawn underneath.
+     */
+    private cursorCell(): { col: number; row: number; u: number; v: number } {
+        const world = this.camera.screenToWorld(this.input.pointer.x, this.input.pointer.y)
+
+        const x = world.x / CELL + this.origin.x
+        const y = world.y / CELL + this.origin.y
+        const col = Math.floor(x)
+        const row = Math.floor(y)
+
+        return { col, row, u: x - col, v: y - row }
+    }
+
+    /**
+     * Sends the ship as it stands to the flight sim, and asks to go there.
+     *
+     * The live ship rather than the one the picker names: the whole point is to
+     * try what is on screen, which usually has never been saved. The flight scene
+     * hands the same ship back on the way home, so an unsaved edit survives the
+     * round trip.
+     */
+    private flyIt(): void {
+        sendShip(this.ship, SCENE_ID)
+        this.context.publish("goto", "ship-flight")
+    }
+
+    /**
+     * The builder's shortcuts, as the player has them bound.
+     *
+     * Read from the live bindings rather than written out in the panel, so a
+     * rebinding shows up in the guide and a card can never claim a key that does
+     * something else. Published once on load: bindings do not change mid-scene.
+     */
+    private publishKeyGuide(): void {
+        const bindings = this.input.table
+
+        const guide = actionsIn("builder").map((action) => ({
+            keys: keysFor(action, bindings.codesFor(action)),
+            does: specOf(action).label,
+        }))
+
+        this.context.publish("keyGuide", guide)
+    }
+
+    /**
+     * Renames the ship, from the panel's own fields.
+     *
+     * The ship owns its name now rather than the settings bag: the builder panel
+     * has the fields, and a second copy in the dev panel was one more thing that
+     * could disagree with them.
+     */
+    private rename(patch: { name?: string; creator?: string }): void {
+        if (patch.name !== undefined) {
+            this.ship.name = patch.name
+            this.ship.id = slug(patch.name)
+        }
+
+        if (patch.creator !== undefined) this.ship.creator = patch.creator
+
+        // Republished here rather than waiting on a rebuild: a rename moves no
+        // geometry, so the revision does not notice, and the panel would keep
+        // showing the name from before the edit
+        this.publishShipInfo()
+    }
+
+    /** Loads whatever ship the picker names, when that changes. */
     private syncIdentity(settings: EditorValues): void {
-        if (settings.name !== this.lastName) {
-            this.lastName = settings.name
-            this.ship.name = settings.name
-            this.ship.id = slug(settings.name)
-        }
-
-        if (settings.creator !== this.lastCreator) {
-            this.lastCreator = settings.creator
-            this.ship.creator = settings.creator
-        }
-
         // The first frame only records what the picker says. Opening the scene
         // should leave the blank ship alone; picking from the list is what loads one.
         if (this.lastShipId === null) this.lastShipId = settings.ship
@@ -539,6 +752,10 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         for (const mesh of this.meshes.values()) mesh.destroy()
         this.marks.destroy()
         this.protectedBoxes?.destroy()
+        this.steeringBoxes.destroy()
+        this.litBatch.destroy()
+        this.lights.destroy()
+        this.bloomMesh?.destroy()
         this.hover.destroy()
         this.ghost.destroy()
         this.massMark?.destroy()
@@ -558,6 +775,10 @@ class ShipBuilder implements SceneInstance<EditorValues> {
      * layout that does not put R where QWERTY does.
      */
     private readShortcuts(): void {
+        // A dialog is modal: its backdrop already keeps the pointer off the grid,
+        // and the keyboard has no backdrop, so it is stopped here instead
+        if (this.modal) return
+
         const input = this.input
 
         if (input.pressed("builder.rotate")) this.rotateBrush()
@@ -571,8 +792,55 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         if (input.pressed("builder.prevShape")) this.stepShape(-1)
         if (input.pressed("builder.nextShape")) this.stepShape(1)
 
-        if (input.pressed("builder.layerUp")) this.stepLayer(-1)
-        if (input.pressed("builder.layerDown")) this.stepLayer(1)
+        // SHIP_LAYERS is bottom-up and the panel lists it top-down, so "up" is a
+        // step *forward* through the array - toward cosmetic, which is the row
+        // above components in the panel someone is looking at
+        if (input.pressed("builder.layerUp")) this.stepLayer(1)
+        if (input.pressed("builder.layerDown")) this.stepLayer(-1)
+
+        if (input.pressed("builder.undo")) this.undo()
+        if (input.pressed("builder.redo")) this.redo()
+
+        for (const [action, tool] of TOOL_KEYS) {
+            if (input.pressed(action)) this.pickTool(tool)
+        }
+
+        for (const [action, kind] of PICK_KEYS) {
+            if (input.pressed(action)) this.pickKind(kind)
+        }
+    }
+
+    /**
+     * Switches tool, taking the brush somewhere it can work.
+     *
+     * The same move the panel's tool buttons make: erase and select can sit on a
+     * layer the brush's type cannot build on, so coming back to build has to find
+     * a legal layer or the first click would be refused with no explanation.
+     */
+    private pickTool(tool: BrushTool): void {
+        if (this.brush.tool === tool) return
+
+        this.patchBrush({
+            tool,
+            layer: tool === "build" ? layerFor(this.brush.type, this.brush.layer) : this.brush.layer,
+        })
+    }
+
+    /**
+     * Switches the brush to a category's first model.
+     *
+     * The same move the panel's category buttons make, and it has to be: a
+     * shortcut that left the brush on a layer its type cannot go on would place
+     * nothing and explain nothing.
+     */
+    private pickKind(kind: ComponentKind): void {
+        const type = componentsOfKind(kind)[0]?.id
+        if (!type || type === this.brush.type) return
+
+        const layers = SHIP_LAYERS.filter((layer) => canPlace(type, layer))
+        const layer = layers.includes(this.brush.layer) ? this.brush.layer : layers[0] ?? this.brush.layer
+
+        this.patchBrush({ type, layer, level: Math.min(this.brush.level, maxLevel(type)), tool: "build" })
     }
 
     /**
@@ -584,6 +852,11 @@ class ShipBuilder implements SceneInstance<EditorValues> {
      */
     private rotateBrush(): void {
         const brush = this.brush
+
+        if (kindOf(brush.type) === "thruster") {
+            this.patchBrush({ facing: this.nextThrusterFacing() })
+            return
+        }
 
         if (kindOf(brush.type) !== "hull") {
             this.patchBrush({ facing: (brush.facing + 1) % 4 })
@@ -658,7 +931,9 @@ class ShipBuilder implements SceneInstance<EditorValues> {
             }
         }
 
-        this.highlightBoxes.write(new Float32Array(out))
+        const thick: number[] = []
+        thickenSegments(thick, out, OUTLINE_WIDTH)
+        this.highlightBoxes.write(new Float32Array(thick))
     }
 
     /*~~~ Selection ~~~*/
@@ -670,19 +945,52 @@ class ShipBuilder implements SceneInstance<EditorValues> {
      * that it takes the topmost occupied layer, which is what makes a hull block
      * selectable while the brush is set to place thrusters.
      */
+    /**
+     * Selects whatever is under the pointer, and follows it to its layer.
+     *
+     * Switching the brush's layer is the point: picking a cosmetic block and then
+     * finding the level buttons wired to it while the panel still says you are
+     * building on hull is the kind of mismatch that makes an editor feel haunted.
+     */
+    private selectAt(col: number, row: number): void {
+        const picked = this.pickAt(col, row)
+        this.selected = picked
+
+        if (picked && picked.layer !== this.brush.layer) {
+            this.patchBrush({ layer: picked.layer })
+        }
+    }
+
+    /**
+     * The block under the pointer, taken from the top down.
+     *
+     * Whatever is drawn there is what gets picked, which means walking the layers
+     * from the top and taking the first whose *shape* actually covers the point -
+     * not merely the first that has a cell there. A cosmetic half block over a
+     * thruster hits the half block on its solid side and the thruster through the
+     * gap, which is what someone pointing at the thruster meant.
+     *
+     * Hidden layers are skipped: an outline round something nobody can see, with
+     * the level buttons wired to it, is worse than no selection at all.
+     *
+     * Falls back to the brush's own layer when nothing is hit, so the panel can
+     * say "empty" rather than keeping the last selection alive.
+     */
     private pickAt(col: number, row: number): { col: number; row: number; layer: ShipLayer } | null {
-        // Nothing on a layer you cannot see: the outline would sit around empty
-        // space, and the level buttons would edit a block with nothing on screen
-        // to show for it
+        const { u, v } = this.cursorCell()
+
+        // Reversed, because SHIP_LAYERS is draw order and the top one is drawn last
+        for (const layer of [...SHIP_LAYERS].reverse()) {
+            if (this.layerView[layer] === "hidden") continue
+
+            const cell = this.ship.layers[layer].get(col, row)
+            if (!cell) continue
+
+            if (blockCovers(cell, u, v)) return { col, row, layer }
+        }
+
         if (this.layerView[this.brush.layer] === "hidden") return null
 
-        // The chosen layer and nothing else. Falling through to whatever else
-        // happened to be under the cursor meant clicking bare hull while holding a
-        // thruster selected the hull, and the panel then described a block on a
-        // layer you were not working on - with the level buttons wired to it.
-        //
-        // The cell is returned even when it is empty, so the panel can say so
-        // rather than keeping the last selection alive.
         return { col, row, layer: this.brush.layer }
     }
 
@@ -708,7 +1016,9 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         // The outline is what ties the info panel to a block on screen - without
         // it the panel describes a cell you have no way to point at
         this.selectedBox.write(
-            cell && at ? this.cellBoxVertices(at.col, at.row, this.markerInk(SELECTED_COLOR)) : EMPTY_MESH,
+            cell && at
+                ? this.cellOutline(at.col, at.row, this.markerInk(SELECTED_COLOR), at.layer)
+                : EMPTY_MESH,
         )
 
         if (!cell || !at) {
@@ -831,8 +1141,31 @@ class ShipBuilder implements SceneInstance<EditorValues> {
             facing: this.facingFor(col, row),
             color: Color.from(brush.color),
             accentColor: brush.accentColor === "" ? null : Color.from(brush.accentColor),
-            emission: brush.emission,
+            emission: emissionFor(brush),
         })
+    }
+
+    /**
+     * The next facing a thruster could actually be placed with, here.
+     *
+     * Stepping blindly by one looks broken: only the facings that reach an edge
+     * are legal, `bestThrusterFacing` snaps the rest to the same fallback, and so
+     * two of every four presses appeared to do nothing. Stepping through the legal
+     * ones means every press changes the thing on screen.
+     *
+     * Falls back to a plain step where nothing is legal - the cursor is off the
+     * ship, and a key that does nothing at all is worse than one that spins a
+     * value nobody can see yet.
+     */
+    private nextThrusterFacing(): number {
+        const [col, row] = this.getGridPositionFromMouse()
+        const options = thrusterFacings(this.ship, col, row)
+
+        // Nothing legal here means the cursor is off the ship, and a key that does
+        // nothing at all is worse than one that spins a value not yet on screen
+        if (options.length === 0) return (this.brush.facing + 1) % 4
+
+        return nextFacing(options, this.brush.facing)
     }
 
     /**
@@ -865,7 +1198,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
             && cell.type === brush.type
             && cell.level === brush.level
             && cell.facing === brush.facing
-            && cell.emission === brush.emission
+            && cell.emission === emissionFor(brush)
             && cell.color.hex === brush.color
             && (cell.accentColor?.hex ?? "") === brush.accentColor
     }
@@ -919,10 +1252,15 @@ class ShipBuilder implements SceneInstance<EditorValues> {
     }
 
     /** Swaps in a whole different ship, undoably. */
-    private replaceShip(ship: Ship): void {
-        this.pushUndo()
+    private replaceShip(ship: Ship, restoring = false): void {
+        // A restore is the ship you were already editing, coming back from a test
+        // flight. There is no earlier state in this session to undo to, and the
+        // zoom you left at is the one you expect to find - a fit here would throw
+        // it away, and on a small hull it fills the screen with one block
+        if (!restoring) this.pushUndo()
+
         this.ship = ship
-        this.frameShip()
+        if (!restoring) this.frameShip()
 
         // A fresh ship's revision counter starts from its own sets and can land on
         // the number already cached, which would leave the previous ship's meshes
@@ -969,6 +1307,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
 
         for (const mesh of this.meshes.values()) mesh.destroy()
         this.meshes.clear()
+        this.shadingReach = 1
 
         for (const layer of SHIP_LAYERS) {
             const view = this.layerView[layer]
@@ -978,8 +1317,22 @@ class ShipBuilder implements SceneInstance<EditorValues> {
             const fade = view === "dim" ? DIM_FADE : 0
 
             appendLayer(builder, this.ship.layers[layer], CELL, this.origin, fade, BACKGROUND)
+
+            // Across every layer, since the hull is shaded as one object
+            this.shadingReach = Math.max(this.shadingReach, builder.cellReach)
+
             if (builder.vertexCount > 0) this.meshes.set(layer, builder.build(gpu, layer))
         }
+
+        // One mesh across every layer, since it is laid over the whole ship
+        const bloom = new MeshBuilder()
+        for (const layer of SHIP_LAYERS) {
+            if (this.layerView[layer] === "hidden") continue
+            appendEmissiveBloom(bloom, this.ship.layers[layer], CELL, this.origin)
+        }
+
+        this.bloomMesh?.destroy()
+        this.bloomMesh = bloom.vertexCount > 0 ? bloom.build(gpu, "builder bloom") : null
 
         this.buildMassMark()
         this.publishPalette()
@@ -1027,6 +1380,8 @@ class ShipBuilder implements SceneInstance<EditorValues> {
             width: bounds ? bounds.maxCol - bounds.minCol + 1 : 0,
             height: bounds ? bounds.maxRow - bounds.minRow + 1 : 0,
             perLayer,
+            perKind: countKinds(this.ship),
+            issues: structuralIssues(this.ship),
         }
 
         this.context.publish("shipInfo", info)
@@ -1088,6 +1443,88 @@ class ShipBuilder implements SceneInstance<EditorValues> {
      * at a time. Drawn as each block's own shape rather than a flat square so the
      * wash lands on the block and not on the empty half of a wedge.
      */
+    /**
+     * The ship through the lit pipeline, as a preview of how it will actually look.
+     *
+     * One instance and one light, placed relative to the hull's own reach so the
+     * preview reads the same on a fighter and on a freighter. The light is fixed
+     * rather than another set of sliders: this is a look, not a lighting rig, and
+     * the ship viewer already has the rig.
+     */
+    private drawLit(frame: Frame): void {
+        const renderer = this.context.renderer
+        const reach = this.shadingReach
+
+        // Up and to the left, far enough out that the whole hull is on the near
+        // side of it and the terminator falls across the ship rather than past it
+        this.sun.position = { x: -1.1 * reach, y: -1.1 * reach }
+        this.sun.range = 2.5 * reach
+        this.sun.intensity = 1.15
+
+        this.lights.setShading(DEFAULT_SHADING)
+        this.lights.begin().add(this.field.sample({ x: 0, y: 0 }, 0), reach)
+        this.lights.upload()
+
+        // The mesh sits where it was built, so the instance is the identity one
+        this.litBatch.begin().add(0, 0, 0, 1, 1, 1, 1)
+
+        frame.setPipeline(renderer.lit)
+            .setBindGroup(0, renderer.camera.group)
+            .setBindGroup(1, this.lights.group)
+
+        for (const layer of SHIP_LAYERS) {
+            const mesh = this.meshes.get(layer)
+            if (mesh) this.litBatch.draw(frame, mesh)
+        }
+
+        // The emissive halo, over the hull it spills off. Part of the preview
+        // rather than the flat view: a glow is light, and the flat view is the one
+        // that deliberately shows none
+        if (this.bloomMesh) {
+            frame.setPipeline(renderer.instancedGlow).setBindGroup(0, renderer.camera.group)
+            this.litBatch.draw(frame, this.bloomMesh)
+        }
+    }
+
+    /**
+     * A wash over every engine marked for steering, coloured by which way it turns.
+     *
+     * Only the engines that would actually turn the ship: one lined up through the
+     * centre of mass has no leverage, so marking it green or blue would promise a
+     * turn that never comes. Those are left unmarked, which is itself the useful
+     * signal - a steering flag on a nozzle with no colour is a nozzle doing nothing.
+     */
+    private rebuildSteering(): void {
+        const views = VIEW_LAYERS.map((layer) => this.layerView[layer]).join(",")
+
+        // The plain revision, not the geometry one: flipping the steering flag
+        // changes no triangles on the ship and would otherwise never repaint
+        const key = `${this.ship.revision}|${views}`
+        if (key === this.steeringKey) return
+        this.steeringKey = key
+
+        const center = this.ship.centerOfMass
+        const out: number[] = []
+
+        for (const layer of SHIP_LAYERS) {
+            if (this.layerView[layer] === "hidden") continue
+
+            for (const cell of this.ship.layers[layer].ofKind("thruster")) {
+                if (!cell.steering) continue
+
+                const turn = turnSignOf(cell, center)
+                if (turn === 0) continue
+
+                const { r, g, b } = this.markerInk(turn < 0 ? TURN_LEFT_COLOR : TURN_RIGHT_COLOR)
+                appendCellBorder(out, cell.col, cell.row, this.origin, r, g, b)
+            }
+        }
+
+        const thick: number[] = []
+        thickenSegments(thick, out, OUTLINE_WIDTH)
+        this.steeringBoxes.write(new Float32Array(thick))
+    }
+
     private rebuildProtected(): void {
         const brush = this.brush
         // Every view belongs in the key, markers included: hiding the layer above
@@ -1203,12 +1640,15 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         const brush = this.brush
         // A hidden layer refuses everything, so the cursor reads blocked wherever
         // it sits rather than promising a placement the click will turn down
-        const legal = !this.onHiddenLayer
+        const placeable = !this.onHiddenLayer
             && canPlaceAt(this.ship, brush.layer, col, row, brush.type).ok
 
-        const key = `${col},${row},${this.input.pointer.over},${legal},` +
-            `${brush.shape},${brush.turns},${brush.mirrored},${brush.tool},${brush.color},` +
-            `${brush.type},${brush.level},${brush.facing},${this.ship.geometryRevision}`
+        const cursor = this.cursorOutline(col, row, placeable)
+
+        const key = `${col},${row},${this.input.pointer.over},${placeable},${cursor?.layer},` +
+            `${cursor?.color.hex},${brush.shape},${brush.turns},${brush.mirrored},` +
+            `${brush.tool},${brush.color},${brush.type},${brush.level},${brush.facing},` +
+            `${this.ship.revision}`
 
         if (key === this.hoverKey) return
         this.hoverKey = key
@@ -1217,31 +1657,87 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         this.ghost.write(EMPTY_MESH)
         if (!this.input.pointer.over) return
 
-        this.hover.write(this.cellBoxVertices(col, row, legal ? HOVER_COLOR : BLOCKED_COLOR))
+        if (cursor) {
+            this.hoverLegal = cursor.color === HOVER_COLOR
+            this.hover.write(this.cellOutline(col, row, cursor.color, cursor.layer))
+        }
 
         // Nothing to preview when destroying or selecting, nothing to promise on a
         // cell that would refuse the block, and nothing to add on one that already
         // holds exactly this - a ghost over an identical block is just a smudge
         const identical = this.matchesBrush(this.ship.layers[brush.layer].get(col, row))
-        if (brush.tool === "build" && legal && !identical) this.ghost.write(this.buildGhost(col, row))
+        if (brush.tool === "build" && placeable && !identical) this.ghost.write(this.buildGhost(col, row))
     }
 
-    /** One cell's border as four line segments. */
-    private cellBoxVertices(col: number, row: number, color: Color): Float32Array<ArrayBuffer> {
-        const x = (col - this.origin.x) * CELL
-        const y = (row - this.origin.y) * CELL
-        const { r, g, b } = color
+    /**
+     * What the cursor should outline, and in what colour - or nothing.
+     *
+     * Each tool marks the thing it would actually act on, which is not the same
+     * thing for all three:
+     *
+     *   - **build** marks the cell a block would land in, on the brush's layer,
+     *     red when that placement would be refused.
+     *   - **destroy** marks the block a click would remove, orange, or red when
+     *     the ship needs it. It works on the brush's layer, so that is the layer
+     *     it looks at - an outline round a block the click would not touch is
+     *     worse than no outline.
+     *   - **select** marks whatever is under the cursor, whichever visible layer
+     *     it is on, and is never refused.
+     */
+    private cursorOutline(
+        col: number, row: number, placeable: boolean,
+    ): { layer: ShipLayer; color: Color } | null {
+        const brush = this.brush
 
-        const box = [
-            x, y, x + CELL, y,
-            x + CELL, y, x + CELL, y + CELL,
-            x + CELL, y + CELL, x, y + CELL,
-            x, y + CELL, x, y,
-        ]
+        if (brush.tool === "build") {
+            return { layer: brush.layer, color: placeable ? HOVER_COLOR : BLOCKED_COLOR }
+        }
+
+        if (brush.tool === "destroy") {
+            // Nothing there is nothing to delete, and a marker over empty space
+            // would be warning about an act nobody can perform
+            if (this.onHiddenLayer || !this.ship.layers[brush.layer].has(col, row)) return null
+
+            const erasable = canEraseAt(this.ship, brush.layer, col, row).ok
+            return { layer: brush.layer, color: erasable ? DELETE_COLOR : BLOCKED_COLOR }
+        }
+
+        const picked = this.pickAt(col, row)
+        return { layer: picked?.layer ?? brush.layer, color: HOVER_COLOR }
+    }
+
+    /**
+     * The outline of whatever is drawn in a cell, as thick triangles.
+     *
+     * Traced from `appendBlock` - the same call that draws the block - rather
+     * than from the cell's `shape` field. A component's shape is leftover brush
+     * state that nothing renders: components draw as their art, so outlining the
+     * stored shape drew a quarter round a thruster. Asking the drawing code means
+     * a hull outlines as its wedge and a turret outlines as a turret.
+     *
+     * An empty cell has nothing drawn in it, so it falls back to the cell box -
+     * there the square *is* the truth about what is being pointed at.
+     */
+    private cellOutline(
+        col: number, row: number, color: Color, layer?: ShipLayer,
+    ): Float32Array<ArrayBuffer> {
+        const cell = layer ? this.ship.layers[layer].get(col, row) : undefined
+        const segments: number[] = []
+
+        if (cell) {
+            const x = (col - this.origin.x) * CELL
+            const y = (row - this.origin.y) * CELL
+            const scratch = new MeshBuilder()
+
+            appendBlock(scratch, cell, x, y, CELL)
+            appendTriangleOutline(segments, scratch.toArray(), color)
+        } else {
+            const { r, g, b } = color
+            appendCellBorder(segments, col, row, this.origin, r, g, b)
+        }
 
         const out: number[] = []
-        for (let i = 0; i < box.length; i += 2) out.push(box[i]!, box[i + 1]!, r, g, b)
-
+        thickenSegments(out, segments, OUTLINE_WIDTH)
         return new Float32Array(out)
     }
 
@@ -1327,7 +1823,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
 
 
 const scene: DevSceneDefinition<EditorValues> = {
-    id: "ship-builder",
+    id: SCENE_ID,
     name: "Ship Builder",
     description:
         "Left drag paints, right or middle drag pans, wheel zooms. The brush is the " +

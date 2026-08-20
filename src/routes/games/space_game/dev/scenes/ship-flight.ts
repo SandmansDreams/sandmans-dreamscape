@@ -18,6 +18,7 @@ import { InputService } from "../../input/service"
 import type { SceneContext, SceneInstance } from "../../render/scene"
 import type { ActionsOf, SearchColumn, SettingsSchema, ValuesOf } from "../../settings/settings"
 import type { DevSceneDefinition } from "../DevScene"
+import { sendShip, shipOf, takeHandoff } from "../handoff"
 
 /** World units per cell, matching the builder so a ship is the size you drew it. */
 const CELL = 32
@@ -114,6 +115,14 @@ export interface FlightInfo {
     /** True while the ship is against a wall. */
     touching: boolean
     assist: boolean
+    /**
+     * The scene the back button returns to, or null when there is nowhere to go.
+     *
+     * Null is the ordinary case: someone who picked this scene from the list did
+     * not come from anywhere, and offering to send them "back" to a place they
+     * have never been would be a button that means nothing.
+     */
+    returnTo: string | null
 }
 
 class ShipFlight implements SceneInstance<FlightValues> {
@@ -178,6 +187,14 @@ class ShipFlight implements SceneInstance<FlightValues> {
     readonly actions: Record<ActionsOf<typeof SETTINGS>, () => void> = {
         reset: () => this.resetBody(),
     }
+
+    /**
+     * The ship that was handed to this scene, if any, and where it came from.
+     *
+     * Taken once in the constructor rather than read per frame: the handoff is
+     * consumed on read, so whoever asks first is the only one who can have it.
+     */
+    private readonly arrived = takeHandoff()
 
     constructor(context: SceneContext) {
         this.context = context
@@ -291,13 +308,17 @@ class ShipFlight implements SceneInstance<FlightValues> {
     /*~~~ Ship ~~~*/
 
     private syncShip(settings: FlightValues): void {
-        if (settings.ship === this.builtShip) return
+        // The handed-over ship is loaded once, on the first frame, and the picker
+        // takes over from there: changing the ship in the panel should still work
+        // after arriving from the builder
+        const handed = this.builtShip === "" ? this.arrived : null
+        if (!handed && settings.ship === this.builtShip) return
         this.builtShip = settings.ship
 
         this.exhaust.clear()
         this.exhaustOwed = []
 
-        this.ship = buildShip(settings.ship)
+        this.ship = handed ? shipOf(handed) : buildShip(settings.ship)
         this.physics = shipPhysics(this.ship)
         this.radius = boundingRadius(this.ship)
         this.resetBody()
@@ -390,6 +411,26 @@ class ShipFlight implements SceneInstance<FlightValues> {
     }
 
     /*~~~ Readout ~~~*/
+
+    /**
+     * Goes back where the ship came from, carrying it home.
+     *
+     * The same ship is handed back rather than the builder reloading from its
+     * picker: what left the builder was usually an unsaved edit, and reloading
+     * would silently throw it away.
+     */
+    private returnHome(): void {
+        const home = this.arrived
+        if (!home) return
+
+        sendShip(this.ship, "ship-flight")
+        this.context.publish("goto", home.from)
+    }
+
+    /** A message from the panel. Only the back button sends one. */
+    receive(key: string): void {
+        if (key === "back") this.returnHome()
+    }
 
     /*~~~ Lighting ~~~*/
 
@@ -565,6 +606,7 @@ class ShipFlight implements SceneInstance<FlightValues> {
             spin: this.body.spin,
             touching: this.touching,
             assist: this.assist,
+            returnTo: this.arrived?.from ?? null,
         } satisfies FlightInfo)
     }
 

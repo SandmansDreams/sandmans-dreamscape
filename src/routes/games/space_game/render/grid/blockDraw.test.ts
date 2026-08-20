@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { Color } from "../color"
 import { MeshBuilder, FLOATS_PER_VERTEX } from "../mesh"
-import { appendBlock, appendLayer, type BlockLike } from "./blockDraw"
+import { appendBlock, appendLayer, blockCovers, type BlockLike } from "./blockDraw"
 import { appendShape } from "./shapes"
 import { Grid } from "./grid"
 
@@ -245,5 +245,49 @@ describe("preview and placement agree", () => {
         appendBlock(five, preview("autocannon", 5), 0, 0, 32)
 
         expect([...one.toArray()]).not.toEqual([...five.toArray()])
+    })
+})
+
+describe("blockCovers", () => {
+    function block(overrides: Partial<BlockLike> = {}): BlockLike {
+        return {
+            shape: "full", turns: 0, mirrored: false,
+            type: "hull-plate", facing: 0, level: 1, color: RED, accentColor: null,
+            ...overrides,
+        }
+    }
+
+    it("covers a hull block only where its shape is solid", () => {
+        const half = block({ shape: "half" })
+
+        // One of these is the solid side and one is the gap; which is which is
+        // the shape's business, but they must differ
+        expect(blockCovers(half, 0.5, 0.2)).not.toBe(blockCovers(half, 0.5, 0.8))
+    })
+
+    it("ignores the shape a component was placed with", () => {
+        // The bug this pins: a battery placed while the brush held a quarter was
+        // selectable across a quarter of itself, because its `shape` is brush
+        // leftovers that nothing draws. The art decides, so the two agree exactly
+        const asQuarter = block({ type: "battery", shape: "quarter" })
+        const asFull = block({ type: "battery", shape: "full" })
+
+        for (const [u, v] of [[0.1, 0.1], [0.9, 0.9], [0.5, 0.5], [0.9, 0.1]] as const) {
+            expect(blockCovers(asQuarter, u, v)).toBe(blockCovers(asFull, u, v))
+        }
+    })
+
+    it("follows a component's art rather than its cell", () => {
+        // A turret is not a square: the space its barrel does not fill belongs to
+        // whatever is drawn underneath, which is what lets a click reach the hull
+        const turret = block({ type: "autocannon" })
+        const points = [[0.02, 0.02], [0.5, 0.5], [0.98, 0.98], [0.02, 0.98]] as const
+
+        const covered = points.map(([u, v]) => blockCovers(turret, u, v))
+        expect(covered).toContain(true)
+    })
+
+    it("stops at the edges of the cell", () => {
+        expect(blockCovers(block({ type: "battery" }), 1.4, 0.5)).toBe(false)
     })
 })

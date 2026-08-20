@@ -12,6 +12,20 @@ export interface Legality {
     reason?: string
 }
 
+/**
+ * How far from the origin the first hull block may go, in cells.
+ *
+ * Matches the margin the editor draws its marks with, and has to: the marks are
+ * a promise about where a click will work. Two either way, so the opening move is
+ * a 5x5 box rather than the whole infinite plane.
+ */
+export const START_REACH = 2
+
+/** True when this cell is inside the box the first block may start in. */
+export function inStartArea(col: number, row: number): boolean {
+    return Math.abs(col) <= START_REACH && Math.abs(row) <= START_REACH
+}
+
 /** N, E, S, W - the order `facing` indexes into. */
 export const OFFSETS = [
     { col: 0, row: -1 },
@@ -46,8 +60,14 @@ export function canPlaceAt(
     const hull = ship.layers.hull
 
     if (layer === "hull") {
-        // An empty hull has to start somewhere, or nothing could ever be placed
-        if (hull.size === 0) return { ok: true }
+        // An empty hull has to start somewhere, but not anywhere: the editor draws
+        // a small box of marks around the origin, and a click outside it that
+        // silently worked would make those marks a lie
+        if (hull.size === 0) {
+            return inStartArea(col, row)
+                ? { ok: true }
+                : { ok: false, reason: "the first block goes in the middle" }
+        }
 
         // Repainting a block that is already there is always allowed - it changes no connectivity, and refusing it would strand a lone starter block
         if (hull.has(col, row)) return { ok: true }
@@ -100,6 +120,24 @@ export function thrusterFacings(ship: Ship, col: number, row: number): number[] 
  * Falling back to the first direction that does keeps a thruster from being
  * refused for pointing the wrong way - it turns to face an edge instead.
  */
+/**
+ * The next facing after `facing` among the ones offered, wrapping.
+ *
+ * For stepping a brush through the directions a cell can actually take. Stepping
+ * by one instead looks broken: `bestThrusterFacing` snaps an illegal facing to
+ * the same fallback every time, so on a cell with two legal directions half the
+ * presses appear to do nothing.
+ *
+ * Returns `facing` unchanged when nothing is on offer, so a caller with no legal
+ * placement is left holding what it had rather than a number picked from thin air.
+ */
+export function nextFacing(options: readonly number[], facing: number): number {
+    if (options.length === 0) return facing
+
+    // Strictly after, so a facing already in the list advances rather than sticking
+    return options.find((option) => option > facing) ?? options[0]!
+}
+
 export function bestThrusterFacing(ship: Ship, col: number, row: number, facing: number): number {
     const options = thrusterFacings(ship, col, row)
     const wanted = ((facing % 4) + 4) % 4

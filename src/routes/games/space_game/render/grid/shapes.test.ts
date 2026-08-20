@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { Color } from "../color"
-import { appendShape, BLOCK_SHAPES, MIRRORABLE_SHAPES, turnCount, type BlockShape } from "./shapes"
+import { appendShape, BLOCK_SHAPES, MIRRORABLE_SHAPES, shapeCovers, turnCount, type BlockShape } from "./shapes"
 import { FLOATS_PER_VERTEX, MeshBuilder } from "../mesh"
 import { coverageOf as coverageOfMesh } from "./sampling.test-utils"
 
@@ -103,5 +103,42 @@ describe("appendShape()", () => {
                     .not.toBe(coverageOf(shape, 0))
             }
         }
+    })
+})
+describe("shapeCovers", () => {
+    it("covers the whole cell for a full block", () => {
+        for (const [u, v] of [[0.1, 0.1], [0.5, 0.5], [0.9, 0.9]] as const) {
+            expect(shapeCovers("full", 0, false, u, v)).toBe(true)
+        }
+    })
+
+    it("covers nothing at all for empty", () => {
+        expect(shapeCovers("empty", 0, false, 0.5, 0.5)).toBe(false)
+    })
+
+    it("leaves the other half of a half block uncovered", () => {
+        // The whole point of the hit test: a half block has real gaps, and a click
+        // in one should reach whatever is drawn underneath
+        const top = shapeCovers("half", 0, false, 0.5, 0.2)
+        const bottom = shapeCovers("half", 0, false, 0.5, 0.8)
+
+        expect(top).not.toBe(bottom)
+    })
+
+    it("follows the shape round its turns", () => {
+        // Turning a half block moves which half is solid, so the same point flips
+        const before = shapeCovers("half", 0, false, 0.5, 0.2)
+        const after = shapeCovers("half", 2, false, 0.5, 0.2)
+
+        expect(before).not.toBe(after)
+    })
+
+    it("misses the empty corner of a wedge and hits the solid one", () => {
+        const hits = [[0.1, 0.1], [0.9, 0.9], [0.1, 0.9], [0.9, 0.1]]
+            .map(([u, v]) => shapeCovers("wedge", 0, false, u!, v!))
+
+        // A wedge fills a triangle, so some corners are in and some are out
+        expect(hits).toContain(true)
+        expect(hits).toContain(false)
     })
 })

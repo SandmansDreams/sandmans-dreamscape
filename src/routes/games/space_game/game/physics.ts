@@ -91,6 +91,42 @@ function thrustOf(cell: Cell): number {
     return component instanceof ThrusterComponent ? component.statsAt(cell.level).thrust : 0
 }
 
+/**
+ * One engine, from the cell that is it.
+ *
+ * Exported because the builder needs to know which way a nozzle would turn the
+ * ship in order to mark it, and deriving that a second time is how a marker ends
+ * up disagreeing with the physics it is describing.
+ */
+export function thrusterOf(cell: Cell, center: Vec2, thrust: number): Thruster {
+    // Exhaust leaves the way the thruster points, so the ship goes the other way
+    const step = OFFSETS[cell.facing % 4]!
+    const force = { x: -step.col * thrust, y: -step.row * thrust }
+
+    const rx = cell.col + 0.5 - center.x
+    const ry = cell.row + 0.5 - center.y
+
+    return {
+        force,
+        // The 2D cross product r × F. This single line is why placement matters:
+        // a thruster through the center contributes nothing here.
+        torque: rx * force.y - ry * force.x,
+        steering: cell.steering,
+        offset: { x: rx, y: ry },
+    }
+}
+
+/**
+ * Which way an engine at this cell turns the ship: -1 left, 1 right, 0 not at all.
+ *
+ * The sign the allocator matches against `Controls.turn`, so a marker built on it
+ * says exactly what Q and E will do. Thrust is passed as 1 because only the sign
+ * is wanted, and it scales the torque without moving it off zero.
+ */
+export function turnSignOf(cell: Cell, center: Vec2): number {
+    return Math.sign(thrusterOf(cell, center, 1).torque)
+}
+
 function thrustersOf(ship: Ship, center: Vec2): Thruster[] {
     const out: Thruster[] = []
 
@@ -99,22 +135,7 @@ function thrustersOf(ship: Ship, center: Vec2): Thruster[] {
             const thrust = thrustOf(cell)
             if (thrust <= 0) continue
 
-            // Exhaust leaves the way the thruster points, so the ship goes the
-            // other way
-            const step = OFFSETS[cell.facing % 4]!
-            const force = { x: -step.col * thrust, y: -step.row * thrust }
-
-            const rx = cell.col + 0.5 - center.x
-            const ry = cell.row + 0.5 - center.y
-
-            // The 2D cross product r × F. This single line is why placement
-            // matters: a thruster through the center contributes nothing here.
-            out.push({ 
-                force, 
-                torque: rx * force.y - ry * force.x,
-                steering: cell.steering,
-                offset: { x: rx, y: ry },
-            })
+            out.push(thrusterOf(cell, center, thrust))
         }
     }
 

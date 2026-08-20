@@ -8,7 +8,22 @@
      * this draws it, which is why the numbers can never disagree with the physics
      * that produced them.
      */
-    let { info = null }: { info?: FlightInfo | null } = $props()
+    let { info = null, onBack }: {
+        info?: FlightInfo | null
+        /** Asks the scene to go back where the ship came from. */
+        onBack: () => void
+    } = $props()
+
+    /**
+     * Where the back button goes, in words.
+     *
+     * Only ever set when a scene sent a ship here, which is what keeps the button
+     * off screen for someone who simply picked this scene from the list.
+     */
+    const HOME_LABEL: Record<string, string> = {
+        "ship-builder": "Back to builder",
+        "ship-viewer": "Back to viewer",
+    }
 
     /** Degrees per second reads better than radians for a number you watch move. */
     let spinRate = $derived(info ? (info.spin * 180) / Math.PI : 0)
@@ -20,10 +35,20 @@
         { key: "W / S", does: "burn fore and aft" },
         { key: "A / D", does: "burn sideways" },
         { key: "Q / E", does: "turn" },
+        { key: "Z", does: "flight assist" },
     ]
 </script>
 
 <div id="flight-ui">
+    <!-- Only for someone who arrived from somewhere. Picking this scene off the
+         list is not arriving from anywhere, and a button offering to send them
+         "back" to a place they have never been would mean nothing -->
+    {#if info?.returnTo}
+        <button id="back" class="panel" onclick={onBack}>
+            {HOME_LABEL[info.returnTo] ?? "Back"}
+        </button>
+    {/if}
+
     <div id="readout" class="panel">
         {#if info}
             <div class="heading">{info.name.toUpperCase()}</div>
@@ -115,6 +140,20 @@
         right: 14px;
         width: 180px;
     }
+
+    /* Opposite the readout, out of the way of the arena and of the numbers */
+    #back {
+        top: 14px;
+        left: 14px;
+        padding: 8px 12px;
+        font-family: inherit;
+        font-size: 12px;
+        font-weight: bold;
+        letter-spacing: .04em;
+        color: var(--text-color);
+        cursor: pointer;
+    }
+    #back:hover { background: var(--ui-background); }
 
     #keys {
         bottom: 14px;

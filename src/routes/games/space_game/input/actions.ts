@@ -14,6 +14,15 @@
 export const INPUT_CONTEXTS = ["global", "flight", "builder", "sprite", "viewer"] as const
 export type InputContext = (typeof INPUT_CONTEXTS)[number]
 
+/**
+ * A held key that changes what another key means.
+ *
+ * Only ctrl, because that is the one that turns a letter into a command. Shift
+ * and alt are left alone deliberately: an action that required "no shift" would
+ * stop mid-burn the moment a pilot leaned on it.
+ */
+export type Modifier = "ctrl"
+
 export interface ActionSpec {
     /** Shown in a rebinding panel, so write it for a player and not for a log. */
     label: string
@@ -34,6 +43,15 @@ export interface ActionSpec {
      * cost refresh and devtools for the sake of tidiness.
      */
     capture?: boolean
+    /**
+     * Modifiers that must be held for this to fire.
+     *
+     * An action that names none also refuses to fire while ctrl is down, so
+     * ctrl+Z is undo and not undo-and-whatever-Z-does. Meta counts as ctrl here:
+     * on a Mac the same shortcut is written with command, and a builder should
+     * not have to learn otherwise.
+     */
+    mods?: readonly Modifier[]
 }
 
 /**
@@ -65,6 +83,22 @@ export const ACTIONS = {
     "flight.toggleAssist":  { label: "Toggle flight assist", context: "flight", keys: ["KeyZ"], capture: true },
 
     /*~~~ Building a ship ~~~*/
+    // Declaration order is what the builder's key guide lists, so the ones someone
+    // reaches for first are declared first: pick a tool, pick a part, then the
+    // adjustments, then undo
+    "builder.toolBuild":   { label: "Build tool", context: "builder", keys: ["KeyB"] },
+    "builder.toolDestroy": { label: "Destroy tool", context: "builder", keys: ["KeyD"] },
+    "builder.toolSelect":  { label: "Select tool", context: "builder", keys: ["KeyS"] },
+
+    // One per category, on its own first letter. They happen not to collide -
+    // hull, thruster, cargo, generator, projector, weapon - which is luck worth
+    // spending rather than inventing a scheme nobody would remember
+    "builder.pickHull":      { label: "Pick hull", context: "builder", keys: ["KeyH"] },
+    "builder.pickThruster":  { label: "Pick thruster", context: "builder", keys: ["KeyT"] },
+    "builder.pickCargo":     { label: "Pick cargo", context: "builder", keys: ["KeyC"] },
+    "builder.pickGenerator": { label: "Pick generator", context: "builder", keys: ["KeyG"] },
+    "builder.pickProjector": { label: "Pick projector", context: "builder", keys: ["KeyP"] },
+    "builder.pickWeapon":    { label: "Pick weapon", context: "builder", keys: ["KeyW"] },
     // Rotate is one action even though it means two things: a component turns its
     // facing and structure turns its art, and which one is a property of the brush
     // rather than of the key
@@ -75,6 +109,13 @@ export const ACTIONS = {
     "builder.nextShape":  { label: "Next shape", context: "builder", keys: ["ArrowRight"], capture: true },
     "builder.layerUp":    { label: "Layer up", context: "builder", keys: ["ArrowUp"], capture: true },
     "builder.layerDown":  { label: "Layer down", context: "builder", keys: ["ArrowDown"], capture: true },
+
+    "builder.undo": {
+        label: "Undo", context: "builder", keys: ["KeyZ"], mods: ["ctrl"], capture: true,
+    },
+    "builder.redo": {
+        label: "Redo", context: "builder", keys: ["KeyY"], mods: ["ctrl"], capture: true,
+    },
 
     /*~~~ Drawing component art ~~~*/
     "sprite.rotate":     { label: "Rotate shape", context: "sprite", keys: ["KeyR"] },
@@ -90,6 +131,35 @@ export type ActionId = keyof typeof ACTIONS
 
 /** Every id in the catalogue. Declaration order, which is the order a panel lists. */
 export const ACTION_IDS = Object.keys(ACTIONS) as ActionId[]
+
+/**
+ * A key code as a player would write it: "KeyR" reads "R", "ArrowUp" reads "Up".
+ *
+ * For a guide or a rebinding panel. Codes are physical and spelled for the
+ * machine; nobody wants to read "Backquote" on a card telling them what to press.
+ */
+export function keyLabel(code: string): string {
+    if (code.startsWith("Key")) return code.slice(3)
+    if (code.startsWith("Digit")) return code.slice(5)
+    if (code.startsWith("Arrow")) return code.slice(5)
+
+    const named: Record<string, string> = {
+        Backquote: "`",
+        ControlLeft: "Ctrl",
+        ControlRight: "Ctrl",
+        MetaLeft: "Cmd",
+        MetaRight: "Cmd",
+        Space: "Space",
+    }
+
+    return named[code] ?? code
+}
+
+/** What to press for an action, modifiers included: "Ctrl+Z", "Left / Right". */
+export function keysFor(action: ActionId, codes: readonly string[]): string {
+    const prefix = specOf(action).mods?.includes("ctrl") ? "Ctrl+" : ""
+    return codes.map((code) => prefix + keyLabel(code)).join(" / ")
+}
 
 export function specOf(action: ActionId): ActionSpec {
     return ACTIONS[action]

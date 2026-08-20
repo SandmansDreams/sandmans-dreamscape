@@ -64,6 +64,7 @@ export class Renderer {
 
     private meshPipeline: Pipeline | null = null
     private meshLinesPipeline: Pipeline | null = null
+    private meshInvertPipeline: Pipeline | null = null
     private instancedPipeline: Pipeline | null = null
     private instancedLinesPipeline: Pipeline | null = null
     private instancedGlowPipeline: Pipeline | null = null
@@ -122,6 +123,25 @@ export class Renderer {
         })
 
         return this.meshPipeline
+    }
+
+    /**
+     * Triangles that come out as the negative of whatever they cover.
+     *
+     * For a marker that has to stay visible over anything: draw it white and it
+     * lands as the exact opposite of the pixels beneath, so it can never be lost
+     * against a hull that happens to be the same colour.
+     */
+    get meshInvert(): Pipeline {
+        this.meshInvertPipeline ??= Pipeline.create(this.gpu, {
+            label: "mesh 2d invert",
+            shader: this.mesh2d(),
+            layouts: [this.camera.layout],
+            vertexBuffers: [VERTEX_LAYOUT],
+            blend: "invert",
+        })
+
+        return this.meshInvertPipeline
     }
 
     /** The same vertices as a line list, for outlines and wireframes. */

@@ -7,13 +7,13 @@ import type { ShipLayer } from "./layers"
  * The categories a component appears under in the builder.
  *
  * A category is a drawer in the UI, not a thing you can place: you place a
- * `crate`, and storage is where you find it. Derived from the array so adding a
+ * `crate`, and cargo is where you find it. Derived from the array so adding a
  * category is one edit rather than two that can disagree.
  */
 export const COMPONENT_KINDS = [
     "hull", // Shape blocks, body of the ship
     "thruster",
-    "storage",
+    "cargo",
     "generator",
     "projector",
     "weapon",
@@ -43,6 +43,12 @@ export interface ComponentStats {
  * base class holds only what every component answers - the rest is the reason
  * the subclasses exist.
  */
+/** One labelled number, for a readout that has no idea what it is showing. */
+export interface StatLine {
+    label: string
+    value: string
+}
+
 export abstract class Component<S extends ComponentStats = ComponentStats> {
     /** Stable, and the key art files are named after. Never rename one lightly. */
     abstract readonly id: string
@@ -65,6 +71,18 @@ export abstract class Component<S extends ComponentStats = ComponentStats> {
 
     canGoOn(layer: ShipLayer): boolean {
         return this.layers.includes(layer)
+    }
+
+    /**
+     * Numbers beyond the ones every component has.
+     *
+     * Empty by default and overridden where a subclass has something of its own
+     * to say. This is the same reason the subclasses exist at all: what a thruster
+     * has to report is not what a crate has, and a panel that switched on the
+     * concrete class would hold every component's vocabulary instead.
+     */
+    extraStats(_level: number): readonly StatLine[] {
+        return []
     }
 
     /**
@@ -102,6 +120,10 @@ export class ThrusterComponent extends Component<ThrusterStats> {
     readonly kind = "thruster"
     readonly layers = ["components"] as const
 
+    extraStats(level: number): readonly StatLine[] {
+        return [{ label: "thrust", value: String(this.statsAt(level).thrust) }]
+    }
+
     constructor(
         readonly id: string,
         readonly name: string,
@@ -109,19 +131,19 @@ export class ThrusterComponent extends Component<ThrusterStats> {
     ) { super() }
 }
 
-export interface StorageStats extends ComponentStats {
+export interface CargoStats extends ComponentStats {
     /** Units held. What the mass penalty is paid for. */
     capacity: number
 }
 
-export class StorageComponent extends Component<StorageStats> {
-    readonly kind = "storage"
+export class CargoComponent extends Component<CargoStats> {
+    readonly kind = "cargo"
     readonly layers = ["components"] as const
 
     constructor(
         readonly id: string,
         readonly name: string,
-        readonly levels: readonly StorageStats[],
+        readonly levels: readonly CargoStats[],
     ) { super() }
 }
 
@@ -206,11 +228,11 @@ const REGISTRY: readonly Component[] = [
 
     // Storage carries its cargo's weight too, which is why its mass reads high
     // for how little it survives
-    new StorageComponent("crate", "Crate", [
+    new CargoComponent("crate", "Crate", [
         { hitPoints: 6, mass: 1, capacity: 10 },
         { hitPoints: 12, mass: 2, capacity: 25 },
     ]),
-    new StorageComponent("battery", "Battery", [
+    new CargoComponent("battery", "Battery", [
         { hitPoints: 6, mass: 2, capacity: 40 },
         { hitPoints: 12, mass: 3, capacity: 90 },
     ]),

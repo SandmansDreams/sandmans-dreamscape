@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { Ship } from "../../game/ship"
-import { canClearLayer, canEraseAt, canPlaceAt, thrusterFacings } from "./shipLegality"
+import { canClearLayer, canEraseAt, canPlaceAt, nextFacing, START_REACH, thrusterFacings } from "./shipLegality"
 
 function shipWithHull(): Ship {
     const ship = new Ship("t", "T")
@@ -10,9 +10,34 @@ function shipWithHull(): Ship {
 }
 
 describe("hull adjacency", () => {
-    it("lets the first block go anywhere", () => {
+    it("lets the first block start near the middle", () => {
         const ship = new Ship("t", "T")
-        expect(canPlaceAt(ship, "hull", 17, -4, "hull-plate").ok).toBe(true)
+
+        expect(canPlaceAt(ship, "hull", 0, 0, "hull-plate").ok).toBe(true)
+        // The corner of the box, which is the furthest a first block may go
+        expect(canPlaceAt(ship, "hull", START_REACH, -START_REACH, "hull-plate").ok).toBe(true)
+    })
+
+    it("refuses a first block out in the middle of nowhere", () => {
+        // The editor draws its marks in a small box around the origin, and a click
+        // outside it that silently worked would make those marks a lie
+        const ship = new Ship("t", "T")
+        const result = canPlaceAt(ship, "hull", 17, -4, "hull-plate")
+
+        expect(result.ok).toBe(false)
+        expect(result.reason).toContain("middle")
+    })
+
+    it("stops caring where the middle is once a block exists", () => {
+        // Only the *first* block is boxed in; a hull can grow anywhere from there
+        const ship = new Ship("t", "T")
+        ship.layers.hull.fill(0, 0, 2, 2, "full")
+
+        for (let col = 3; col < 3 + 20; col++) {
+            ship.layers.hull.set(col, 0, "full")
+        }
+
+        expect(canPlaceAt(ship, "hull", 23, 0, "hull-plate").ok).toBe(true)
     })
 
     it("refuses a block that touches nothing", () => {
@@ -162,5 +187,39 @@ describe("canClearLayer", () => {
 
         expect(canClearLayer(ship, "components").ok).toBe(true)
         expect(canClearLayer(ship, "cosmetic").ok).toBe(true)
+    })
+})
+describe("stepping a thruster's facing", () => {
+    it("advances to the next option after the one held", () => {
+        expect(nextFacing([0, 1, 2, 3], 1)).toBe(2)
+    })
+
+    it("skips the facings this cell cannot take", () => {
+        // The bug this pins: stepping by one lands on an illegal facing, which
+        // bestThrusterFacing then snaps back to the same fallback - so half the
+        // presses of R appeared to do nothing at all
+        expect(nextFacing([1, 3], 1)).toBe(3)
+        expect(nextFacing([1, 3], 3)).toBe(1)
+    })
+
+    it("wraps from the last option to the first", () => {
+        expect(nextFacing([0, 2], 2)).toBe(0)
+    })
+
+    it("moves off a facing that is not on offer", () => {
+        // Standing on an illegal facing still has to go somewhere useful
+        expect(nextFacing([1, 2], 0)).toBe(1)
+        expect(nextFacing([0, 1], 3)).toBe(0)
+    })
+
+    it("leaves the facing alone when there is nothing legal", () => {
+        expect(nextFacing([], 2)).toBe(2)
+    })
+
+    it("still moves when only one facing is legal", () => {
+        // One option means every press is the same answer, which is honest: there
+        // is one way this nozzle can point
+        expect(nextFacing([2], 2)).toBe(2)
+        expect(nextFacing([2], 0)).toBe(2)
     })
 })

@@ -1,9 +1,14 @@
 <script lang="ts">
     import { shapeSvgPath } from "../shapeSVG"
+    import { blockSvgTriangles } from "../artSVG"
+    import { Color } from "../color"
+    import type { BlockLike } from "../grid/blockDraw"
+    import { nameIssue, type Issue } from "../../game/shipReadiness"
     import { layerFor, type Brush, type BrushTool } from "../grid/brush"
     import { DRAWN_SHAPES } from "../grid/palette"
     import { turnCount, type BlockShape } from "../grid/shapes"
     import { SHIP_LAYERS } from "../grid/layers"
+    import { COMPONENT_KINDS } from "../grid/components"
     import {
         canPlace, componentById, componentsOfKind, kindOf, maxLevel, statsFor,
         type ComponentKind,
@@ -20,9 +25,10 @@
     import clearLayerIconSRC from "../../assets/icons/SpaceGame-X.png"
     import clearAllIconSRC from "../../assets/icons/SpaceGame-Bomb.png"
     import arrowIconSRC from "../../assets/icons/SpaceGame-Arrow.png"
+    import testIconSRC from "../../assets/icons/SpaceGame-Test.png"
     import hullIconSRC from "../../assets/icons/SpaceGame-Hull.png"
     import thrusterIconSRC from "../../assets/icons/SpaceGame-Thruster.png"
-    import storageIconSRC from "../../assets/icons/SpaceGame-Storage.png"
+    import cargoIconSRC from "../../assets/icons/SpaceGame-Storage.png"
     import generatorIconSRC from "../../assets/icons/SpaceGame-Generator.png"
     import projectorIconSRC from "../../assets/icons/SpaceGame-Projector.png"
     import weaponIconSRC from "../../assets/icons/SpaceGame-Weapon.png"
@@ -35,7 +41,7 @@
      * are the scene's, rendered here; every control asks for a change and waits
      * to be told what happened, so there is no local copy to fall out of step.
      */
-    let { brush, palette = [], shipInfo = null, selected = null, notice = null, layerView = null, onPatch, onAction, onUpgrade, onSteering, onHighlight, onLayerView }: {
+    let { brush, palette = [], shipInfo = null, selected = null, notice = null, layerView = null, onPatch, onAction, onUpgrade, onSteering, onHighlight, onLayerView, onIdentity, onModal, lit = false, onLit, keyGuide = [] }: {
         brush: Brush
         /** Hex colors currently used in the ship, published by the scene. */
         palette?: string[]
@@ -53,6 +59,21 @@
         onLayerView: (patch: Record<string, LayerView>) => void
         /** Flips whether the selected thruster is used for turning. */
         onSteering: (steering: boolean) => void
+        /**
+         * Renames the ship, or its creator.
+         *
+         * A patch rather than a whole identity, so the two fields never overwrite
+         * each other with a stale copy of the one that was not being typed in.
+         */
+        onIdentity: (patch: { name?: string; creator?: string }) => void
+        /** Raised while a dialog is covering the scene, lowered when it closes. */
+        onModal: (open: boolean) => void
+        /** True while the ship is drawn lit rather than in flat colours. */
+        lit?: boolean
+        /** Switches the lighting preview. */
+        onLit: (next: boolean) => void
+        /** Every builder shortcut as it is currently bound. */
+        keyGuide?: { keys: string; does: string }[]
     } = $props()
 
     /** What each control does, in the words someone who has not read the code would use. */
@@ -65,6 +86,7 @@
         clear: "Empty the current layer",
         clearAll: "Empty every layer",
         upload: "Load a ship from a file",
+        test: "Fly this ship, then come back to it",
         download: "Save this ship to a file",
     }
 
@@ -94,6 +116,41 @@
      */
     let tip = $state<{ text: string; x: number; y: number; below: boolean } | null>(null)
 
+    /** True while the download dialog is up. Nothing is written until it closes. */
+    let confirmingDownload = $state(false)
+
+    /**
+     * Tells the scene to stop reading the keyboard while a dialog is up.
+     *
+     * The backdrop already keeps the pointer off the grid, but the scene polls
+     * keys from the window and has no way to know a dialog is covering it, so
+     * pressing T behind the dialog would quietly switch the brush.
+     */
+    $effect(() => {
+        onModal(confirmingDownload)
+    })
+
+    /**
+     * Everything wrong with the ship right now, including the name being typed.
+     *
+     * The scene reports what is wrong with the hull; the name is this panel's,
+     * because the field holding it is. Composed here rather than in either place
+     * alone, which is why the rule for it is its own exported function.
+     */
+    let downloadIssues = $derived.by((): Issue[] => {
+        const structural = shipInfo?.issues ?? []
+
+        // An empty grid says one thing and stops - piling "and name it" onto that
+        // is not help, it is a list
+        if (structural[0]?.id === "empty") return structural
+
+        const named = nameIssue(shipInfo?.name ?? "")
+        return named ? [named, ...structural] : structural
+    })
+
+    /** The rich tip: an enlarged sprite and the numbers behind it. */
+    let card = $state<{ type: string; x: number; y: number; below: boolean } | null>(null)
+
     /**
      * What the accent picker shows before one has been chosen.
      *
@@ -106,8 +163,32 @@
     /** Enough room for a two-line tip; below that it flips above the control. */
     const TIP_ROOM = 70
 
+    /** The same, for the taller sprite card. */
+    const CARD_ROOM = 210
+
     function trackTip(event: Event) {
-        const found = (event.target as HTMLElement | null)?.closest?.("[data-tip]")
+        const target = event.target as HTMLElement | null
+
+        // The card wins wherever both could apply: it says everything the text tip
+        // would and shows the piece as well
+        const sprite = target?.closest?.("[data-sprite]")
+        if (sprite instanceof HTMLElement && sprite.dataset.sprite) {
+            const box = sprite.getBoundingClientRect()
+            const room = box.bottom + CARD_ROOM < window.innerHeight
+
+            tip = null
+            card = {
+                type: sprite.dataset.sprite,
+                x: box.left + box.width / 2,
+                y: room ? box.bottom + 8 : box.top - 8,
+                below: room,
+            }
+            return
+        }
+
+        card = null
+
+        const found = target?.closest?.("[data-tip]")
         const text = found instanceof HTMLElement ? found.dataset.tip : null
 
         if (!found || !text) {
@@ -271,11 +352,6 @@
         return () => clearTimeout(timer)
     })
 
-    /** 1..max for a type, which is how far it upgrades. */
-    function levelsOf(type: string): number[] {
-        return Array.from({ length: maxLevel(type) }, (_, index) => index + 1)
-    }
-
     /**
      * The orientation a swatch draws at.
      *
@@ -290,6 +366,36 @@
     function swatchMirrored(shape: BlockShape): boolean {
         return shape === brush.shape && brush.mirrored
     }
+
+    /**
+     * What a tray swatch draws: this type, at the level a click would place.
+     *
+     * Painted in the brush's own colours, so the tray previews the piece as it
+     * will land on the ship rather than in whatever palette the artist used.
+     */
+    function swatchBlock(type: string): BlockLike {
+        return {
+            shape: "full",
+            turns: 0,
+            mirrored: false,
+            type,
+            facing: 0,
+            level: Math.min(brush.level, maxLevel(type)),
+            color: Color.from(brush.color),
+            // Empty means "leave the art's own accent alone", same as a placed cell
+            accentColor: brush.accentColor === "" ? null : Color.from(brush.accentColor),
+        }
+    }
+
+    /**
+     * The tray's sprites, rebuilt only when the brush changes how they look.
+     *
+     * Derived rather than built in the markup: re-tessellating a tray of turrets
+     * on every hover would be most of a frame for a result that did not change.
+     */
+    let traySprites = $derived(
+        types.map((type) => ({ type, triangles: blockSvgTriangles(swatchBlock(type.id)) })),
+    )
 </script>
 
 <!-- mouseover/mouseout rather than enter/leave, and focusin/focusout rather than
@@ -317,6 +423,101 @@
             style={`left: ${tip.x}px; top: ${tip.y}px; transform: translateX(-50%) ${tip.below ? "" : "translateY(-100%)"}`}
         >
             {tip.text}
+        </div>
+    {/if}
+
+    <!-- Out here with the tip, and for the same reason: every panel clips its
+         overflow, and the ones that matter carry a transform -->
+    {#if card}
+        {@const component = componentById(card.type)}
+        {@const level = Math.min(brush.level, component.maxLevel)}
+        {@const stats = component.statsAt(level)}
+
+        <div
+            id="sprite-card"
+            style={`left: ${card.x}px; top: ${card.y}px; transform: translateX(-50%) ${card.below ? "" : "translateY(-100%)"}`}
+        >
+            <svg class="card-art" viewBox="0 0 100 100" aria-hidden="true">
+                {#each blockSvgTriangles(swatchBlock(card.type)) as triangle, index (index)}
+                    <polygon points={triangle.points} fill={triangle.fill} />
+                {/each}
+            </svg>
+
+            <div class="card-body">
+                <div class="card-name">{component.name}</div>
+                <div class="card-kind">{component.kind} &middot; L{level} of {component.maxLevel}</div>
+
+                <dl class="readout">
+                    <dt>hp</dt><dd>{stats.hitPoints}</dd>
+                    <dt>mass</dt><dd>{stats.mass}</dd>
+                    {#each component.extraStats(level) as line (line.label)}
+                        <dt>{line.label}</dt><dd>{line.value}</dd>
+                    {/each}
+                </dl>
+            </div>
+        </div>
+    {/if}
+
+    <!-- The last look before a file is written. The name and creator are the live
+         settings, so editing them here is editing the ship, not a copy of it that
+         has to be applied on confirm -->
+    {#if confirmingDownload && shipInfo}
+        <div id="download-backdrop" role="presentation" onclick={() => (confirmingDownload = false)}></div>
+
+        <div id="download-dialog" role="dialog" aria-label="Confirm download">
+            <div class="heading">DOWNLOAD SHIP</div>
+
+            <div class="dialog-body">
+                <label class="field">
+                    <span>name</span>
+                    <input
+                        value={shipInfo.name}
+                        oninput={(e) => onIdentity({ name: e.currentTarget.value })}
+                    />
+                </label>
+                <label class="field">
+                    <span>by</span>
+                    <input
+                        value={shipInfo.creator}
+                        oninput={(e) => onIdentity({ creator: e.currentTarget.value })}
+                    />
+                </label>
+
+                <dl class="readout">
+                    <dt>mass</dt><dd>{shipInfo.mass}</dd>
+                    <dt>blocks</dt><dd>{shipInfo.blocks}</dd>
+                    <dt>size</dt><dd>{shipInfo.width}x{shipInfo.height}</dd>
+                    {#each SHIP_LAYERS as layer (layer)}
+                        <dt>{layer}</dt><dd>{shipInfo.perLayer[layer]}</dd>
+                    {/each}
+                    {#each COMPONENT_KINDS as kind (kind)}
+                        {#if kind !== "hull"}
+                            <dt>{kind}</dt><dd>{shipInfo.perKind[kind]}</dd>
+                        {/if}
+                    {/each}
+                </dl>
+
+                <!-- Listed rather than reduced to "not ready": three things wrong
+                     should be said once, not found one download at a time -->
+                {#if downloadIssues.length > 0}
+                    <ul id="download-issues">
+                        {#each downloadIssues as issue (issue.id)}
+                            <li>{issue.message}</li>
+                        {/each}
+                    </ul>
+                {/if}
+            </div>
+
+            <div class="dialog-actions">
+                <button onclick={() => (confirmingDownload = false)}>Cancel</button>
+                <button
+                    class="confirm"
+                    disabled={downloadIssues.length > 0}
+                    onclick={() => { confirmingDownload = false; onAction("download") }}
+                >
+                    Download
+                </button>
+            </div>
         </div>
     {/if}
 
@@ -378,7 +579,11 @@
                 <img class="image-icon" src={arrowIconSRC} alt="redo.png">
                 UPLOAD
             </button>
-            <button class="icon-button" onclick={() => onAction("download")} data-tip={TIPS.download}>
+            <button class="icon-button" onclick={() => onAction("test")} data-tip={TIPS.test}>
+                <img class="image-icon" src={testIconSRC} alt="test.png">
+                TEST
+            </button>
+            <button class="icon-button" onclick={() => (confirmingDownload = true)} data-tip={TIPS.download}>
                 <img class="image-icon" src={arrowIconSRC} style="transform: scaleY(-1)" alt="redo.png">
                 DOWNLOAD
             </button>
@@ -400,15 +605,15 @@
                 HULL
             </button>
             <button 
-                class={`icon-button ${picking && brushKind === "storage" ? "active" : ""}`} 
-                onclick={() => selectKind("storage")}
-                onmouseenter={() => (hoveredType = firstTypeOf("storage"))}
+                class={`icon-button ${picking && brushKind === "cargo" ? "active" : ""}`} 
+                onclick={() => selectKind("cargo")}
+                onmouseenter={() => (hoveredType = firstTypeOf("cargo"))}
                 onmouseleave={() => (hoveredType = null)}
-                title={"storage"}
-                aria-label={"storage"}
+                title={"cargo"}
+                aria-label={"cargo"}
             >
-                <img class="image-icon" src={storageIconSRC} alt="storage.png">
-                STORAGE
+                <img class="image-icon" src={cargoIconSRC} alt="cargo.png">
+                CARGO
             </button>
             <button 
                 class={`icon-button ${picking && brushKind === "thruster" ? "active" : ""}`} 
@@ -456,43 +661,8 @@
             </button>
         </div>
 
-        <!-- Only shown when there is a choice to make: a category with one model
-             is already named by the heading below, and a tray of one is noise -->
-        {#if types.length > 1}
-            <div class="heading">MODEL</div>
-            <div id="types">
-                {#each types as type (type.id)}
-                    <button
-                        class={`type-row ${picking && brush.type === type.id ? "active" : ""}`}
-                        onclick={() => selectType(type.id)}
-                        onmouseenter={() => (hoveredType = type.id)}
-                        onmouseleave={() => (hoveredType = null)}
-                        title={type.name}
-                    >
-                        {type.name}
-                    </button>
-                {/each}
-            </div>
-        {/if}
-
         <!-- Only a machine has grades to choose between; structure has shapes,
              and those live in the tray along the bottom -->
-        {#if placingComponent}
-            <div class="heading">{componentById(brush.type).name.toUpperCase()}</div>
-            <div id="levels">
-                {#each levelsOf(brush.type) as level (level)}
-                    <button
-                        class={`level-swatch ${brush.level === level ? "active" : ""}`}
-                        onclick={() => set({ level })}
-                        onmouseenter={() => (hoveredType = brush.type)}
-                        onmouseleave={() => (hoveredType = null)}
-                    >
-                        <span class="roman">L{level}</span>
-                        <span class="sub">{statsFor(brush.type, level).hitPoints}hp</span>
-                    </button>
-                {/each}
-            </div>
-        {/if}
         <div class="heading">{placingComponent ? "MAIN COLOR" : "COLOR"}</div>
         <input
             id="build-color"
@@ -501,35 +671,39 @@
             oninput={(e) => set({ color: e.currentTarget.value })}
         />
 
-        <!-- Only components have an accent: hull art is one colour, and offering a
-             second picker there would imply something the block cannot do -->
-        {#if placingComponent}
-            <div class="heading">ACCENT</div>
+        <!-- Always offered, so the two pickers do not shuffle up and down the panel
+             as the category changes. It only reaches art, so on a plain shape it
+             sets a colour nothing draws with - harmless, and worth less than a
+             control that stays where you left it -->
+        <div class="heading">ACCENT</div>
             <input
                 id="build-accent"
                 type="color"
                 value={brush.accentColor === "" ? DEFAULT_ACCENT_SWATCH : brush.accentColor}
                 oninput={(e) => set({ accentColor: e.currentTarget.value })}
             />
-            <button
-                class="accent-reset"
-                onclick={() => set({ accentColor: "" })}
-                disabled={brush.accentColor === ""}
-                data-tip="Use the colour the art was drawn with"
-            >
-                {brush.accentColor === "" ? "using art's accent" : "reset to art"}
-            </button>
-        {/if}
+        <button
+            class="accent-reset"
+            onclick={() => set({ accentColor: "" })}
+            disabled={brush.accentColor === ""}
+            data-tip="Use the colour the art was drawn with"
+        >
+            {brush.accentColor === "" ? "using art's accent" : "reset to art"}
+        </button>
 
-        <div class="heading">EMISSION</div>
-        <div class="slider-row">
-            <input
-                type="range" min="0" max="1" step="0.05"
-                value={brush.emission}
-                oninput={(e) => set({ emission: e.currentTarget.valueAsNumber })}
-            />
-            <span class="slider-value">{brush.emission.toFixed(2)}</span>
-        </div>
+        <!-- Structure only. A component's glow is the artist's, not the builder's -
+             see emissionFor in the scene, which is what actually enforces it -->
+        {#if !placingComponent}
+            <div class="heading">EMISSION</div>
+            <div class="slider-row">
+                <input
+                    type="range" min="0" max="1" step="0.05"
+                    value={brush.emission}
+                    oninput={(e) => set({ emission: e.currentTarget.valueAsNumber })}
+                />
+                <span class="slider-value">{brush.emission.toFixed(2)}</span>
+            </div>
+        {/if}
         <div class="heading">PALETTE</div>
         <div id="palette">
             {#each palette as entry (entry)}
@@ -551,12 +725,41 @@
         </div>
     </div>
 
+    <!-- Top right, above the readout: a card you glance at while your other hand
+         is on the keyboard, not something to read through -->
+    {#if keyGuide.length > 0}
+        <div id="key-guide" class="panel">
+            <div class="heading">KEYS</div>
+            <dl class="readout">
+                {#each keyGuide as entry (entry.does)}
+                    <dt>{entry.keys}</dt><dd>{entry.does}</dd>
+                {/each}
+            </dl>
+        </div>
+    {/if}
+
     <div id="info-panel" class="panel">
         <div class="heading">SHIP</div>
         {#if shipInfo}
             <dl class="readout">
-                <dt>name</dt><dd>{shipInfo.name}</dd>
-                <dt>by</dt><dd>{shipInfo.creator}</dd>
+                <dt>name</dt>
+                <dd>
+                    <input
+                        class="identity-input"
+                        value={shipInfo.name}
+                        oninput={(e) => onIdentity({ name: e.currentTarget.value })}
+                        aria-label="Ship name"
+                    />
+                </dd>
+                <dt>by</dt>
+                <dd>
+                    <input
+                        class="identity-input"
+                        value={shipInfo.creator}
+                        oninput={(e) => onIdentity({ creator: e.currentTarget.value })}
+                        aria-label="Creator"
+                    />
+                </dd>
                 <dt>mass</dt><dd>{shipInfo.mass}</dd>
                 <dt>blocks</dt><dd>{shipInfo.blocks}</dd>
                 <dt>size</dt><dd>{shipInfo.width}x{shipInfo.height}</dd>
@@ -604,6 +807,25 @@
                         <span class="layer-row static-row">markers</span>
                     {/if}
                 </div>
+
+                <!-- Under markers, because it belongs with it: neither is a layer
+                     of the ship, both only change how what is there is drawn. Its
+                     eye is two-state, since a half-lit ship means nothing -->
+                {#if layer === "markers"}
+                    <div class="layer-line">
+                        <button
+                            class={`eye ${lit ? "" : "off"}`}
+                            onclick={() => onLit(!lit)}
+                            data-tip={lit
+                                ? "Previewing the ship lit. Click for flat colours"
+                                : "Flat colours, for building. Click to preview it lit"}
+                            aria-label="lighting preview"
+                        >
+                            <img class="eye-icon" src={lit ? circleFilledIconSRC : circleEmptyIconSRC} alt="">
+                        </button>
+                        <span class="layer-row static-row">lighting</span>
+                    </div>
+                {/if}
             {/each}
         </div>
 
@@ -657,22 +879,46 @@
     </div>
 
     <div id="bottom-panel" class="panel">
-        {#each DRAWN_SHAPES as shape (shape)}
-            <button
-                class={`shape-swatch wide ${picking && brush.shape === shape ? "active" : ""}`}
-                onclick={() => selectShape(shape)}
-                title={shape}
-                aria-label={shape}
-            >
-                <svg class="shape-svg" viewBox="0 0 100 100" aria-hidden="true">
-                    <path
-                        d={shapeSvgPath(shape, swatchTurns(shape), swatchMirrored(shape))}
-                        fill={brush.color}
-                    />
-                </svg>
-                <!--<span class="component-name">{shape}</span>-->
-            </button>
-        {/each}
+        {#if placingComponent}
+            <!-- The models in this category, drawn as what they actually place.
+                 One per model and not per level: levels are their own row, and a
+                 tray of five autocannons differing by a digit is not a choice.
+
+                 No `title`, because a native tooltip would race the card below
+                 and win -->
+            {#each traySprites as entry (entry.type.id)}
+                <button
+                    class={`shape-swatch wide ${picking && brush.type === entry.type.id ? "active" : ""}`}
+                    onclick={() => selectType(entry.type.id)}
+                    onmouseenter={() => (hoveredType = entry.type.id)}
+                    onmouseleave={() => (hoveredType = null)}
+                    data-sprite={entry.type.id}
+                    aria-label={entry.type.name}
+                >
+                    <svg class="shape-svg" viewBox="0 0 100 100" aria-hidden="true">
+                        {#each entry.triangles as triangle, index (index)}
+                            <polygon points={triangle.points} fill={triangle.fill} />
+                        {/each}
+                    </svg>
+                </button>
+            {/each}
+        {:else}
+            {#each DRAWN_SHAPES as shape (shape)}
+                <button
+                    class={`shape-swatch wide ${picking && brush.shape === shape ? "active" : ""}`}
+                    onclick={() => selectShape(shape)}
+                    title={shape}
+                    aria-label={shape}
+                >
+                    <svg class="shape-svg" viewBox="0 0 100 100" aria-hidden="true">
+                        <path
+                            d={shapeSvgPath(shape, swatchTurns(shape), swatchMirrored(shape))}
+                            fill={brush.color}
+                        />
+                    </svg>
+                </button>
+            {/each}
+        {/if}
     </div>
 </div>
 
@@ -836,7 +1082,11 @@
         padding: 5px 6px;
     }
     .slider-row input[type="range"] {
-        flex: 1;
+        /* Zero basis, then grow. A range input carries an intrinsic width of its
+           own, and this panel is shrink-to-fit, so leaving it would make the panel
+           jump wider the moment the emission row appeared */
+        width: 0;
+        flex: 1 1 0;
         min-width: 0;
         accent-color: var(--text-color);
     }
@@ -849,72 +1099,62 @@
     .shape-swatch {
         border: 1px solid var(--ui-separator);
         border-radius: 0;
-        width: 100%;
+        width: 50px;
+        height: 50px;
         margin: 0;
+        /* Overriding the padding every button gets by default, which is what was
+           holding the art off the edges - a 100% svg only fills the content box */
+        padding: 0;
         aspect-ratio: 1 / 1;
         background: transparent;
     }
     .shape-swatch:hover { background: rgba(0, 191, 255, 0.2); }
     .shape-swatch.active { background: rgba(0, 255, 64, 0.22); }
-    .shape-svg { width: 100%; height: 100%; display: block; aspect-ratio: 1/1; padding: 0;}
+    .shape-svg { 
+        width: 100%; 
+        height: 100%; 
+        width: 50px;
+        height: 50px;
+        display: block; 
+        aspect-ratio: 1/1; 
+        padding: 0;
+    }
 
     /* The bottom tray runs sideways, so its swatches are fixed-width columns with
        a name under the art rather than cells in a grid */
     .shape-swatch.wide {
         display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 2px;
         width: 50px;
         flex-shrink: 0;
-        aspect-ratio: auto;
-        border-radius: 5px;
-        aspect-ratio: 1/1
-    }
-    .shape-swatch.wide .shape-svg { width: 30px; height: 30px; padding: 0;}
-
-    /* Two across, same square cells as the shapes had - a placement is picked the
-       same way a shape is, and the column is only wide enough for two */
-    #placements { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px}
-    .placement-swatch {
-        border: 1px solid var(--ui-separator);
         border-radius: 0;
-        width: 100%;
-        margin: 0;
         aspect-ratio: 1 / 1;
-        padding: 0;
-        background: transparent;
     }
-    .placement-swatch:hover { background: rgba(0, 191, 255, 0.2); }
-    .placement-swatch.active { background: rgba(0, 255, 64, 0.22); }
+    /* Filling the button rather than sitting inside it, so a sprite and a shape
+       are drawn at the same scale - both viewBoxes are the same 100 unit box, so
+       the only thing that could differ is how much of the button each one gets */
+    .shape-swatch.wide .shape-svg { width: 100%; height: 100%; padding: 0; }
 
-    /* Stacked and full width, like the layer rows: a model is picked by its
-       name, and names do not fit in a swatch */
-    #types { display: flex; flex-direction: column; }
-    .type-row {
-        border-radius: 0;
-        border: 1px solid var(--ui-separator);
-        background: transparent;
-        font-size: 12px;
-        text-align: left;
-        padding: .3rem .5rem;
-    }
-    .type-row:hover { background: rgba(0, 191, 255, 0.2); }
+    /* One down the column: a category is picked by its name as much as its icon,
+       and a single column gives the name room to sit beside the art */
+    #placements { display: grid; grid-template-columns: 1fr; gap: 1px}
 
-    #levels { display: flex; flex-direction: column; }
-    .level-swatch {
-        display: flex;
-        justify-content: space-between;
-        align-items: baseline;
-        border-radius: 0;
-        border: 1px solid var(--ui-separator);
-        background: transparent;
-        padding: .3rem .5rem;
+    /* Rows rather than the square tiles the toolbar uses. Scoped to this list,
+       because .icon-button is shared with the toolbar across the top, where the
+       stacked column is right. Six squares at full panel width would not fit the
+       panel, which is the whole reason this is a row */
+    #placements .icon-button {
+        flex-direction: row;
+        justify-content: flex-start;
+        gap: 8px;
+        width: 100%;
+        height: 50px;
+        padding: 3px 8px;
     }
-    .level-swatch:hover { background: rgba(0, 191, 255, 0.2); }
-    .roman { font-size: 13px; }
-    .sub { font-size: 10px; opacity: .6; }
+    #placements .image-icon {
+        width: 48px;
+        height: 48px;
+        margin-bottom: 0;
+    }
 
     #palette {
         display: grid;
@@ -934,14 +1174,34 @@
     .palette-swatch.active { border-color: var(--active); }
 
     /*~~~ Right: ship, layers, block or hovered kind ~~~*/
+    /* The readout drops below the guide rather than staying centred, so the two
+       never overlap on a short window */
     #info-panel {
         right: 14px;
-        top: 50%;
-        transform: translateY(-50%);
+        top: 340px;
         width: 186px;
-        max-height: 74vh;
+        max-height: calc(100vh - 370px);
         overflow-y: auto;
     }
+
+    /* Below the toolbar, not beside it: the toolbar is centred and wide enough to
+       reach this corner, and a guide over the download button is worse than one
+       an inch lower */
+    #key-guide {
+        right: 14px;
+        top: 133px;
+        width: 186px;
+        max-height: 190px;
+        overflow-y: auto;
+    }
+    /* Keys left, what they do right - the opposite of the readouts, because here
+       the key is what you are looking up */
+    #key-guide .readout {
+        grid-template-columns: auto 1fr;
+        font-size: 11px;
+    }
+    #key-guide dt { font-weight: bold; }
+    #key-guide dd { opacity: .7; text-align: right; }
 
     .readout {
         display: grid;
@@ -951,6 +1211,9 @@
         padding: 6px 8px;
         font-size: 12px;
     }
+    /* A grid item will not shrink below its content's intrinsic width unless it
+       is told to, and an input's is wide enough to push the value off the panel */
+    .readout dd { min-width: 0; }
     .readout dt { opacity: .6; }
     .readout dd {
         margin: 0;
@@ -1099,6 +1362,120 @@
         box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
         pointer-events: none;
     }
+
+    /* Dimmed rather than blacked out: the ship you are about to save should still
+       be visible behind the dialog describing it */
+    #download-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 200;
+        background: rgba(0, 0, 0, 0.55);
+        /* Taken back from the overlay, which switches them off so the canvas can
+           be drawn on. Without this the dialog is a picture: clicks fall straight
+           through it and keep building the ship behind. Covering the canvas is
+           also what makes this modal - a stray click cannot reach the grid */
+        pointer-events: auto;
+    }
+    #download-dialog {
+        position: fixed;
+        z-index: 201;
+        pointer-events: auto;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 300px;
+        color: var(--text-color);
+        background: var(--ui-background-dark);
+        border: 1px solid var(--ui-border);
+        border-radius: 6px;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.7);
+        overflow: hidden;
+    }
+    .dialog-body { padding: 4px 0; }
+    .field {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 8px;
+        font-size: 12px;
+    }
+    .field span { opacity: .7; }
+    .field input, .identity-input {
+        width: 100%;
+        min-width: 0;
+        /* Or the padding and border are added to the 100% and the value is pushed
+           out past the panel, which clips it */
+        box-sizing: border-box;
+        padding: 2px 4px;
+        font-family: inherit;
+        font-size: 12px;
+        font-weight: bold;
+        text-align: right;
+        color: var(--text-color);
+        background: rgba(0, 0, 0, .35);
+        border: 1px solid var(--ui-separator);
+        border-radius: 3px;
+    }
+    .field input:focus, .identity-input:focus {
+        outline: none;
+        border-color: var(--text-color);
+    }
+    #download-issues {
+        margin: 4px 8px 8px;
+        padding-left: 16px;
+        font-size: 11px;
+        line-height: 1.4;
+        color: #ffb0b0;
+    }
+    .dialog-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 6px;
+        padding: 8px;
+        border-top: 1px solid var(--ui-separator);
+    }
+    .dialog-actions button { font-size: 12px; }
+    .dialog-actions .confirm:not(:disabled) { background: rgba(0, 255, 64, 0.22); }
+    .dialog-actions .confirm:disabled { opacity: .45; cursor: default; }
+
+    #sprite-card {
+        position: fixed;
+        z-index: 100;
+        display: flex;
+        gap: 10px;
+        width: max-content;
+        padding: 8px 10px;
+        font-size: 11px;
+        font-weight: normal;
+        color: var(--text-color);
+        background: var(--ui-background-dark);
+        border: 1px solid var(--ui-border);
+        border-radius: 4px;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
+        pointer-events: none;
+    }
+    /* Big enough to read the art rather than guess at it, which is the whole
+       point of the card over the one-line tip */
+    .card-art {
+        width: 72px;
+        height: 72px;
+        background: rgba(0, 0, 0, .35);
+        border-radius: 3px;
+    }
+    .card-body {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 118px;
+    }
+    .card-name { font-weight: bold; }
+    .card-kind {
+        opacity: .6;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+    }
+    #sprite-card .readout { margin-top: 4px; }
 
     /* One row per layer: the eye acts on what is drawn, the row on what is built */
     .layer-line { display: flex; align-items: stretch; }

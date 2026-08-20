@@ -5,7 +5,7 @@ import { DEFAULT_FONT } from "../font"
 import type { Vec2 } from "../camera"
 import { componentById, kindOf, type ComponentKind } from "./components"
 import type { Cell, Grid } from "./grid"
-import { appendShape, type BlockShape } from "./shapes"
+import { appendShape, trianglesCover, type BlockShape } from "./shapes"
 import { appendTriangleOutline } from "./gridOutline"
 import { FLOATS_PER_VERTEX, MeshBuilder } from "../mesh"
 import { findArt } from "../../assets/components"
@@ -23,7 +23,7 @@ import { ART_LAYERS, ART_ROLES, type ArtRole } from "./spriteMesh"
 export const KIND_LETTER: Record<ComponentKind, string> = {
     hull: "",
     thruster: "T",
-    storage: "S",
+    cargo: "C",
     generator: "G",
     projector: "P",
     weapon: "W",
@@ -295,6 +295,47 @@ export function appendLayer(
         const { x, y } = cellCorner(cell, cellSize, origin)
         appendBlock(builder, cell, x, y, cellSize, fade, fadeTo)
     }
+}
+
+/**
+ * The triangles a block draws, in a unit cell, cached by what decides them.
+ *
+ * Hit-testing runs every frame the cursor moves, across every layer, and a
+ * turret is a few hundred triangles - re-tessellating it per frame to answer
+ * "is the cursor on it" would be most of a frame for an answer that never
+ * changes. Colour is normalised out because it moves no vertex.
+ */
+const COVER_CACHE = new Map<string, Float32Array>()
+
+function coverTriangles(block: BlockLike): Float32Array {
+    const key = `${block.type}|${block.level}|${block.facing}|`
+        + `${block.shape}|${block.turns}|${block.mirrored}`
+
+    const cached = COVER_CACHE.get(key)
+    if (cached) return cached
+
+    const builder = new MeshBuilder()
+    appendBlock(builder, { ...block, color: Color.WHITE, accentColor: null }, 0, 0, 1)
+
+    const data = builder.toArray()
+    COVER_CACHE.set(key, data)
+    return data
+}
+
+/**
+ * True when a point inside a cell lands on the block actually drawn there.
+ *
+ * Tested against the triangles `appendBlock` emits, which is the only honest
+ * answer: a turret with a narrow barrel leaves real space around it, and pointing
+ * at that space means pointing at the hull underneath. Testing the cell's `shape`
+ * instead was worse than wrong for a component - that field is brush leftovers
+ * nothing renders, so a battery answered for a quarter of itself.
+ *
+ * @param u across the cell, 0 at its left edge and 1 at its right
+ * @param v down the cell, 0 at its top edge and 1 at its bottom
+ */
+export function blockCovers(block: BlockLike, u: number, v: number): boolean {
+    return trianglesCover(coverTriangles(block), u, v)
 }
 
 /**

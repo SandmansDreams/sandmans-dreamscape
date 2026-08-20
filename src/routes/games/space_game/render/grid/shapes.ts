@@ -1,7 +1,7 @@
 // The geometry for every block shape, each defined once in a canonical orientation
 
-import type { MeshBuilder } from "../mesh"
-import type { Color } from "../color"
+import { FLOATS_PER_VERTEX, MeshBuilder } from "../mesh"
+import { Color } from "../color"
 
 export const BLOCK_SHAPES = [
     "empty",
@@ -102,6 +102,77 @@ interface CellFrame {
 const scratch: number[] = []
 
 // Append shape to MeshBuilder for rendering
+/**
+ * True when a point inside a cell lands on the shape actually drawn there.
+ *
+ * Measured against the triangles `appendShape` emits rather than against a
+ * description of the shape, so a half block, an arc and a wedge all answer
+ * correctly without anyone writing three hit tests - and a shape added later
+ * answers correctly for free.
+ *
+ * @param u across the cell, 0 at its left edge and 1 at its right
+ * @param v down the cell, 0 at its top edge and 1 at its bottom
+ */
+export function shapeCovers(
+    shape: BlockShape,
+    turns: number,
+    mirrored: boolean,
+    u: number,
+    v: number,
+): boolean {
+    if (shape === "empty") return false
+
+    const builder = new MeshBuilder()
+    appendShape(builder, shape, turns, mirrored, 0, 0, 1, HIT_COLOR)
+
+    return trianglesCover(builder.toArray(), u, v)
+}
+
+/** True when (u, v) lands on any triangle in an interleaved vertex array. */
+export function trianglesCover(data: Float32Array, u: number, v: number): boolean {
+    const stride = FLOATS_PER_VERTEX * 3
+
+    for (let i = 0; i + stride <= data.length; i += stride) {
+        const covered = inTriangle(
+            u, v,
+            data[i]!, data[i + 1]!,
+            data[i + 5]!, data[i + 6]!,
+            data[i + 10]!, data[i + 11]!,
+        )
+
+        if (covered) return true
+    }
+
+    return false
+}
+
+/** The colour is irrelevant to a hit test; this only exists to satisfy the call. */
+const HIT_COLOR = Color.WHITE
+
+/**
+ * Point in triangle, by the sign of three edge cross products.
+ *
+ * Accepts either winding: these come from a mix of fans and quads, and demanding
+ * one orientation would make half the shapes untouchable.
+ */
+export function inTriangle(
+    px: number, py: number,
+    ax: number, ay: number,
+    bx: number, by: number,
+    cx: number, cy: number,
+): boolean {
+    const d1 = (px - bx) * (ay - by) - (ax - bx) * (py - by)
+    const d2 = (px - cx) * (by - cy) - (bx - cx) * (py - cy)
+    const d3 = (px - ax) * (cy - ay) - (cx - ax) * (py - ay)
+
+    const negative = d1 < 0 || d2 < 0 || d3 < 0
+    const positive = d1 > 0 || d2 > 0 || d3 > 0
+
+    // On an edge every product is zero, which counts as inside - a point on the
+    // seam between two triangles of the same shape belongs to the shape
+    return !(negative && positive)
+}
+
 export function appendShape(
     builder: MeshBuilder,
     shape: BlockShape,

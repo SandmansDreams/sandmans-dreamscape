@@ -37,7 +37,7 @@ export interface Brush {
     shape: BlockShape
     turns: number
     mirrored: boolean
-    /** A registry id, so the brush names a crate rather than "some storage". */
+    /** A registry id, so the brush names a crate rather than "some cargo". */
     type: string
     level: number
     /** 0-3 as N/E/S/W. */

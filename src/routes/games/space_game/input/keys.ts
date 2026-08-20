@@ -200,6 +200,15 @@ export class KeyboardInput {
 
     private readonly held = new Set<string>()
     private readonly downEdges = new Set<string>()
+    /**
+     * Codes that went down while a command modifier was held.
+     *
+     * Recorded at the press rather than read at the poll, because the two are not
+     * the same moment: a chord tapped and released inside one frame - which at
+     * 30Hz is any brisk ctrl+Z - would be read with ctrl already back up, and the
+     * shortcut would simply not fire.
+     */
+    private readonly ctrlEdges = new Set<string>()
     private readonly upEdges = new Set<string>()
     private readonly detach: (() => void)[] = []
 
@@ -220,6 +229,9 @@ export class KeyboardInput {
             // Letting it through makes pressed() true on frame after frame, so a
             // once-per-press action fires dozens of times from one press
             if (event.repeat) return
+
+            // Before the code is added, so a modifier does not count itself
+            if (this.ctrl) this.ctrlEdges.add(event.code)
 
             this.held.add(event.code)
             this.downEdges.add(event.code)
@@ -244,9 +256,26 @@ export class KeyboardInput {
         return this.held.has(code)
     }
 
+    /**
+     * True while a command modifier is down.
+     *
+     * Meta counts as ctrl: the same shortcut is written with command on a Mac,
+     * and a player should not have to learn which one this build wanted. Either
+     * side of the keyboard, since a chord is held with whichever hand is free.
+     */
+    get ctrl(): boolean {
+        return this.held.has("ControlLeft") || this.held.has("ControlRight")
+            || this.held.has("MetaLeft") || this.held.has("MetaRight")
+    }
+
     /** Went down since the last endFrame(). Auto-repeat does not count. */
     pressed(code: string): boolean {
         return this.downEdges.has(code)
+    }
+
+    /** True when this key's press happened with a command modifier held. */
+    pressedWithCtrl(code: string): boolean {
+        return this.ctrlEdges.has(code)
     }
 
     /** Came up since the last endFrame(). */
@@ -257,6 +286,7 @@ export class KeyboardInput {
     /** Clears the per-frame edges. Call at the end of update(). */
     endFrame(): void {
         this.downEdges.clear()
+        this.ctrlEdges.clear()
         this.upEdges.clear()
     }
 

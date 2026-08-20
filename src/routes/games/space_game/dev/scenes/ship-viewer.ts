@@ -9,6 +9,7 @@ import { DynamicMesh, Mesh, MeshBuilder } from "../../render/mesh"
 import { LightBinding } from "../../render/lighting"
 import { glowDisc } from "../../render/glow"
 import { DEFAULT_SHADING, Light, LightField } from "../../game/lighting"
+import { sendShip, shipOf, takeHandoff } from "../handoff"
 import type { Pipeline } from "../../render/webgpu/pipeline"
 import type { PointerInput } from "../../input/keys"
 import type { SceneContext, SceneInstance } from "../../render/scene"
@@ -24,6 +25,9 @@ const LABEL_COLOR = Color.from("#797979")
 const MASS_COLOR = Color.from("#00aaff")
 const BOUNDS_COLOR = Color.from("#ff6a00")
 const HOVER_COLOR = Color.from("#fff700")
+
+/** This scene's own id, for a handoff that has to name where it came from. */
+const SCENE_ID = "ship-viewer"
 
 const CELL = 24
 
@@ -242,6 +246,8 @@ class ShipViewer implements SceneInstance<ViewerValues> {
     private readonly glowBatch: InstanceBatch
     private readonly lights: LightBinding
     private readonly glowMesh: Mesh
+    /** Whatever was handed back to this scene, until the first rebuild uses it. */
+    private returned = takeHandoff()
     private readonly field = new LightField()
     private readonly sun = new Light({ position: { x: 0, y: 0 } })
     private readonly wireBatch: InstanceBatch
@@ -273,6 +279,40 @@ class ShipViewer implements SceneInstance<ViewerValues> {
 
     readonly actions: Record<ActionsOf<typeof SETTINGS>, () => void> = {
         getShip: () => this.download(),
+    }
+
+    /** A message from the panel: its two buttons are the only senders. */
+    receive(key: string): void {
+        if (key === "test") this.flyIt()
+        if (key === "edit") this.editIt()
+    }
+
+    /**
+     * Sends the ship being viewed to the builder, and asks to go there.
+     *
+     * The same handoff the test button uses. The builder takes whatever arrives
+     * in place of its picker, so a ship opened for editing is the one that was on
+     * screen rather than a fresh read of the file.
+     */
+    private editIt(): void {
+        if (!this.ship) return
+
+        sendShip(this.ship, SCENE_ID)
+        this.context.publish("goto", "ship-builder")
+    }
+
+    /**
+     * Sends the ship being viewed to the flight sim, and asks to go there.
+     *
+     * The same route the builder's test button takes, so the flight scene needs
+     * to know nothing about who sent it - only that someone did, which is what
+     * puts a way back on screen.
+     */
+    private flyIt(): void {
+        if (!this.ship) return
+
+        sendShip(this.ship, SCENE_ID)
+        this.context.publish("goto", "ship-flight")
     }
 
     constructor(context: SceneContext) {
@@ -684,11 +724,20 @@ class ShipViewer implements SceneInstance<ViewerValues> {
 
     /** Rebuild everything the settings describe. */
     private rebuild(settings: ViewerValues): void {
-        const ship = buildShip(settings.ship)
+        // A ship coming back from a test flight is shown as it is, not reloaded
+        // from the picker - it may never have been saved. Taken here and cleared,
+        // so a later visit that nobody sent a ship to finds nothing waiting
+        const ship = this.returned ? shipOf(this.returned) : buildShip(settings.ship)
+        this.returned = null
+
         this.ship = ship
         this.shipSize = shipWorldSize(ship, CELL)
         this.origin = originFor(ship, settings.origin)
         this.shipReach = shipHalfReach(ship, this.origin, CELL)
+
+        // Published rather than assumed: the button should not offer to fly a
+        // ship before one has been built
+        this.context.publish("viewerReady", true)
 
         // After shipSize, since the radius is derived from it
         this.layOutViews(settings)
@@ -835,13 +884,14 @@ class ShipViewer implements SceneInstance<ViewerValues> {
 }
 
 const scene: DevSceneDefinition<ViewerValues> = {
-    id: "ship-viewer",
+    id: SCENE_ID,
     name: "Ship Viewer",
     description:
         "One ship drawn up to three ways - flat, spinning, and as a wireframe - arranged " +
         "on a circle. Orange marks the center of mass, blue the center of the bounding " +
         "box. Hover a ship to highlight the cell under the cursor.",
     settings: SETTINGS,
+    ui: "viewer",
     create: (context) => new ShipViewer(context),
 }
 

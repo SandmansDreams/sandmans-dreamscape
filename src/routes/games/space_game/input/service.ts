@@ -94,17 +94,39 @@ export class InputService {
         }
     }
 
-    /** True while any key bound to this action is down. */
+    /**
+     * True while any key bound to this action is down.
+     *
+     * Live modifier state here, unlike `pressed`: a hold is about right now, and
+     * letting go of ctrl mid-hold genuinely ends a ctrl action.
+     */
     held(action: ActionId): boolean {
+        if (this.wantsCtrl(action) !== this.keys.ctrl) return false
         return this.codes(action).some((code) => this.keys.isDown(code))
     }
 
-    /** Went down since the last endFrame(). Auto-repeat does not count. */
+    /**
+     * Went down since the last endFrame(). Auto-repeat does not count.
+     *
+     * Modifiers are judged from the press itself rather than from the keyboard
+     * now: a chord tapped and released within one frame would otherwise be read
+     * after ctrl came back up, and would never fire.
+     */
     pressed(action: ActionId): boolean {
-        return this.codes(action).some((code) => this.keys.pressed(code))
+        const wantsCtrl = this.wantsCtrl(action)
+
+        return this.codes(action).some(
+            (code) => this.keys.pressed(code) && this.keys.pressedWithCtrl(code) === wantsCtrl,
+        )
     }
 
-    /** Came up since the last endFrame(). */
+    /**
+     * Came up since the last endFrame().
+     *
+     * Modifiers are deliberately not checked: releasing ctrl before the letter is
+     * ordinary, and an action that could never report its own release would leave
+     * anything watching for it stuck holding.
+     */
     released(action: ActionId): boolean {
         return this.codes(action).some((code) => this.keys.released(code))
     }
@@ -142,6 +164,16 @@ export class InputService {
     destroy(): void {
         this.keys.destroy()
         this.pointer.destroy()
+    }
+
+    /**
+     * Whether this action asks for a command modifier.
+     *
+     * An action that names ctrl needs it down; one that names nothing needs it
+     * up, which is what stops ctrl+Z from also firing whatever plain Z does.
+     */
+    private wantsCtrl(action: ActionId): boolean {
+        return specOf(action).mods?.includes("ctrl") ?? false
     }
 
     /**

@@ -20,6 +20,7 @@
     import SpriteEditorUI from "./render/ui/SpriteEditorUI.svelte"
     import type { ArtBrush, ArtInfo } from "./dev/scenes/sprite-editor"
     import FlightUI from "./render/ui/FlightUI.svelte"
+    import ViewerUI from "./render/ui/ViewerUI.svelte"
     import type { FlightInfo } from "./dev/scenes/ship-flight"
 
     const DEV_COLOR = "#87CEEB"
@@ -55,6 +56,12 @@
     let layerView = $state<Record<string, LayerView> | null>(null)
     /** The flight readout. Null until the scene has published a frame. */
     let flightInfo = $state<FlightInfo | null>(null)
+    /** True once the viewer has a ship worth offering to fly. */
+    let viewerReady = $state(false)
+    /** True while the builder is previewing its ship lit. */
+    let lit = $state(false)
+    /** The builder's shortcuts, as the scene has them bound. */
+    let keyGuide = $state<{ keys: string; does: string }[]>([])
 
     function formatStat(entry: StatEntry): string {
         // Smoothing is right for milliseconds and wrong for counts: an averaged
@@ -148,6 +155,18 @@
                 if (key === "notice") notice = value as string | null
                 if (key === "layerView") layerView = value as Record<string, LayerView>
                 if (key === "flightInfo") flightInfo = value as FlightInfo
+                if (key === "viewerReady") viewerReady = value === true
+                if (key === "lit") lit = value === true
+                if (key === "keyGuide") keyGuide = value as { keys: string; does: string }[]
+
+                // A scene asking to be swapped for another. The page owns which
+                // scene is loaded, so a scene cannot do it itself - it says where
+                // it wants to go and leaves the ship in the handoff for whoever
+                // loads next
+                if (key === "goto") {
+                    const wanted = DEV_SCENES.find((s) => s.id === value)
+                    if (wanted) selectScene(wanted)
+                }
             })
 
             ticker = setInterval(() => {
@@ -183,6 +202,11 @@
             onAction={(name) => runner?.send("action", name)}
             onUpgrade={(delta) => runner?.send("upgrade", delta)}
             onSteering={(steering) => runner?.send("steering", steering)}
+            onIdentity={(patch) => runner?.send("identity", patch)}
+            onModal={(open) => runner?.send("modal", open)}
+            {lit}
+            onLit={(next) => runner?.send("lit", next)}
+            {keyGuide}
             onHighlight={(hex) => runner?.send("highlight", hex)}
         />
     {:else if scene?.ui === "sprite" && artBrush}
@@ -194,8 +218,14 @@
             onPatch={(patch) => runner?.send("artBrush", patch)}
             onAction={(name) => runner?.send("action", name)}
         />
+    {:else if scene?.ui === "viewer"}
+        <ViewerUI
+            ready={viewerReady}
+            onTest={() => runner?.send("test", true)}
+            onEdit={() => runner?.send("edit", true)}
+        />
     {:else if scene?.ui === "flight"}
-        <FlightUI info={flightInfo} />
+        <FlightUI info={flightInfo} onBack={() => runner?.send("back", true)} />
     {/if}
 
     {#if devMode}

@@ -28,7 +28,10 @@ function fakeWindow() {
         } as unknown as Window,
 
         fire(type: string, event: Record<string, unknown>) {
-            for (const handler of handlers.get(type) ?? []) handler({ repeat: false, ...event })
+            // preventDefault included because a captured key calls it, and until
+            // something pressed one no test here ever needed it to exist
+            const base = { repeat: false, preventDefault() {} }
+            for (const handler of handlers.get(type) ?? []) handler({ ...base, ...event })
         },
     }
 }
@@ -149,6 +152,76 @@ describe("resolving a key to an action", () => {
     })
 })
 
+describe("modifiers", () => {
+    it("fires a ctrl action only while ctrl is down", () => {
+        const { input, press } = harness()
+        input.setSceneContext("builder")
+
+        press("KeyZ")
+        expect(input.pressed("builder.undo")).toBe(false)
+
+        input.endFrame()
+        press("ControlLeft")
+        press("KeyZ")
+        expect(input.pressed("builder.undo")).toBe(true)
+    })
+
+    it("takes command as ctrl, so the Mac chord is the same chord", () => {
+        const { input, press } = harness()
+        input.setSceneContext("builder")
+
+        press("MetaLeft")
+        press("KeyY")
+        expect(input.pressed("builder.redo")).toBe(true)
+    })
+
+    it("holds a plain action back while ctrl is down", () => {
+        // The bug this pins: ctrl+Z firing undo *and* whatever plain Z does
+        const { input, press, release } = harness()
+        input.setSceneContext("builder")
+
+        press("ControlLeft")
+        press("KeyR")
+        expect(input.pressed("builder.rotate")).toBe(false)
+
+        input.endFrame()
+        release("ControlLeft")
+        release("KeyR")
+        press("KeyR")
+        expect(input.pressed("builder.rotate")).toBe(true)
+    })
+
+    it("fires a chord that began and ended inside one frame", () => {
+        // The bug this pins: judging ctrl at poll time instead of at the press.
+        // A brisk ctrl+Z is over in well under a frame at 30Hz, and reading the
+        // keyboard afterwards finds ctrl already back up
+        const { input, press, release } = harness()
+        input.setSceneContext("builder")
+
+        press("ControlLeft")
+        press("KeyZ")
+        release("KeyZ")
+        release("ControlLeft")
+
+        expect(input.pressed("builder.undo")).toBe(true)
+    })
+
+    it("still reports the release, whichever way ctrl went first", () => {
+        // Letting go of ctrl before the letter is ordinary, and an action that
+        // could never report its own release would leave a watcher stuck holding
+        const { input, press, release } = harness()
+        input.setSceneContext("builder")
+
+        press("ControlLeft")
+        press("KeyZ")
+        input.endFrame()
+
+        release("ControlLeft")
+        release("KeyZ")
+        expect(input.released("builder.undo")).toBe(true)
+    })
+})
+
 describe("captured keys", () => {
     it("suppresses the browser default only for the live actions that asked", () => {
         const { input } = harness()
@@ -159,9 +232,11 @@ describe("captured keys", () => {
         expect(input.keys.capture.has("KeyW")).toBe(false)
 
         input.setSceneContext("builder")
-        // The arrows scroll the page, so the builder claims them
+        // The arrows scroll the page, so the builder claims them; undo claims Z
+        // to keep the browser's own undo out of it. R is bound and wants neither
         expect(input.keys.capture.has("ArrowUp")).toBe(true)
-        expect(input.keys.capture.has("KeyZ")).toBe(false)
+        expect(input.keys.capture.has("KeyZ")).toBe(true)
+        expect(input.keys.capture.has("KeyR")).toBe(false)
     })
 
     it("moves the capture with a rebinding", () => {
