@@ -1,14 +1,19 @@
 import { buildShip, findShip, SHIPS } from "../../assets/ships"
 import { Ship } from "../../game/ship"
 import {
-    bodyAt, bounce, boundingRadius, shipPhysics, step, throttles,
-    type Arena, type Body, type Controls, type ShipPhysics,
+    bodyAt, bounce, boundingRadius, DRY, LOAD_STAGES, loadStage, shipPhysics, step, throttles,
+    type Arena, type Body, type Controls, type LoadStages, type ShipPhysics, type Thruster,
 } from "../../game/physics"
+import {
+    fullReserves, shipSystems, tickSystems,
+    type Reserves, type ShipSystems,
+} from "../../game/shipSystems"
 import { Camera, type Vec2 } from "../../render/camera"
 import { Color } from "../../render/color"
 import type { Frame } from "../../render/frame"
 import { appendEmissiveBloom, appendLayer } from "../../render/grid/blockDraw"
 import { DynamicMesh, Mesh, MeshBuilder } from "../../render/mesh"
+import type { Cell } from "../../render/grid/grid"
 import { InstanceBatch } from "../../render/webgpu/instance"
 import { fadeOf, ParticleField } from "../../game/particles"
 import { LightBinding } from "../../render/lighting"
@@ -19,11 +24,17 @@ import type { SceneContext, SceneInstance } from "../../render/scene"
 import type { ActionsOf, SearchColumn, SettingsSchema, ValuesOf } from "../../settings/settings"
 import type { DevSceneDefinition } from "../DevScene"
 import { sendShip, shipOf, takeHandoff } from "../handoff"
+import { emissiveSources, falloff, spillOnto } from "../../game/emissiveSpill"
+import { FLOATS_PER_CELL_GLOW } from "../../render/lighting"
 
 /** World units per cell, matching the builder so a ship is the size you drew it. */
 const CELL = 32
 
 const WALL_COLOR = Color.from("#3d6b8c")
+
+function sum(values: readonly number[]): number {
+    return values.reduce((total, value) => total + value, 0)
+}
 
 /** The opposite push, which is the way the exhaust actually leaves. */
 function negated(vector: Vec2): Vec2 {
@@ -57,6 +68,29 @@ const EXHAUST_COLOR = Color.from("#ffb347")
  * well under half the size and brightness it started at. The exhaust plume is
  * what should carry the eye; this is the heat behind it.
  */
+/**
+ * How far down the plume a speck is born, in cells from the thruster's centre.
+ *
+ * Half a cell is exactly the mouth - the aft edge of the thruster's own block,
+ * which is the lowest thing drawn on the hull. A shade past it, so specks clear
+ * the hull rather than looking like they are seeping out of it, and no further:
+ * a plume that starts a whole cell out reads as detached from the engine.
+ *
+ * Turn on "Mark exhaust origins" to see where this lands: white is the thruster's
+ * cell, cyan its centre, magenta where specks appear.
+ */
+const NOZZLE_OFFSET = 0.6
+
+/**
+ * How far a burning nozzle throws light across the hull, in cells, and how much.
+ *
+ * Short and dim: this is the heat washing the plates immediately around the
+ * nozzle, not a lamp. It rides the same falloff curve the emissive spill uses,
+ * so a strip and an engine agree about what "range" means.
+ */
+const ENGINE_GLOW_RANGE = 3
+const ENGINE_GLOW_STRENGTH = 0.5
+
 const GLOW_RANGE = 220
 const GLOW_RADIUS = 26
 const GLOW_INTENSITY = 0.35
@@ -88,6 +122,17 @@ const SETTINGS = {
     assist:  { type: "checkbox", label: "Flight assist", default: true },
     exhaust: { type: "checkbox", label: "Exhaust", default: true },
 
+    systemsSep: { type: "separator", label: "Systems" },
+
+    /*
+     * On by default, so a ship that was flyable before this existed still is.
+     * Turning it off is what puts the power network in charge: engines nothing
+     * reaches go dead, the battery drains under a burn, and the hull browns out.
+     */
+    infinitePower: { type: "checkbox", label: "Infinite power / fuel", default: true },
+    cargoFill:     { type: "range", label: "Cargo load", default: 0, min: 0, max: 1, step: 0.1 },
+    refuel:        { type: "button", label: "Refuel" },
+
     lightSeparator: { type: "separator", label: "Lighting" },
 
     lit:            { type: "checkbox", label: "Lit", default: true },
@@ -96,6 +141,11 @@ const SETTINGS = {
     lightIntensity: { type: "range", label: "Intensity", default: 1.2, min: 0, max: 3, step: 0.05 },
     lightRange:     { type: "range", label: "Falloff", default: 1600, min: 200, max: 8000, step: 100 },
     lightColor:     { type: "color", label: "Light Color", default: "#fff3d6" },
+    
+    debugSep: { type: "separator", label: "Debug" },
+
+    markOrigins: { type: "checkbox", label: "Mark exhaust origins", default: false },
+
     reset:  { type: "button", label: "Reset Ship" },
 } as const satisfies SettingsSchema
 
@@ -115,6 +165,20 @@ export interface FlightInfo {
     /** True while the ship is against a wall. */
     touching: boolean
     assist: boolean
+    /** Power stored and the most it could hold, summed across every island. */
+    power: number
+    powerCapacity: number
+    fuel: number
+    fuelCapacity: number
+    /** Power per second being made and spent right now. */
+    producing: number
+    drawing: number
+    /** Engines no generator reaches. Zero on a well-wired ship. */
+    unpowered: number
+    /** How separate the plant is: more than one means two independent buses. */
+    islands: number
+    /** False while the panel is paying the bills for you. */
+    limited: boolean
     /**
      * The scene the back button returns to, or null when there is nowhere to go.
      *
@@ -150,6 +214,14 @@ class ShipFlight implements SceneInstance<FlightValues> {
     /** Distance to the outermost cell, which is what the shading fades across. */
     private shadingReach = 1
     private readonly shipBatch: InstanceBatch
+    /**
+     * The halo's own instance, so it can be dimmed without dimming the hull.
+     *
+     * shipBatch's instance colour is white and shared with the ship; the glow
+     * pipeline multiplies vertex colour by it, so fading the halo there would
+     * fade the whole ship with it.
+     */
+    private readonly bloomBatch: InstanceBatch
     private readonly lights: LightBinding
     private readonly walls: DynamicMesh
 
@@ -161,9 +233,22 @@ class ShipFlight implements SceneInstance<FlightValues> {
     private readonly glowBatch: InstanceBatch
     private readonly glowMesh: Mesh
 
+    /**
+     * Every cell of the ship, in the order the mesh named them.
+     *
+     * The mesh hands each cell an index as appendLayer walks it, and the glow
+     * buffer is read by that index - so this has to be built by walking the very
+     * same loop. Both come off `layersOf()` in `syncShip` for that reason.
+     */
+    private glowCells: Cell[] = []
+    /** rgb + pad per cell, rewritten every frame and handed to the lighting. */
+    private cellGlow = new Float32Array(0)
+
     /*~~~ Exhaust ~~~*/
     private readonly exhaust = new ParticleField(EXHAUST_CAPACITY)
     private readonly exhaustBatch: InstanceBatch
+    /** Debug dots for the exhaust origins. Empty unless the checkbox is on. */
+    private readonly markerBatch: InstanceBatch
     /** One quad, repeated once per speck. Built once and never touched again. */
     private readonly spark: Mesh
     /**
@@ -174,6 +259,22 @@ class ShipFlight implements SceneInstance<FlightValues> {
      * One entry per thruster, rebuilt with the ship.
      */
     private exhaustOwed: number[] = []
+
+    /*~~~ Systems ~~~*/
+    private systems: ShipSystems
+    private reserves: Reserves
+    /**
+     * The load the physics snapshot was built for.
+     *
+     * Held so the snapshot is rebuilt only when a stage boundary is crossed -
+     * about once every twenty seconds on a draining tank, rather than every frame.
+     */
+    private load: LoadStages = DRY
+    /** 0..1, how brightly the hull's emissive cells burn. */
+    private emissionGain = 1
+    /** Power per second made and spent last frame, for the readout only. */
+    private producing = 0
+    private drawing = 0
 
     private builtShip = ""
     private wallsKey = ""
@@ -186,6 +287,7 @@ class ShipFlight implements SceneInstance<FlightValues> {
 
     readonly actions: Record<ActionsOf<typeof SETTINGS>, () => void> = {
         reset: () => this.resetBody(),
+        refuel: () => { this.reserves = fullReserves(this.systems) },
     }
 
     /**
@@ -204,6 +306,7 @@ class ShipFlight implements SceneInstance<FlightValues> {
         this.walls = DynamicMesh.create(gpu, "arena")
 
         this.shipBatch = InstanceBatch.create(gpu, context.renderer.instanceLayout, 4, "flight ship")
+        this.bloomBatch = InstanceBatch.create(gpu, context.renderer.instanceLayout, 4, "flight bloom")
         this.glowBatch = InstanceBatch.create(gpu, context.renderer.instanceLayout, 32, "flight glow")
         this.lights = LightBinding.create(gpu, 4)
         this.glowMesh = glowDisc().build(gpu, "glow disc")
@@ -220,10 +323,16 @@ class ShipFlight implements SceneInstance<FlightValues> {
             gpu, context.renderer.instanceLayout, EXHAUST_CAPACITY, "exhaust",
         )
 
+        this.markerBatch = InstanceBatch.create(
+            gpu, context.renderer.instanceLayout, 256, "exhaust markers",
+        )
+
         // A real ship arrives on the first update; this keeps every field valid
         // until then rather than leaving them undefined
         this.ship = new Ship("empty", "Empty")
-        this.physics = shipPhysics(this.ship)
+        this.physics = shipPhysics(this.ship, DRY)
+        this.systems = shipSystems(this.ship, this.physics)
+        this.reserves = fullReserves(this.systems)
     }
 
     update(dt: number, settings: FlightValues): void {
@@ -236,10 +345,17 @@ class ShipFlight implements SceneInstance<FlightValues> {
         const controls = this.readControls()
         const before = this.body
 
+        // One array, three consumers. step() used to work out its own from the
+        // same controls and the same pre-step spin, so the two agreed by luck
+        // rather than by construction - and would stop agreeing the moment either
+        // side scaled its copy back.
+        const wanted = throttles(this.physics, controls, before.spin, dt)
+        const firing = this.runSystems(wanted, dt, settings)
+
         // dt arrives already clamped by the frame loop, which caps a backgrounded
         // tab's catch-up for exactly this reason. Clamping again here only made the
         // simulation run slower than real time whenever frames were scarce.
-        this.body = step(this.body, this.physics, controls, dt)
+        this.body = step(this.body, this.physics, firing, dt)
         const flown = this.body
         this.body = bounce(this.body, this.radius, this.arenaOf(settings), settings.bounciness)
 
@@ -248,7 +364,6 @@ class ShipFlight implements SceneInstance<FlightValues> {
         this.touching = this.body.velocity.x !== flown.velocity.x
             || this.body.velocity.y !== flown.velocity.y
 
-        const firing = throttles(this.physics, controls, before.spin, dt)
         this.firing = firing.filter((throttle) => throttle > 0).length
 
         this.updateExhaust(firing, dt, settings)
@@ -301,8 +416,77 @@ class ShipFlight implements SceneInstance<FlightValues> {
         }
     }
 
+    /**
+     * Back to the start line with full tanks.
+     *
+     * Refuelling is part of resetting rather than a separate step: a ship put
+     * back at the origin still coasting on an empty battery is not a reset, it is
+     * the same dead ship somewhere else.
+     */
     private resetBody(): void {
         this.body = bodyAt(0, 0)
+        this.reserves = fullReserves(this.systems)
+    }
+
+    /*~~~ Systems ~~~*/
+
+    /** Where the cargo slider sits on the mass staircase. */
+    private cargoStage(settings: FlightValues): number {
+        return Math.round(settings.cargoFill * LOAD_STAGES)
+    }
+
+    /**
+     * Burn fuel, make power, spend it, and hand back the throttles that survived.
+     *
+     * The one place the plant touches the frame. With the panel's infinite toggle
+     * on it does nothing at all and the throttles pass straight through, which is
+     * how the scene behaved before any of this existed.
+     */
+    private runSystems(
+        wanted: readonly number[],
+        dt: number,
+        settings: FlightValues,
+    ): number[] {
+        if (settings.infinitePower) {
+            this.reserves = fullReserves(this.systems)
+            this.emissionGain = 1
+            this.producing = 0
+            this.drawing = 0
+            this.syncLoad({ fuel: LOAD_STAGES, cargo: this.cargoStage(settings) })
+
+            return [...wanted]
+        }
+
+        const tick = tickSystems(this.systems, this.reserves, wanted, dt)
+
+        this.reserves = tick.reserves
+        this.emissionGain = tick.emissionGain
+        this.producing = tick.producing
+        this.drawing = tick.drawing
+
+        this.syncLoad({
+            fuel: loadStage(tick.reserves.fuel, this.systems.fuelCapacity),
+            cargo: this.cargoStage(settings),
+        })
+
+        return tick.firing
+    }
+
+    /**
+     * Rebuilds the physics snapshot, but only when the load actually stepped.
+     *
+     * The whole reason the fill is quantised: mass feeds the centre of mass, the
+     * inertia and every thruster's leverage, so this would otherwise be a full
+     * rebuild every frame instead of one every twenty seconds or so.
+     */
+    private syncLoad(load: LoadStages): void {
+        if (load.fuel === this.load.fuel && load.cargo === this.load.cargo) return
+
+        this.load = load
+        this.physics = shipPhysics(this.ship, load)
+        // The thruster array was just rebuilt, so the island each engine sits on
+        // has to be looked up against the new order or the two fall out of step
+        this.systems = shipSystems(this.ship, this.physics)
     }
 
     /*~~~ Ship ~~~*/
@@ -319,15 +503,33 @@ class ShipFlight implements SceneInstance<FlightValues> {
         this.exhaustOwed = []
 
         this.ship = handed ? shipOf(handed) : buildShip(settings.ship)
-        this.physics = shipPhysics(this.ship)
+
+        // Full, because a ship arriving for a test flight should start fuelled.
+        // Note that this is the only place it can be decided: handoff.ts writes
+        // the ship out as JSON, so no amount of fuel would survive the trip from
+        // the builder anyway.
+        this.load = { fuel: LOAD_STAGES, cargo: this.cargoStage(settings) }
+        this.physics = shipPhysics(this.ship, this.load)
+        this.systems = shipSystems(this.ship, this.physics)
         this.radius = boundingRadius(this.ship)
         this.resetBody()
 
-        // Origin at the center of mass, so the rotation in uploadShip turns the
-        // ship about the point the physics actually spins it around
+        // Origin at the dry centre of mass: it is the one centre a mesh can be
+        // baked about and keep, since the loaded one moves every time the fuel
+        // steps. fillShipBatch draws the mesh at wherever that origin currently
+        // is, so the ship still turns about the point the physics spins it around.
         const builder = new MeshBuilder()
-        for (const grid of this.ship.layersOf()) {
-            appendLayer(builder, grid, CELL, this.ship.centerOfMass)
+        // One array, walked twice: the mesh indexes cells in exactly this order,
+        // and the glow buffer is read by that index. Two separate walks that
+        // happen to agree today is precisely the bug worth designing out.
+        const layers = this.ship.layersOf()
+        const sources = emissiveSources(layers)
+
+        this.glowCells = layers.flatMap((grid) => grid.list)
+        this.cellGlow = new Float32Array(this.glowCells.length * FLOATS_PER_CELL_GLOW)
+
+        for (const grid of layers) {
+            appendLayer(builder, grid, CELL, this.ship.centerOfMass, 0, Color.BLACK, spillOnto(grid, sources))
         }
 
         this.shadingReach = Math.max(builder.cellReach, 1)
@@ -348,6 +550,7 @@ class ShipFlight implements SceneInstance<FlightValues> {
         this.bloomMesh = bloom.vertexCount > 0
             ? bloom.build(this.context.gpu, "ship bloom")
             : null
+
     }
 
     /**
@@ -361,12 +564,22 @@ class ShipFlight implements SceneInstance<FlightValues> {
         this.shipBatch.begin()
         this.lights.begin()
 
-        const at = { x: this.body.position.x * CELL, y: this.body.position.y * CELL }
+        const cos = Math.cos(this.body.angle)
+        const sin = Math.sin(this.body.angle)
+        const origin = this.worldOf(this.meshOffset(), cos, sin)
+
+        const at = { x: origin.x * CELL, y: origin.y * CELL }
         this.shipBatch.add(at.x, at.y, this.body.angle, 1, 1, 1, 1)
+
+        // Same transform, dimmed colour: the halo fades with the windows rather
+        // than hanging over a hull that has already gone dark
+        const gain = this.emissionGain
+        this.bloomBatch.begin()
+        this.bloomBatch.add(at.x, at.y, this.body.angle, 1, gain, gain, gain, 1)
 
         // The ship's own engines are excluded by owner, so a burn does not wash
         // out the hull it is burning from
-        this.lights.add(this.field.sample(at, this.body.angle, this), this.shadingReach)
+        this.lights.add(this.field.sample(at, this.body.angle, this), this.shadingReach, gain)
         this.lights.upload()
     }
 
@@ -456,6 +669,57 @@ class ShipFlight implements SceneInstance<FlightValues> {
 
         this.lights.setShading(DEFAULT_SHADING)
         this.syncEngineGlows(firing)
+        this.syncCellGlow(firing)
+    }
+
+    /**
+     * How much each cell is lit by the engines burning near it, this frame.
+     *
+     * Ship-local throughout: a nozzle and a cell are both fixed to the hull, so
+     * none of this needs the ship's world position or rotation - which is also
+     * why it survives the ship spinning without any of it being recomputed.
+     *
+     * A flat scan over cells x firing engines. About twelve hundred comparisons
+     * on a big ship, which is cheaper than the bookkeeping any index would need
+     * to avoid them.
+     */
+    private syncCellGlow(firing: readonly number[]): void {
+        const glow = this.cellGlow
+        if (glow.length === 0) return
+
+        // Whole, not patched: a cell left holding last frame's value is a plate
+        // that keeps glowing after its engine has stopped
+        glow.fill(0)
+
+        const rangeSq = ENGINE_GLOW_RANGE * ENGINE_GLOW_RANGE
+
+        this.physics.thrusters.forEach((thruster, index) => {
+            const throttle = firing[index] ?? 0
+            if (throttle <= 0) return
+
+            // The nozzle mouth in grid space, matching where the specks appear
+            const fx = -thruster.force.x
+            const fy = -thruster.force.y
+            const length = Math.hypot(fx, fy) || 1
+            const atCol = thruster.col + 0.5 + (fx / length) * NOZZLE_OFFSET
+            const atRow = thruster.row + 0.5 + (fy / length) * NOZZLE_OFFSET
+
+            const amount = throttle * ENGINE_GLOW_STRENGTH
+
+            this.glowCells.forEach((cell, slot) => {
+                const dc = cell.col + 0.5 - atCol
+                const dr = cell.row + 0.5 - atRow
+                const strength = amount * falloff(dc * dc + dr * dr, rangeSq)
+                if (strength <= 0) return
+
+                const at = slot * FLOATS_PER_CELL_GLOW
+                glow[at] = (glow[at] ?? 0) + EXHAUST_COLOR.r * strength
+                glow[at + 1] = (glow[at + 1] ?? 0) + EXHAUST_COLOR.g * strength
+                glow[at + 2] = (glow[at + 2] ?? 0) + EXHAUST_COLOR.b * strength
+            })
+        })
+
+        this.lights.writeCellGlow(glow)
     }
 
     private syncEngineGlows(firing: readonly number[]): void {
@@ -480,9 +744,11 @@ class ShipFlight implements SceneInstance<FlightValues> {
 
         this.physics.thrusters.forEach((thruster, index) => {
             const glow = this.engineGlows[index]!
-            const local = this.worldOf(thruster.offset, cos, sin)
+            // The point the specks are born at, not the block's centre: the heat
+            // belongs behind the plume rather than inside the engine making it
+            const { at } = this.nozzleOf(thruster, cos, sin)
 
-            glow.position = { x: local.x * CELL, y: local.y * CELL }
+            glow.position = { x: at.x * CELL, y: at.y * CELL }
             glow.intensity = (firing[index] ?? 0) * GLOW_INTENSITY
         })
     }
@@ -513,6 +779,62 @@ class ShipFlight implements SceneInstance<FlightValues> {
      * Fed the same throttles the step used rather than its own: a plume that
      * disagreed with the thrust would be a lie about what the ship is doing.
      */
+    /**
+     * Where a thruster's exhaust is born and which way it leaves, in world cells.
+     *
+     * One function for both the specks and the debug marker, so a marker can
+     * never disagree with what it is describing - the same rule the outlines
+     * follow by tracing the drawing code rather than re-deriving it.
+     */
+    private nozzleOf(thruster: Thruster, cos: number, sin: number): { at: Vec2; direction: Vec2 } {
+        // Exhaust leaves the way the force does not, which is what makes the ship
+        // go the other way in the first place
+        const direction = this.worldDirection(negated(thruster.force), cos, sin)
+        const centre = this.worldOf(thruster.offset, cos, sin)
+
+        return {
+            at: {
+                x: centre.x + direction.x * NOZZLE_OFFSET,
+                y: centre.y + direction.y * NOZZLE_OFFSET,
+            },
+            direction,
+        }
+    }
+
+    /**
+     * A dot on each thruster's cell centre and on the point its specks are born.
+     *
+     * Cyan is the centre of the block, magenta is the spawn point, and the gap
+     * between them is NOZZLE_OFFSET. Drawn opaque and last so nothing can hide it.
+     */
+    private fillMarkerBatch(): void {
+        this.markerBatch.begin()
+
+        const cos = Math.cos(this.body.angle)
+        const sin = Math.sin(this.body.angle)
+        const size = 0.22 * CELL
+
+        for (const thruster of this.physics.thrusters) {
+            const centre = this.worldOf(thruster.offset, cos, sin)
+            const { at } = this.nozzleOf(thruster, cos, sin)
+
+            // Cornered off the offset rather than off centerOfMass a second time:
+            // one origin for the dots and the corners is what makes white corners
+            // that fail to bracket the nozzle art mean something.
+            for (const [dc, dr] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) {
+                const corner = this.worldOf(
+                    { x: thruster.offset.x + dc - 0.5, y: thruster.offset.y + dr - 0.5 },
+                    cos,
+                    sin,
+                )
+                this.markerBatch.add(corner.x * CELL, corner.y * CELL, 0, size * 0.7, 1, 1, 1, 1)
+            }
+
+            this.markerBatch.add(centre.x * CELL, centre.y * CELL, 0, size, 0, 1, 1, 1)
+            this.markerBatch.add(at.x * CELL, at.y * CELL, 0, size, 1, 0, 1, 1)
+        }
+    }
+
     private updateExhaust(firing: readonly number[], dt: number, settings: FlightValues): void {
         if (!settings.exhaust) {
             // Cleared rather than frozen: leaving a plume hanging in space while the
@@ -533,11 +855,11 @@ class ShipFlight implements SceneInstance<FlightValues> {
             this.exhaustOwed[index] = owed - count
             if (count === 0) return
 
+            const { at, direction } = this.nozzleOf(thruster, cos, sin)
+
             this.exhaust.emit(count, {
-                at: this.worldOf(thruster.offset, cos, sin),
-                // Exhaust leaves the way the force does not, which is what makes
-                // the ship go the other way in the first place
-                direction: this.worldDirection(negated(thruster.force), cos, sin),
+                at,
+                direction,
                 speed: EXHAUST_SPEED * throttle,
                 // Inherited, so a plume trails the ship rather than hanging where
                 // the ship was when it fired
@@ -554,6 +876,25 @@ class ShipFlight implements SceneInstance<FlightValues> {
         })
 
         this.exhaust.update(dt)
+    }
+
+    /**
+     * Where the mesh's origin sits in the ship's own space, in cells.
+     *
+     * The mesh is baked about the dry centre of mass - stable, so it survives a
+     * tank draining - while the body flies and spins about the loaded one, and a
+     * full tank walks those two apart. Drawing at this point instead of at the
+     * body puts the art back under the physics: every offset a thruster reports
+     * is measured from the loaded centre, so without it the plumes, the glows and
+     * the markers all sit that far off the nozzles they belong to.
+     */
+    private meshOffset(): Vec2 {
+        const origin = this.ship.centerOfMass
+
+        return {
+            x: origin.x - this.physics.center.x,
+            y: origin.y - this.physics.center.y,
+        }
     }
 
     /** A point in the ship's own space, in world cells. */
@@ -606,6 +947,15 @@ class ShipFlight implements SceneInstance<FlightValues> {
             spin: this.body.spin,
             touching: this.touching,
             assist: this.assist,
+            power: sum(this.reserves.power),
+            powerCapacity: sum(this.systems.islands.map((island) => island.capacity)),
+            fuel: this.reserves.fuel,
+            fuelCapacity: this.systems.fuelCapacity,
+            producing: this.producing,
+            drawing: this.drawing,
+            unpowered: this.systems.thrusters.filter((load) => load.island < 0).length,
+            islands: this.systems.islands.length,
+            limited: !this.settings?.infinitePower,
             returnTo: this.arrived?.from ?? null,
         } satisfies FlightInfo)
     }
@@ -644,13 +994,21 @@ class ShipFlight implements SceneInstance<FlightValues> {
 
         // The hull's own emissive halo rides the ship's transform, so it is drawn
         // from the same batch that just placed the ship
-        if (this.bloomMesh) this.shipBatch.draw(frame, this.bloomMesh)
+        if (this.bloomMesh) this.bloomBatch.draw(frame, this.bloomMesh)
         if (this.glowBatch.size > 0) this.glowBatch.draw(frame, this.glowMesh)
         if (this.exhaust.count > 0) this.exhaustBatch.draw(frame, this.spark)
 
         // Lines last so a wall stays visible with the ship pressed against it
         frame.setPipeline(linePipeline).setBindGroup(0, camera.group)
         this.walls.draw(frame)
+
+        // Over everything, opaque: a debug marker that something else can cover
+        // is a debug marker that can lie about where it is
+        if (settings?.markOrigins) {
+            this.fillMarkerBatch()
+            frame.setPipeline(renderer.instanced).setBindGroup(0, camera.group)
+            this.markerBatch.draw(frame, this.spark)
+        }
     }
 
     dispose(): void {
@@ -661,6 +1019,8 @@ class ShipFlight implements SceneInstance<FlightValues> {
         this.glowMesh.destroy()
         this.exhaustBatch.destroy()
         this.shipBatch.destroy()
+        this.markerBatch.destroy()
+        this.bloomBatch.destroy()
         this.glowBatch.destroy()
         this.lights.destroy()
     }

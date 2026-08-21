@@ -10,6 +10,15 @@ export const FLOATS_PER_SURFACE = 8
 /** knobs.xyzw, ambient.rgb + multiply */
 const SHADING_FLOATS = 8
 
+/**
+ * rgb plus a pad, per cell.
+ *
+ * A vec4 rather than a vec3 because a storage array of vec3f is padded to 16
+ * bytes per element anyway - writing three floats would put every entry after
+ * the first at the wrong offset.
+ */
+export const FLOATS_PER_CELL_GLOW = 4
+
 /** How much spare room a reallocation buys, matching InstanceBatch. */
 const GROWTH_FACTOR = 1.5
 
@@ -35,6 +44,15 @@ export class LightBinding {
 
     private surfaces: Float32Array<ArrayBuffer>
     private surfaceBuffer: Buffer
+    /**
+     * Light added per *cell* rather than per hull, for anything that moves.
+     *
+     * The per-hull surfaces above cannot say "the plates around this nozzle are
+     * brighter" - they carry one direction and one colour for the whole ship. A
+     * burning engine has to light its own corner of the hull, and it changes
+     * every frame, so it can be neither aggregated nor baked into the mesh.
+     */
+    private cellGlow: Buffer
     private bindGroup: GPUBindGroup
     private count = 0
 
@@ -46,6 +64,13 @@ export class LightBinding {
         this.shadingBuffer = Buffer.makeUniformBuffer(gpu, SHADING_FLOATS * 4, `${label} shading`)
         this.surfaces = new Float32Array(capacity * FLOATS_PER_SURFACE)
         this.surfaceBuffer = Buffer.makeStorageBuffer(gpu, this.surfaces.byteLength, `${label} surfaces`)
+
+        // Never zero-length: an empty storage array is not something the shader
+        // can index into, and a scene that never lights a cell still binds this
+        this.cellGlow = Buffer.makeStorageBuffer(
+            gpu, FLOATS_PER_CELL_GLOW * 4, `${label} cell glow`,
+        )
+
         this.bindGroup = this.makeGroup()
     }
 
@@ -60,6 +85,11 @@ export class LightBinding {
                 },
                 {
                     binding: 1,
+                    visibility: GPUShaderStage.VERTEX,
+                    buffer: { type: "read-only-storage" },
+                },
+                {
+                    binding: 2,
                     visibility: GPUShaderStage.VERTEX,
                     buffer: { type: "read-only-storage" },
                 },
@@ -104,8 +134,11 @@ export class LightBinding {
      *
      * @param reach the hull's bounding radius: cells that far from its centre
      *        take full contrast, and the interior fades toward its base colour
+     * @param emissionGain how brightly this hull's emissive cells burn, 0..1.
+     *        Per hull rather than global, so a ship losing power goes dark while
+     *        another in the same frame stays lit.
      */
-    add(light: SurfaceLight, reach: number): this {
+    add(light: SurfaceLight, reach: number, emissionGain = 1): this {
         if (this.count >= this.capacity) this.grow(this.count + 1)
 
         const at = this.count * FLOATS_PER_SURFACE
@@ -118,7 +151,7 @@ export class LightBinding {
         data[at + 4] = light.tint.r
         data[at + 5] = light.tint.g
         data[at + 6] = light.tint.b
-        data[at + 7] = 1
+        data[at + 7] = emissionGain
 
         this.count++
         return this
@@ -128,6 +161,21 @@ export class LightBinding {
     upload(): void {
         if (this.count === 0) return
         this.surfaceBuffer.write(this.surfaces.subarray(0, this.count * FLOATS_PER_SURFACE))
+    }
+
+    /**
+     * Replaces the per-cell glow, one vec4 per cell of the mesh about to be drawn.
+     *
+     * Indexed by the cell index the mesh carries, so the caller has to fill it in
+     * the same order the mesh named its cells. Written whole each frame rather
+     * than patched: a stale entry is a cell that keeps glowing after its engine
+     * has stopped.
+     */
+    writeCellGlow(data: Float32Array<ArrayBuffer>): void {
+        if (data.length === 0) return
+        if (data.byteLength > this.cellGlow.size) this.growCellGlow(data.byteLength)
+
+        this.cellGlow.write(data)
     }
 
     get capacity(): number {
@@ -141,6 +189,13 @@ export class LightBinding {
     destroy(): void {
         this.shadingBuffer.destroy()
         this.surfaceBuffer.destroy()
+        this.cellGlow.destroy()
+    }
+
+    private growCellGlow(bytes: number): void {
+        this.cellGlow.destroy()
+        this.cellGlow = Buffer.makeStorageBuffer(this.gpu, bytes, `${this.label} cell glow`)
+        this.bindGroup = this.makeGroup()
     }
 
     private grow(needed: number): void {
@@ -161,6 +216,7 @@ export class LightBinding {
             entries: [
                 { binding: 0, resource: { buffer: this.shadingBuffer.handle } },
                 { binding: 1, resource: { buffer: this.surfaceBuffer.handle } },
+                { binding: 2, resource: { buffer: this.cellGlow.handle } },
             ],
         })
     }

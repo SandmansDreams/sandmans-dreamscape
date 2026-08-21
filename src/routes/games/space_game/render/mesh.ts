@@ -10,17 +10,19 @@ export const FLOATS_PER_VERTEX = 5 // x, y, r, g, b
 const STRIDE = FLOATS_PER_VERTEX * 4 // Bytes from one vertex to the next
 
 /**
- * The second, optional channel: cell centre x, cell centre y, emission.
+ * The second, optional channel: cell centre x, cell centre y, emission, and the
+ * glow spilled onto this cell by the emissive cells around it.
  *
- * Its own buffer rather than three more floats on every vertex. Only the lit
+ * Its own buffer rather than six more floats on every vertex. Only the lit
  * pipeline reads it, and the things that would have to invent an answer - glyph
  * runs, wireframe lines, the arena walls - simply never fill it.
  *
  * The centre is in the same space as the positions beside it, so for a ship it
  * is measured from the hull's centre and is exactly the outward direction the
- * shading treats as a cell's normal.
+ * shading treats as a cell's normal. The spill is baked here because it is
+ * fixed to the hull: it can only change when the ship itself does.
  */
-export const FLOATS_PER_CELL_VERTEX = 3
+export const FLOATS_PER_CELL_VERTEX = 7
 const CELL_STRIDE = FLOATS_PER_CELL_VERTEX * 4
 
 // Single source of truth for vertex layout for the game
@@ -38,7 +40,8 @@ export const CELL_VERTEX_LAYOUT: GPUVertexBufferLayout = {
     arrayStride: CELL_STRIDE,
     stepMode: "vertex",
     attributes: [
-        { shaderLocation: 2, offset: 0, format: "float32x3" }, // cell centre xy, emission
+        { shaderLocation: 2, offset: 0, format: "float32x4" },  // cell centre xy, emission, index
+        { shaderLocation: 3, offset: 16, format: "float32x3" }, // spill rgb
     ],
 }
 
@@ -225,6 +228,18 @@ export class MeshBuilder {
     private cellX = 0
     private cellY = 0
     private emission = 0
+    /**
+     * Which cell this is, counted in the order cells were named.
+     *
+     * The lit shader uses it to look up a cell's share of anything that changes
+     * per frame - an engine burning lights the plates around its nozzle - which
+     * is exactly what a baked vertex channel cannot carry.
+     */
+    private cellIndex = 0
+    private cellsSeen = 0
+    private spillR = 0
+    private spillG = 0
+    private spillB = 0
     private cellsUsed = false
     private furthestCellSq = 0
 
@@ -241,11 +256,16 @@ export class MeshBuilder {
      *
      * @param x centre of the cell, in the same space as the positions being added
      * @param emission 0 for a surface the light shades, 1 for one that lights itself
+     * @param spill what this cell picks up from the emissive cells near it
      */
-    inCell(x: number, y: number, emission = 0): this {
+    inCell(x: number, y: number, emission = 0, spill?: Color): this {
+        this.cellIndex = this.cellsSeen++
         this.cellX = x
         this.cellY = y
         this.emission = emission
+        this.spillR = spill?.r ?? 0
+        this.spillG = spill?.g ?? 0
+        this.spillB = spill?.b ?? 0
         this.cellsUsed = true
         this.furthestCellSq = Math.max(this.furthestCellSq, x * x + y * y)
         return this
@@ -263,15 +283,36 @@ export class MeshBuilder {
         return Math.sqrt(this.furthestCellSq)
     }
 
-    /** Back to geometry that belongs to no cell - overlays, labels, markers. */
+    /**
+     * Back to geometry that belongs to no cell - overlays, labels, markers.
+     *
+     * Deliberately does not take an index: it is not a cell, and counting one
+     * here would shift every real cell after it out of step with the glow buffer.
+     */
     outsideCell(): this {
-        return this.inCell(0, 0, 0)
+        this.cellX = 0
+        this.cellY = 0
+        this.emission = 0
+        this.spillR = 0
+        this.spillG = 0
+        this.spillB = 0
+        this.cellIndex = 0
+        this.cellsUsed = true
+        return this
+    }
+
+    /** How many cells were named. The size the per-cell glow buffer has to be. */
+    get cellCount(): number {
+        return this.cellsSeen
     }
 
     /** One cell record per vertex just pushed. */
     private markVertices(count: number): void {
         for (let i = 0; i < count; i++) {
-            this.cellData.push(this.cellX, this.cellY, this.emission)
+            this.cellData.push(
+                this.cellX, this.cellY, this.emission, this.cellIndex,
+                this.spillR, this.spillG, this.spillB,
+            )
         }
     }
 
@@ -296,6 +337,7 @@ export class MeshBuilder {
         this.data.length = 0
         this.cellData.length = 0
         this.cellsUsed = false
+        this.cellsSeen = 0
         this.furthestCellSq = 0
         return this.outsideCell()
     }

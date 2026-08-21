@@ -3,6 +3,7 @@ import { Ship } from "../../game/ship"
 import { shipFromText, shipToText } from "../../game/shipJson"
 import { Camera, type Vec2 } from "../../render/camera"
 import { Color } from "../../render/color"
+import { emissiveSources, spillOnto } from "../../game/emissiveSpill"
 import type { Frame } from "../../render/frame"
 import { canPlace, componentById, componentsOfKind, kindOf, maxLevel, type ComponentKind } from "../../render/grid/components"
 import type { Cell } from "../../render/grid/grid"
@@ -1309,6 +1310,13 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         this.meshes.clear()
         this.shadingReach = 1
 
+        // Only the layers actually on screen light anything: a glow cast by a
+        // hidden cosmetic would sit on the hull with nothing visible making it
+        const shown = SHIP_LAYERS
+            .filter((layer) => this.layerView[layer] !== "hidden")
+            .map((layer) => this.ship.layers[layer])
+        const sources = emissiveSources(shown)
+
         for (const layer of SHIP_LAYERS) {
             const view = this.layerView[layer]
             if (view === "hidden") continue
@@ -1316,7 +1324,8 @@ class ShipBuilder implements SceneInstance<EditorValues> {
             const builder = new MeshBuilder()
             const fade = view === "dim" ? DIM_FADE : 0
 
-            appendLayer(builder, this.ship.layers[layer], CELL, this.origin, fade, BACKGROUND)
+            const grid = this.ship.layers[layer]
+            appendLayer(builder, grid, CELL, this.origin, fade, BACKGROUND, spillOnto(grid, sources))
 
             // Across every layer, since the hull is shaded as one object
             this.shadingReach = Math.max(this.shadingReach, builder.cellReach)

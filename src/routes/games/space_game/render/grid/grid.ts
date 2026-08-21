@@ -17,7 +17,14 @@ const DEFAULT_COLOR = Color.gray(0.6)
 const KEY_OFFSET = 0x8000
 const KEY_MAX = 0x7fff
 
-function cellKey(col: number, row: number): number {
+/**
+ * The canonical identity of a cell, packed into one integer.
+ *
+ * Exported because anything that indexes cells outside a Grid - the power network
+ * being the first - has to agree with the Grid about what a cell is called. A
+ * second copy of this is a bug waiting for the day the packing changes.
+ */
+export function cellKey(col: number, row: number): number {
     return ((col + KEY_OFFSET) << 16) | (row + KEY_OFFSET)
 }
 
@@ -191,8 +198,8 @@ export class Grid {
             // Wrapped to 0-3 but NOT folded by the shape: a component's facing is
             // its own property, not a consequence of whatever art represents it
             facing: (((options.facing ?? 0) % 4) + 4) % 4,
-            // ?? would turn an explicit null into the default, and null is the
             steering: options.steering ?? true,
+            // ?? would turn an explicit null into the default, and null is the
             // meaningful value here - it is how a cell says "use the art's accent"
             accentColor: options.accentColor === undefined ? null : options.accentColor,
         }

@@ -31,6 +31,22 @@
     /** Every engine burning, as a fraction, for the bar. */
     let burn = $derived(info && info.thrusters > 0 ? info.firing / info.thrusters : 0)
 
+    let powerLevel = $derived(
+        info && info.powerCapacity > 0 ? info.power / info.powerCapacity : 0,
+    )
+    let fuelLevel = $derived(
+        info && info.fuelCapacity > 0 ? info.fuel / info.fuelCapacity : 0,
+    )
+
+    /**
+     * The fraction the hull starts going dark below.
+     *
+     * Matches BROWNOUT in game/shipSystems.ts. Duplicated rather than imported
+     * because it is the *threshold the bar warns at*, and a panel that imported
+     * game rules would be deciding them rather than drawing them.
+     */
+    const BROWNOUT = 0.15
+
     const KEYS = [
         { key: "W / S", does: "burn fore and aft" },
         { key: "A / D", does: "burn sideways" },
@@ -77,6 +93,48 @@
                 <span class="burn-count">{info.firing}/{info.thrusters}</span>
             </div>
 
+            <div class="heading">POWER</div>
+            <div class="burn">
+                <div class="burn-track">
+                    <div
+                        class="burn-fill"
+                        style={`width: ${powerLevel * 100}%; --fill: var(${powerLevel <= BROWNOUT ? "--alarm" : "--active"})`}
+                    ></div>
+                </div>
+                <span class="burn-count">{info.power.toFixed(0)}/{info.powerCapacity.toFixed(0)}</span>
+            </div>
+            <dl class="rows">
+                <dt>making</dt><dd>{info.producing.toFixed(1)}/s</dd>
+                <dt>using</dt><dd class={info.drawing > info.producing ? "warn" : ""}>
+                    {info.drawing.toFixed(1)}/s
+                </dd>
+            </dl>
+
+            <div class="heading">FUEL</div>
+            <div class="burn">
+                <div class="burn-track">
+                    <div
+                        class="burn-fill"
+                        style={`width: ${fuelLevel * 100}%; --fill: var(--fuel)`}
+                    ></div>
+                </div>
+                <span class="burn-count">{info.fuel.toFixed(0)}/{info.fuelCapacity.toFixed(0)}</span>
+            </div>
+
+            <!-- Every one of these is a build problem rather than a flying problem,
+                 and each is invisible from the cockpit unless it is said out loud -->
+            {#if info.limited && info.powerCapacity === 0}
+                <p class="note warn">no generator - nothing aboard makes power</p>
+            {:else if info.limited && info.fuelCapacity === 0}
+                <p class="note warn">no fuel tanks - the generators cannot run</p>
+            {/if}
+            {#if info.limited && info.unpowered > 0}
+                <p class="note warn">{info.unpowered} engines out of reach of a generator</p>
+            {/if}
+            {#if info.islands > 1}
+                <p class="note">{info.islands} separate power networks</p>
+            {/if}
+
             <!-- A ship with no off-axis engine can never turn, and can never null a
                  spin either. Saying so beats letting someone conclude it is broken. -->
             {#if info.thrusters === 0}
@@ -86,6 +144,7 @@
             <div class="flags">
                 <span class={info.assist ? "flag on" : "flag"}>assist</span>
                 <span class={info.touching ? "flag hit" : "flag"}>contact</span>
+                <span class={info.limited ? "flag on" : "flag"}>systems</span>
             </div>
         {:else}
             <p class="note">no ship yet</p>
@@ -110,6 +169,7 @@
         --ui-separator: rgba(0, 191, 255, 0.25);
         --text-color: rgb(0, 221, 255);
         --active: rgb(0, 255, 64);
+        --fuel: rgb(255, 179, 71);
         --alarm: rgb(255, 120, 120);
 
         position: fixed;
@@ -211,8 +271,9 @@
     .burn-fill {
         height: 100%;
         border-radius: 3px;
-        background: var(--active);
-        transition: width .08s linear;
+        /* Each bar sets its own --fill; the burn bar never does and stays green */
+        background: var(--fill, var(--active));
+        transition: width .08s linear, background-color .2s linear;
     }
     .burn-count {
         font-size: 11px;

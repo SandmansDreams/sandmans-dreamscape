@@ -18,6 +18,7 @@ import type { DevSceneDefinition } from "../DevScene"
 import { downloadText } from "../../download"
 import { shipToText } from "../../game/shipJson"
 import { Color } from "../../render/color"
+import { emissiveSources, spillOnto } from "../../game/emissiveSpill"
 import { appendEmissiveBloom, appendLayer, appendLayerOutline } from "../../render/grid/blockDraw"
 
 const DEFAULT_WIREFRAME_COLOR = Color.from("#00fbff")
@@ -770,11 +771,16 @@ class ShipViewer implements SceneInstance<ViewerValues> {
         const gpu = this.context.gpu
         this.shadingReach = 0
 
+        // Across every layer before any is built, because a cosmetic strip has to
+        // light the hull under it and the hull is built first
+        const sources = emissiveSources(ship.layersOf())
+
         for (const layer of SHIP_LAYERS) {
             const builder = new MeshBuilder()
 
             // Every layer gets the SAME origin, or they drift apart
-            appendLayer(builder, ship.layers[layer], CELL, origin)
+            const grid = ship.layers[layer]
+            appendLayer(builder, grid, CELL, origin, 0, Color.BLACK, spillOnto(grid, sources))
 
             // Across every layer, since a hull is shaded as one object and a
             // cosmetic fin hanging off it is still part of the silhouette

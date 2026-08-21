@@ -4,7 +4,7 @@ import { Color } from "../color"
 import { DEFAULT_FONT } from "../font"
 import type { Vec2 } from "../camera"
 import { componentById, kindOf, type ComponentKind } from "./components"
-import type { Cell, Grid } from "./grid"
+import { cellKey, type Cell, type Grid } from "./grid"
 import { appendShape, trianglesCover, type BlockShape } from "./shapes"
 import { appendTriangleOutline } from "./gridOutline"
 import { FLOATS_PER_VERTEX, MeshBuilder } from "../mesh"
@@ -12,6 +12,7 @@ import { findArt } from "../../assets/components"
 import { appendGlow } from "../glow"
 import type { ComponentArt } from "../../game/componentArt"
 import { ART_LAYERS, ART_ROLES, type ArtRole } from "./spriteMesh"
+import type { SpillMap } from "../../game/emissiveSpill"
 
 /**
  * Placeholder marks until functional blocks have real art.
@@ -244,11 +245,13 @@ export function appendBlock(
     cellSize: number,
     fade = 0,
     fadeTo: Color = Color.BLACK,
+    /** What the emissive cells around this one throw onto it. */
+    spill?: Color,
 ): void {
     // Named before anything is appended, so art, shape and glyph all inherit it.
     // This is the one place that knows which cell a triangle belongs to, and the
     // lit shader treats the direction out to this point as the cell's normal.
-    builder.inCell(x + cellSize / 2, y + cellSize / 2, block.emission)
+    builder.inCell(x + cellSize / 2, y + cellSize / 2, block.emission, spill)
 
     const art = artFor(block)
     if (art) {
@@ -290,10 +293,12 @@ export function appendLayer(
      */
     fade = 0,
     fadeTo: Color = Color.BLACK,
+    /** Per-cell glow from spillOnto(). Omitted for anything drawn unlit. */
+    spill?: SpillMap,
 ): void {
     for (const cell of grid.list) {
         const { x, y } = cellCorner(cell, cellSize, origin)
-        appendBlock(builder, cell, x, y, cellSize, fade, fadeTo)
+        appendBlock(builder, cell, x, y, cellSize, fade, fadeTo, spill?.get(cellKey(cell.col, cell.row)))
     }
 }
 
@@ -353,7 +358,7 @@ const BLOOM_SPREAD = 0.85
  * Deliberately low: the cell is already drawn at full brightness by the shading,
  * and this is the spill around it rather than the light itself.
  */
-const BLOOM_STRENGTH = 0.12
+const BLOOM_STRENGTH = 0.18
 
 /**
  * A soft halo over every cell that lights itself.

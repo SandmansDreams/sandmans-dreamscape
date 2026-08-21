@@ -51,6 +51,7 @@ struct Shading {
 @group(0) @binding(0) var<uniform> camera: Camera;
 @group(1) @binding(0) var<uniform> shading: Shading;
 @group(1) @binding(1) var<storage, read> surfaces: array<Surface>;
+@group(1) @binding(2) var<storage, read> cellGlow: array<vec4f>;
 @group(2) @binding(0) var<storage, read> instances: array<Instance>;
 
 fn worldToClip(world: vec2f) -> vec2f {
@@ -68,7 +69,8 @@ struct VertexOut {
 @vertex fn vs(
     @location(0) position: vec2f,
     @location(1) color: vec3f,
-    @location(2) cell: vec3f,           // cell centre xy, emission z
+    @location(2) cell: vec4f,           // cell centre xy, emission z, cell index w
+    @location(3) spill: vec3f,          // glow from the emissive cells nearby
     @builtin(instance_index) index: u32,
 ) -> VertexOut {
     let instance = instances[index];
@@ -134,8 +136,27 @@ struct VertexOut {
 
     // An emissive cell makes its own light, so shading it would be backwards.
     // It keeps its base colour and brightens past it instead.
-    let emission = clamp(cell.z, 0.0, 1.0);
-    let lit = mix(shaded, base * (1.0 + emission), emission);
+    //
+    // Scaled by the hull's emission gain, and scaled *before* the mix on purpose:
+    // at gain 0 the cell falls all the way back to the shaded value and takes light
+    // like any other plate. Dimming only the brightness would leave an unlit
+    // patch sitting flat against a shaded hull, which reads as a bug rather than
+    // as a window that has gone out.
+    let emission = clamp(cell.z, 0.0, 1.0) * surface.tint.w;
+    var lit = mix(shaded, base * (1.0 + emission), emission);
+
+    // Baked at build time, because an emissive cell is welded to the hull: what
+    // it throws on its neighbours can only change when the ship does. Added
+    // rather than run through the terminator, since a soft glow off a strip has
+    // no direction to shade from - and scaled by the same gain, so a ship losing
+    // power stops lighting itself at the moment its windows go out.
+    lit = lit + spill * surface.tint.w;
+
+    // Per cell and per frame, for light that moves: an engine burning brightens
+    // the plates around its own nozzle. Baking this the way the emissive spill is
+    // baked would mean rewriting the whole cell channel every frame - the same
+    // answer at seventy times the bytes, since a cell has many vertices.
+    lit = lit + cellGlow[u32(cell.w)].rgb;
 
     var out: VertexOut;
     out.position = vec4f(worldToClip(world), 0.0, 1.0);

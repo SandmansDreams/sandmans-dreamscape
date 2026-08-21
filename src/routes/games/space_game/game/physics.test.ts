@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest"
 import {
-    bodyAt, bounce, boundingRadius, shipPhysics, step, throttles,
-    type Arena, type Body, type Controls,
+    bodyAt, bounce, boundingRadius, DRY, FULL, loadStage, LOAD_STAGES,
+    shipPhysics, step, throttles,
+    type Arena, type Body, type Controls, type ShipPhysics,
 } from "./physics"
 import { Ship } from "./ship"
 
@@ -33,10 +34,26 @@ function pressing(patch: Partial<Controls>): Controls {
     return { ...IDLE, ...patch }
 }
 
+/** Most of these fly a dry hull; the ones that care about load say so. */
+function dryPhysics(ship: Ship): ShipPhysics {
+    return shipPhysics(ship, DRY)
+}
+
+/**
+ * A step from controls, the way the scene used to ask for one.
+ *
+ * step() takes throttles now, but almost every test here is about what a *press*
+ * does, and rewriting each one to derive its own would bury that. The tests that
+ * are genuinely about throttles call step directly.
+ */
+function flown(body: Body, physics: ShipPhysics, controls: Controls, dt: number): Body {
+    return step(body, physics, throttles(physics, controls, body.spin, dt), dt)
+}
+
 describe("mass properties", () => {
     it("puts the center of a symmetric hull at its middle", () => {
         const ship = shipWith([], [[0, 0], [1, 0], [0, 1], [1, 1]])
-        const { center } = shipPhysics(ship)
+        const { center } = dryPhysics(ship)
 
         expect(center.x).toBeCloseTo(1)
         expect(center.y).toBeCloseTo(1)
@@ -45,7 +62,7 @@ describe("mass properties", () => {
     it("gives a one-cell ship inertia it can actually be divided by", () => {
         // The failure this guards: with cells as point masses a lone block has no
         // inertia, and the first torque divides by zero
-        const { inertia } = shipPhysics(shipWith([], [[0, 0]]))
+        const { inertia } = dryPhysics(shipWith([], [[0, 0]]))
 
         expect(inertia).toBeGreaterThan(0)
         expect(Number.isFinite(inertia)).toBe(true)
@@ -54,8 +71,8 @@ describe("mass properties", () => {
     })
 
     it("makes a long ship harder to turn than a compact one of the same mass", () => {
-        const compact = shipPhysics(shipWith([], [[0, 0], [1, 0], [0, 1], [1, 1]]))
-        const long = shipPhysics(shipWith([], [[0, 0], [0, 1], [0, 2], [0, 3]]))
+        const compact = dryPhysics(shipWith([], [[0, 0], [1, 0], [0, 1], [1, 1]]))
+        const long = dryPhysics(shipWith([], [[0, 0], [0, 1], [0, 2], [0, 3]]))
 
         expect(long.mass).toBe(compact.mass)
         expect(long.inertia).toBeGreaterThan(compact.inertia)
@@ -67,9 +84,9 @@ describe("mass properties", () => {
         const decorated = shipWith([], [[0, 0], [1, 0]])
         decorated.layers.cosmetic.set(9, 9, "full")
 
-        expect(shipPhysics(decorated).mass).toBe(shipPhysics(plain).mass)
-        expect(shipPhysics(decorated).inertia).toBeCloseTo(shipPhysics(plain).inertia)
-        expect(shipPhysics(decorated).center).toEqual(shipPhysics(plain).center)
+        expect(dryPhysics(decorated).mass).toBe(dryPhysics(plain).mass)
+        expect(dryPhysics(decorated).inertia).toBeCloseTo(dryPhysics(plain).inertia)
+        expect(dryPhysics(decorated).center).toEqual(dryPhysics(plain).center)
     })
 })
 
@@ -77,20 +94,20 @@ describe("thruster forces", () => {
     it("pushes the ship opposite the way the exhaust leaves", () => {
         // Facing south, so the ship goes north - which is negative y in a grid
         // whose rows count downward
-        const [thruster] = shipPhysics(shipWith([{ col: 0, row: 0, facing: 2 }])).thrusters
+        const [thruster] = dryPhysics(shipWith([{ col: 0, row: 0, facing: 2 }])).thrusters
 
         expect(thruster!.force.x).toBeCloseTo(0)
         expect(thruster!.force.y).toBeLessThan(0)
     })
 
     it("produces no torque through the center of mass", () => {
-        const { thrusters } = shipPhysics(shipWith([{ col: 0, row: 0, facing: 2 }]))
+        const { thrusters } = dryPhysics(shipWith([{ col: 0, row: 0, facing: 2 }]))
 
         expect(thrusters[0]!.torque).toBeCloseTo(0)
     })
 
     it("cancels the torque of a symmetric pair", () => {
-        const { thrusters } = shipPhysics(shipWith([
+        const { thrusters } = dryPhysics(shipWith([
             { col: 0, row: 0, facing: 2 },
             { col: 4, row: 0, facing: 2 },
         ]))
@@ -106,7 +123,7 @@ describe("thruster forces", () => {
     it("spins the ship from a single offset thruster", () => {
         // Two engines, one dead - mass sits at the middle and only one pushes
         const ship = shipWith([{ col: 0, row: 0, facing: 2 }, { col: 4, row: 0, facing: 2 }])
-        const { thrusters } = shipPhysics(ship)
+        const { thrusters } = dryPhysics(ship)
 
         expect(thrusters[0]!.torque).not.toBeCloseTo(0)
     })
@@ -116,7 +133,7 @@ describe("thruster forces", () => {
         // counter-clockwise on a screen whose y counts downward. If a refactor ever
         // mirrors the world, this is the test that says so.
         const ship = shipWith([{ col: 0, row: 0, facing: 2 }, { col: 4, row: 0, facing: 2 }])
-        const { thrusters } = shipPhysics(ship)
+        const { thrusters } = dryPhysics(ship)
 
         const right = thrusters.find((t) => t.torque < 0)
         const left = thrusters.find((t) => t.torque > 0)
@@ -129,14 +146,14 @@ describe("thruster forces", () => {
         const ship = shipWith([], [[0, 0]])
         ship.layers.components.set(0, 0, "full", { type: "crate" })
 
-        expect(shipPhysics(ship).thrusters).toHaveLength(0)
+        expect(dryPhysics(ship).thrusters).toHaveLength(0)
     })
 })
 
 describe("control allocation", () => {
     /** One engine at each end, facing aft, so both push north and both spin. */
     function pair() {
-        return shipPhysics(shipWith([
+        return dryPhysics(shipWith([
             { col: 0, row: 0, facing: 2 },
             { col: 4, row: 0, facing: 2 },
         ]))
@@ -172,7 +189,7 @@ describe("control allocation", () => {
     it("leaves an engine the builder did not mark for steering out of a turn", () => {
         // The whole point of the flag: this engine has the torque to do it and is
         // still not asked, because the main drive is not what you turn with
-        const physics = shipPhysics(shipWith([
+        const physics = dryPhysics(shipWith([
             { col: 0, row: 0, facing: 2, steering: false },
             { col: 4, row: 0, facing: 2, steering: false },
         ]))
@@ -183,7 +200,7 @@ describe("control allocation", () => {
     it("still burns an unmarked engine for thrust", () => {
         // Not steering is not disabled - the flag says what Q and E may spend,
         // and nothing about what W does
-        const physics = shipPhysics(shipWith([{ col: 0, row: 0, facing: 2, steering: false }]))
+        const physics = dryPhysics(shipWith([{ col: 0, row: 0, facing: 2, steering: false }]))
 
         expect(throttles(physics, pressing({ move: { x: 0, y: -1 } }), 0, 1 / 60)).toEqual([1])
     })
@@ -192,7 +209,7 @@ describe("control allocation", () => {
         // A dot product of the whole vector mixes the two, so a strong push the
         // wrong way on one axis can outvote a weak right-way push on the other.
         // North engine and east engine, asked for north-east: both, independently.
-        const physics = shipPhysics(shipWith([
+        const physics = dryPhysics(shipWith([
             { col: 0, row: 0, facing: 2 },
             { col: 1, row: 0, facing: 3 },
         ]))
@@ -204,7 +221,7 @@ describe("control allocation", () => {
     it("fires the sideways engine even when it will spin the ship", () => {
         // Placement is the player's problem, not the allocator's: pressing D lights
         // up what points west, wherever they put it
-        const physics = shipPhysics(shipWith([
+        const physics = dryPhysics(shipWith([
             { col: 0, row: 0, facing: 3 },
             { col: 0, row: 4, facing: 2 },
         ]))
@@ -217,7 +234,7 @@ describe("control allocation", () => {
 
 describe("flight assist", () => {
     function pair() {
-        return shipPhysics(shipWith([
+        return dryPhysics(shipWith([
             { col: 0, row: 0, facing: 2 },
             { col: 4, row: 0, facing: 2 },
         ]))
@@ -262,7 +279,7 @@ describe("flight assist", () => {
     it("will not steady a spin with engines the builder kept for thrust", () => {
         // Assist is rotation control, so it spends what Q and E spend. Otherwise
         // holding nothing would fire the mains and shove the ship down-range.
-        const physics = shipPhysics(shipWith([
+        const physics = dryPhysics(shipWith([
             { col: 0, row: 0, facing: 2, steering: false },
             { col: 4, row: 0, facing: 2, steering: false },
         ]))
@@ -272,10 +289,22 @@ describe("flight assist", () => {
 
     it("gives a ship with nothing off-axis nothing to stabilise with", () => {
         // The whole rule in one case: assist fires real engines or it does nothing
-        const physics = shipPhysics(shipWith([{ col: 0, row: 0, facing: 2 }]))
+        const physics = dryPhysics(shipWith([{ col: 0, row: 0, facing: 2 }]))
         const firing = throttles(physics, pressing({ assist: true }), 5, 1 / 60)
 
         expect(firing).toEqual([0])
+    })
+
+    it("will not fire an engine that fights the burn it is steadying", () => {
+        const physics = dryPhysics(shipWith([
+            { col: 0, row: 0, facing: 1 },
+            { col: 4, row: 0, facing: 3 },
+        ]))
+        const firing = throttles(physics, pressing({ move: { x: 1, y: 0 }, assist: true }), 0.005, 1 / 60)
+
+        physics.thrusters.forEach((thruster, index) => {
+            if (thruster.force.x < 0) expect(firing[index]).toBe(0)
+        })
     })
 })
 
@@ -283,14 +312,14 @@ describe("step", () => {
     const DT = 1 / 60
 
     function pair() {
-        return shipPhysics(shipWith([
+        return dryPhysics(shipWith([
             { col: 0, row: 0, facing: 2 },
             { col: 4, row: 0, facing: 2 },
         ]))
     }
 
     it("accelerates the way the engines push", () => {
-        const after = step(bodyAt(0, 0), pair(), pressing({ move: { x: 0, y: -1 } }), DT)
+        const after = flown(bodyAt(0, 0), pair(), pressing({ move: { x: 0, y: -1 } }), DT)
 
         expect(after.velocity.y).toBeLessThan(0)
         expect(after.velocity.x).toBeCloseTo(0)
@@ -298,7 +327,7 @@ describe("step", () => {
 
     it("moves using the velocity it just gained, not the one it had", () => {
         // Semi-implicit Euler: a body starting from rest still travels this frame
-        const after = step(bodyAt(0, 0), pair(), pressing({ move: { x: 0, y: -1 } }), DT)
+        const after = flown(bodyAt(0, 0), pair(), pressing({ move: { x: 0, y: -1 } }), DT)
 
         expect(after.position.y).toBeCloseTo(after.velocity.y * DT)
         expect(after.position.y).not.toBe(0)
@@ -307,7 +336,7 @@ describe("step", () => {
     it("keeps coasting with nothing held", () => {
         // Space: no drag, and no quiet damping that would forgive a bad layout
         const drifting = { ...bodyAt(0, 0), velocity: { x: 3, y: -2 }, spin: 0.5 }
-        const after = step(drifting, pair(), IDLE, DT)
+        const after = flown(drifting, pair(), IDLE, DT)
 
         expect(after.velocity).toEqual(drifting.velocity)
         expect(after.spin).toBe(drifting.spin)
@@ -318,8 +347,8 @@ describe("step", () => {
         const physics = pair()
         const controls = pressing({ move: { x: 0, y: -1 } })
 
-        const north = step(bodyAt(0, 0), physics, controls, DT)
-        const turned = step({ ...bodyAt(0, 0), angle: Math.PI / 2 }, physics, controls, DT)
+        const north = flown(bodyAt(0, 0), physics, controls, DT)
+        const turned = flown({ ...bodyAt(0, 0), angle: Math.PI / 2 }, physics, controls, DT)
 
         // Same engines, ship rotated a quarter turn: the push follows it
         expect(turned.velocity.x).toBeCloseTo(-north.velocity.y)
@@ -328,23 +357,23 @@ describe("step", () => {
 
     it("leaves the body it was given untouched", () => {
         const before = bodyAt(0, 0)
-        step(before, pair(), pressing({ move: { x: 0, y: -1 } }), DT)
+        flown(before, pair(), pressing({ move: { x: 0, y: -1 } }), DT)
 
         expect(before.velocity).toEqual({ x: 0, y: 0 })
         expect(before.position).toEqual({ x: 0, y: 0 })
     })
 
     it("does not divide by a ship with no blocks", () => {
-        const empty = shipPhysics(new Ship("t", "T"))
+        const empty = dryPhysics(new Ship("t", "T"))
         const body = bodyAt(1, 2)
 
-        expect(() => step(body, empty, pressing({ move: { x: 0, y: -1 } }), DT)).not.toThrow()
-        expect(step(body, empty, pressing({ move: { x: 0, y: -1 } }), DT)).toEqual(body)
+        expect(() => flown(body, empty, pressing({ move: { x: 0, y: -1 } }), DT)).not.toThrow()
+        expect(flown(body, empty, pressing({ move: { x: 0, y: -1 } }), DT)).toEqual(body)
     })
 
     it("spins a ship burning one engine off-axis", () => {
         const physics = pair()
-        const spun = step(bodyAt(0, 0), physics, pressing({ turn: 1 }), DT)
+        const spun = flown(bodyAt(0, 0), physics, pressing({ turn: 1 }), DT)
 
         expect(spun.spin).not.toBeCloseTo(0)
         expect(spun.angle).toBeCloseTo(spun.spin * DT)
@@ -355,7 +384,7 @@ describe("step", () => {
         let body = { ...bodyAt(0, 0), spin: 0.4 }
 
         for (let frame = 0; frame < 120; frame++) {
-            body = step(body, physics, pressing({ assist: true }), DT)
+            body = flown(body, physics, pressing({ assist: true }), DT)
         }
 
         expect(Math.abs(body.spin)).toBeLessThan(0.01)
@@ -368,7 +397,7 @@ describe("step", () => {
         let body = { ...bodyAt(0, 0), spin: 0.4 }
 
         for (let frame = 0; frame < 120; frame++) {
-            body = step(body, physics, pressing({ assist: true }), DT)
+            body = flown(body, physics, pressing({ assist: true }), DT)
         }
 
         const speed = Math.hypot(body.velocity.x, body.velocity.y)
@@ -482,5 +511,97 @@ describe("bounce", () => {
 
         expect(before.position.x).toBe(50)
         expect(before.velocity.x).toBe(20)
+    })
+})
+
+describe("load stages", () => {
+    /** Two hull cells with one fuel tank on them, at the column given. */
+    function tanked(col: number): Ship {
+        const ship = new Ship("t", "T")
+        ship.layers.hull.set(0, 0, "full")
+        ship.layers.hull.set(1, 0, "full")
+        ship.layers.components.set(col, 0, "full", { type: "fuel-tank" })
+
+        return ship
+    }
+
+    it("reads empty as 0 and full as every stage", () => {
+        expect(loadStage(0, 120)).toBe(0)
+        expect(loadStage(120, 120)).toBe(LOAD_STAGES)
+    })
+
+    it("rounds to the nearest step", () => {
+        expect(loadStage(60, 120)).toBe(5)
+    })
+
+    it("does not divide by an empty capacity", () => {
+        expect(loadStage(5, 0)).toBe(0)
+    })
+
+    it("clamps a fill past the capacity", () => {
+        expect(loadStage(500, 120)).toBe(LOAD_STAGES)
+    })
+
+    it("never steps up as a tank drains", () => {
+        let previous = LOAD_STAGES
+
+        for (let stored = 120; stored >= 0; stored--) {
+            const stage = loadStage(stored, 120)
+            expect(stage).toBeLessThanOrEqual(previous)
+            previous = stage
+        }
+    })
+
+    it("adds exactly a full load's mass when full", () => {
+        const ship = tanked(0)
+        // fuel-tank L1 carries 6 of fuel on top of its own dry 2
+        expect(shipPhysics(ship, FULL).mass - dryPhysics(ship).mass).toBe(6)
+    })
+
+    it("adds half of it at half the stages", () => {
+        const ship = tanked(0)
+        const half = shipPhysics(ship, { fuel: LOAD_STAGES / 2, cargo: 0 })
+
+        expect(half.mass - dryPhysics(ship).mass).toBe(3)
+    })
+
+    it("walks the centre of mass toward a tank as it fills", () => {
+        const forward = tanked(0)
+        const aft = tanked(1)
+
+        expect(shipPhysics(forward, FULL).center.x).toBeLessThan(dryPhysics(forward).center.x)
+        expect(shipPhysics(aft, FULL).center.x).toBeGreaterThan(dryPhysics(aft).center.x)
+    })
+
+    it("rebuilds the inertia rather than only the mass", () => {
+        const ship = tanked(0)
+
+        expect(shipPhysics(ship, FULL).inertia).not.toBeCloseTo(dryPhysics(ship).inertia)
+    })
+
+    it("leaves a ship with no tanks alone", () => {
+        const ship = shipWith([{ col: 0, row: 0, facing: 2 }], [[0, 0], [1, 0]])
+
+        expect(shipPhysics(ship, FULL).mass).toBe(dryPhysics(ship).mass)
+    })
+})
+
+describe("gated thrust", () => {
+    const DT = 1 / 60
+
+    it("does not accelerate when nothing is firing", () => {
+        const physics = dryPhysics(shipWith([{ col: 0, row: 0, facing: 2 }]))
+        const after = step(bodyAt(0, 0), physics, [0], DT)
+
+        expect(after.velocity).toEqual({ x: 0, y: 0 })
+        expect(after.spin).toBe(0)
+    })
+
+    it("accelerates exactly half as hard at half throttle", () => {
+        const physics = dryPhysics(shipWith([{ col: 0, row: 0, facing: 2 }]))
+        const full = step(bodyAt(0, 0), physics, [1], DT)
+        const half = step(bodyAt(0, 0), physics, [0.5], DT)
+
+        expect(half.velocity.y).toBeCloseTo(full.velocity.y / 2)
     })
 })
