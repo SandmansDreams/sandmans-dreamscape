@@ -5,6 +5,7 @@ import { Camera, type Vec2 } from "../../render/camera"
 import { Color } from "../../render/color"
 import { emissiveSources, spillOnto } from "../../game/emissiveSpill"
 import type { Frame } from "../../render/frame"
+import type { Pipeline } from "../../render/webgpu/pipeline"
 import { canPlace, componentById, componentsOfKind, kindOf, maxLevel, type ComponentKind } from "../../render/grid/components"
 import type { Cell } from "../../render/grid/grid"
 import { SHIP_LAYERS, type ShipLayer } from "../../render/grid/layers"
@@ -55,10 +56,20 @@ const GHOST_FADE = 0.72
  * How far a dimmed layer is washed toward the background.
  *
  * 0.85 leaves roughly the 15% of the original colour the button promises. There
- * is no alpha in the vertex format, so this mix against a known background is
- * what translucency means here.
+ * is no alpha in the vertex format, but the *instance* carries one - so a dimmed
+ * layer is drawn blended rather than washed toward the background. That is the
+ * difference between seeing through a plate and merely seeing a paler plate.
  */
-const DIM_FADE = 0.85
+const DIM_ALPHA = 0.35
+
+/**
+ * How far a dimmed *marker* is washed toward the background.
+ *
+ * Still a mix rather than an alpha, and rightly so: a marker is a mark about the
+ * ship rather than part of it, drawn flat over everything through the plain
+ * pipeline. There is nothing underneath it worth seeing through to.
+ */
+const MARKER_DIM_FADE = 0.85
 
 /** How strongly a protected block is tinted red. */
 const PROTECTED_TINT = 0.45
@@ -354,6 +365,8 @@ class ShipBuilder implements SceneInstance<EditorValues> {
     /** Off by default: building wants flat, honest colours, not a lit render. */
     private lit = false
     private readonly litBatch: InstanceBatch
+    /** The same identity instance, carrying the alpha a dimmed layer draws at. */
+    private readonly dimBatch: InstanceBatch
     private readonly lights: LightBinding
     private readonly field = new LightField()
     private readonly sun = new Light({ position: { x: 0, y: 0 } })
@@ -527,6 +540,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         // One instance, because the builder draws one ship and never moves it -
         // the lit pipeline is instanced, so even a still hull needs a transform
         this.litBatch = InstanceBatch.create(gpu, context.renderer.instanceLayout, 1, "builder ship")
+        this.dimBatch = InstanceBatch.create(gpu, context.renderer.instanceLayout, 1, "builder dim")
         this.lights = LightBinding.create(gpu, 1)
         this.field.add(this.sun)
 
@@ -611,11 +625,16 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         const { camera, mesh: meshPipeline, meshLines: linePipeline } = this.context.renderer
         camera.upload(this.camera, gpu.width, gpu.height)
 
-        // The ship first, lit or flat
+        // The ship first, lit or flat. The flat view goes through the instanced
+        // pipeline rather than the plain mesh one for a single reason: mesh2d
+        // writes an alpha of 1 and can never be seen through, and dimming a layer
+        // has to work the same way in both views.
         if (this.lit) this.drawLit(frame)
         else {
-            frame.setPipeline(meshPipeline).setBindGroup(0, camera.group)
-            for (const layer of SHIP_LAYERS) this.meshes.get(layer)?.draw(frame)
+            this.litBatch.begin().add(0, 0, 0, 1, 1, 1, 1, 1)
+            this.dimBatch.begin().add(0, 0, 0, 1, 1, 1, 1, DIM_ALPHA)
+
+            this.drawLayers(frame, this.context.renderer.instanced, this.context.renderer.instancedAlpha)
         }
 
         // Everything from here is a mark *about* the ship rather than the ship, so
@@ -755,6 +774,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         this.protectedBoxes?.destroy()
         this.steeringBoxes.destroy()
         this.litBatch.destroy()
+        this.dimBatch.destroy()
         this.lights.destroy()
         this.bloomMesh?.destroy()
         this.hover.destroy()
@@ -1321,11 +1341,11 @@ class ShipBuilder implements SceneInstance<EditorValues> {
             const view = this.layerView[layer]
             if (view === "hidden") continue
 
+            // No fade baked in: dimming is the instance's alpha at draw time, so
+            // the mesh no longer depends on how the layer is being viewed
             const builder = new MeshBuilder()
-            const fade = view === "dim" ? DIM_FADE : 0
-
             const grid = this.ship.layers[layer]
-            appendLayer(builder, grid, CELL, this.origin, fade, BACKGROUND, spillOnto(grid, sources))
+            appendLayer(builder, grid, CELL, this.origin, 0, BACKGROUND, spillOnto(grid, sources))
 
             // Across every layer, since the hull is shaded as one object
             this.shadingReach = Math.max(this.shadingReach, builder.cellReach)
@@ -1460,6 +1480,29 @@ class ShipBuilder implements SceneInstance<EditorValues> {
      * rather than another set of sliders: this is a look, not a lighting rig, and
      * the ship viewer already has the rig.
      */
+    /**
+     * Draws every visible layer, dimmed ones blended.
+     *
+     * In SHIP_LAYERS order with the pipeline switched per layer rather than
+     * grouped by pipeline: without a depth buffer the last thing drawn wins, and
+     * a dimmed *hull* under a full cosmetic still has to be drawn first. Grouping
+     * the blended draws together would quietly put them on top.
+     */
+    private drawLayers(frame: Frame, solid: Pipeline, blended: Pipeline, lights?: GPUBindGroup): void {
+        const camera = this.context.renderer.camera
+
+        for (const layer of SHIP_LAYERS) {
+            const mesh = this.meshes.get(layer)
+            if (!mesh) continue
+
+            const dim = this.layerView[layer] === "dim"
+            frame.setPipeline(dim ? blended : solid).setBindGroup(0, camera.group)
+            if (lights) frame.setBindGroup(1, lights)
+
+            ;(dim ? this.dimBatch : this.litBatch).draw(frame, mesh)
+        }
+    }
+
     private drawLit(frame: Frame): void {
         const renderer = this.context.renderer
         const reach = this.shadingReach
@@ -1474,17 +1517,13 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         this.lights.begin().add(this.field.sample({ x: 0, y: 0 }, 0), reach)
         this.lights.upload()
 
-        // The mesh sits where it was built, so the instance is the identity one
-        this.litBatch.begin().add(0, 0, 0, 1, 1, 1, 1)
+        // The mesh sits where it was built, so the instance is the identity one.
+        // Both batches hold exactly one, so both read surfaces[0] and the lighting
+        // is identical - only the alpha differs.
+        this.litBatch.begin().add(0, 0, 0, 1, 1, 1, 1, 1)
+        this.dimBatch.begin().add(0, 0, 0, 1, 1, 1, 1, DIM_ALPHA)
 
-        frame.setPipeline(renderer.lit)
-            .setBindGroup(0, renderer.camera.group)
-            .setBindGroup(1, this.lights.group)
-
-        for (const layer of SHIP_LAYERS) {
-            const mesh = this.meshes.get(layer)
-            if (mesh) this.litBatch.draw(frame, mesh)
-        }
+        this.drawLayers(frame, renderer.lit, renderer.litAlpha, this.lights.group)
 
         // The emissive halo, over the hull it spills off. Part of the preview
         // rather than the flat view: a glow is light, and the flat view is the one
@@ -1591,7 +1630,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
      * the dim state is one rule instead of five that can drift apart.
      */
     private markerInk(base: Color): Color {
-        return this.layerView.markers === "dim" ? base.mix(BACKGROUND, DIM_FADE) : base
+        return this.layerView.markers === "dim" ? base.mix(BACKGROUND, MARKER_DIM_FADE) : base
     }
 
     /**

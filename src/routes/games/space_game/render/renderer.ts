@@ -69,6 +69,8 @@ export class Renderer {
     private instancedLinesPipeline: Pipeline | null = null
     private instancedGlowPipeline: Pipeline | null = null
     private litPipeline: Pipeline | null = null
+    private litAlphaPipeline: Pipeline | null = null
+    private instancedAlphaPipeline: Pipeline | null = null
     private litShader: Shader | null = null
 
     private constructor(
@@ -111,6 +113,42 @@ export class Renderer {
         })
 
         return this.litPipeline
+    }
+
+    /**
+     * The same lit hull, blended by the instance's alpha.
+     *
+     * For a layer you want to see *through* rather than past. The alternative the
+     * builder used before this - washing colours toward the background - only
+     * looks translucent over the background itself; over another layer it just
+     * fades, which is the opposite of showing what is underneath.
+     *
+     * There is no depth buffer, so what lands on top is whatever was drawn last:
+     * SHIP_LAYERS is bottom to top for exactly this reason.
+     */
+    get litAlpha(): Pipeline {
+        this.litAlphaPipeline ??= Pipeline.create(this.gpu, {
+            label: "lit 2d alpha",
+            shader: this.lit2d(),
+            layouts: [this.camera.layout, this.lightLayout, this.instanceLayout],
+            vertexBuffers: [VERTEX_LAYOUT, CELL_VERTEX_LAYOUT],
+            blend: "alpha",
+        })
+
+        return this.litAlphaPipeline
+    }
+
+    /** Instanced triangles blended by the instance's alpha. The unlit twin of litAlpha. */
+    get instancedAlpha(): Pipeline {
+        this.instancedAlphaPipeline ??= Pipeline.create(this.gpu, {
+            label: "instanced 2d alpha",
+            shader: this.instanced2d(),
+            layouts: [this.camera.layout, this.materialLayout, this.instanceLayout],
+            vertexBuffers: [VERTEX_LAYOUT],
+            blend: "alpha",
+        })
+
+        return this.instancedAlphaPipeline
     }
 
     /** Triangles in the shared 2D mesh format. What almost every scene draws. */

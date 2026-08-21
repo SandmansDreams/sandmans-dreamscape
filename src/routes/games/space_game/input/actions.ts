@@ -118,6 +118,9 @@ export const ACTIONS = {
     },
 
     /*~~~ Drawing component art ~~~*/
+    "sprite.toolBuild":   { label: "Build tool", context: "sprite", keys: ["KeyB"] },
+    "sprite.toolDestroy": { label: "Destroy tool", context: "sprite", keys: ["KeyD"] },
+
     "sprite.rotate":     { label: "Rotate shape", context: "sprite", keys: ["KeyR"] },
     "sprite.mirror":     { label: "Mirror shape", context: "sprite", keys: ["KeyM"] },
     "sprite.cycleLayer": { label: "Next art layer", context: "sprite", keys: ["KeyL"] },
@@ -125,6 +128,13 @@ export const ACTIONS = {
     "sprite.nextShape":  { label: "Next shape", context: "sprite", keys: ["ArrowRight"], capture: true },
     "sprite.prevRole":   { label: "Previous role", context: "sprite", keys: ["ArrowUp"], capture: true },
     "sprite.nextRole":   { label: "Next role", context: "sprite", keys: ["ArrowDown"], capture: true },
+
+    "sprite.undo": {
+        label: "Undo", context: "sprite", keys: ["KeyZ"], mods: ["ctrl"], capture: true,
+    },
+    "sprite.redo": {
+        label: "Redo", context: "sprite", keys: ["KeyY"], mods: ["ctrl"], capture: true,
+    },
 } as const satisfies Record<string, ActionSpec>
 
 export type ActionId = keyof typeof ACTIONS

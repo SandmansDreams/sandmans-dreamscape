@@ -221,9 +221,14 @@
         hidden: circleEmptyIconSRC,
     }
 
+    /*
+     * Worded as "see through" rather than a percentage: a dimmed layer is drawn
+     * blended now, not washed toward the background, so the point of it is what
+     * shows through rather than how pale it went.
+     */
     const VIEW_TIP: Record<LayerView, string> = {
-        full: "Visible. Click to dim to 15%",
-        dim: "Dimmed to 15%. Click to hide",
+        full: "Visible. Click to see through it",
+        dim: "See-through. Click to hide",
         hidden: "Hidden. Click to show",
     }
 

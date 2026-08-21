@@ -7,9 +7,11 @@ import { DRAWN_SHAPES } from "../../render/grid/palette"
 import { ART_LAYERS, ART_ROLES, bakeRole, type ArtLayer, type ArtRole } from "../../render/grid/spriteMesh"
 import { DynamicMesh, FLOATS_PER_VERTEX, Mesh, MeshBuilder } from "../../render/mesh"
 import type { InputService } from "../../input/service"
+import { actionsIn, keysFor, specOf } from "../../input/actions"
 import type { SceneContext, SceneInstance } from "../../render/scene"
-import type { ActionsOf, SettingsSchema, ValuesOf } from "../../settings/settings"
+import type { ActionsOf, SearchColumn, SettingsSchema, ValuesOf } from "../../settings/settings"
 import { artFromText, artToText, emptyArt, ART_GRID, type ComponentArt } from "../../game/componentArt"
+import { ART_PIECES } from "../../assets/components"
 import { downloadText, uploadText } from "../../download"
 import type { DevSceneDefinition } from "../DevScene"
 
@@ -42,22 +44,34 @@ const GHOST_FADE = 0.72
 const IDLE_LAYER_FADE = 0.55
 const BACKGROUND = Color.rgb(0.05, 0.05, 0.07)
 
+const PIECE_COLUMNS: readonly SearchColumn[] = [
+    { header: "Sprite", cell: (id) => ART_PIECES.find((art) => art.id === id)?.name ?? id },
+    { header: "Id", cell: (id) => id },
+]
+
+/*
+ * Only what has nowhere better to live.
+ *
+ * The id and name moved into the piece readout, beside the counts they describe,
+ * and every button here had a twin in the top bar - two ways to clear a layer is
+ * one more than anyone needs. What is left is the picker and the two view
+ * toggles, which is the same shape the builder's panel has.
+ */
 const SETTINGS = {
-    id:       { type: "text", label: "Id", default: "new-part" },
-    name:     { type: "text", label: "Name", default: "New Part" },
+    piece: {
+        type: "search",
+        label: "Open",
+        default: "",
+        options: ART_PIECES.map((art) => art.id),
+        placeholder: "Find a sprite...",
+        columns: PIECE_COLUMNS,
+        limit: 50,
+    },
 
     viewSep:  { type: "separator", label: "View" },
 
     baked:    { type: "checkbox", label: "Show baked", default: false },
     lattice:  { type: "checkbox", label: "Grid", default: true },
-
-    fileSep:  { type: "separator", label: "File" },
-
-    clearRole: { type: "button", label: "Clear Role" },
-    clearLayer: { type: "button", label: "Clear Layer" },
-    clearAll:  { type: "button", label: "Clear All" },
-    download:  { type: "button", label: "Download Art" },
-    upload:    { type: "button", label: "Upload Art" },
 } as const satisfies SettingsSchema
 
 type EditorValues = ValuesOf<typeof SETTINGS>
@@ -132,8 +146,8 @@ class SpriteEditor implements SceneInstance<EditorValues> {
     private hoverKey = ""
     private settings: EditorValues | null = null
 
-    private lastId = ""
-    private lastName = ""
+    /** The picker's last value, so opening a piece happens once per choice. */
+    private opened = ""
 
     private readonly undoStack: Snapshot[] = []
     private readonly redoStack: Snapshot[] = []
@@ -153,17 +167,23 @@ class SpriteEditor implements SceneInstance<EditorValues> {
         upload: () => uploadText((text) => this.load(text)),
     }
 
-    readonly actions: Record<ActionsOf<typeof SETTINGS>, () => void> = {
-        clearRole: () => this.commands.clearRole!(),
-        clearLayer: () => this.commands.clearLayer!(),
-        clearAll: () => this.commands.clearAll!(),
-        download: () => this.commands.download!(),
-        upload: () => this.commands.upload!(),
-    }
+    /*
+     * Empty: every button lives in the scene's own panel now, and reaches the
+     * commands below through `receive("action")` rather than through a setting.
+     */
+    readonly actions: Record<ActionsOf<typeof SETTINGS>, () => void> = {}
 
     receive(key: string, value: unknown): void {
         if (key === "artBrush") {
             this.patchBrush(value as Partial<ArtBrush>)
+            return
+        }
+
+        if (key === "identity") {
+            const patch = value as { id?: string; name?: string }
+            if (patch.id !== undefined) this.art.id = patch.id
+            if (patch.name !== undefined) this.art.name = patch.name
+            this.publishInfo()
             return
         }
 
@@ -181,11 +201,12 @@ class SpriteEditor implements SceneInstance<EditorValues> {
         this.ghost = DynamicMesh.create(gpu, "art ghost")
 
         this.publishBrush()
+        this.publishKeyGuide()
     }
 
     update(_dt: number, settings: EditorValues): void {
         this.settings = settings
-        this.syncIdentity(settings)
+        this.syncPiece(settings)
         this.frameCanvas()
 
         this.readShortcuts()
@@ -249,17 +270,22 @@ class SpriteEditor implements SceneInstance<EditorValues> {
         return col >= 0 && row >= 0 && col < ART_GRID && row < ART_GRID
     }
 
-    /** Keeps the piece's id and name in step with the fields. */
-    private syncIdentity(settings: EditorValues): void {
-        if (settings.id !== this.lastId) {
-            this.lastId = settings.id
-            this.art.id = settings.id
-        }
+    /**
+     * Opens whichever piece the picker names, once per choice.
+     *
+     * Round-tripped through the file format rather than adopted directly: the
+     * pieces in `ART_PIECES` are the ones the game itself draws with, and editing
+     * one in place would repaint every ship on screen. Serialising is already how
+     * a piece survives leaving memory, so it is also how it is safely copied.
+     */
+    private syncPiece(settings: EditorValues): void {
+        if (settings.piece === this.opened || settings.piece === "") return
+        this.opened = settings.piece
 
-        if (settings.name !== this.lastName) {
-            this.lastName = settings.name
-            this.art.name = settings.name
-        }
+        const piece = ART_PIECES.find((art) => art.id === settings.piece)
+        if (!piece) return
+
+        this.load(artToText(piece))
     }
 
     /*~~~ Editing ~~~*/
@@ -383,6 +409,22 @@ class SpriteEditor implements SceneInstance<EditorValues> {
     /*~~~ Meshes ~~~*/
 
     /**
+     * The editor's shortcuts, as the player has them bound.
+     *
+     * Read from the live bindings rather than written out in the panel, so a
+     * rebinding shows up in the guide and a card can never claim a key that does
+     * something else. The builder publishes its own the same way.
+     */
+    private publishKeyGuide(): void {
+        const bindings = this.input.table
+
+        this.context.publish("keyGuide", actionsIn("sprite").map((action) => ({
+            keys: keysFor(action, bindings.codesFor(action)),
+            does: specOf(action).label,
+        })))
+    }
+
+    /**
      * The keyboard's brush shortcuts.
      *
      * The scene's job for the same reason the builder's are: it owns the brush,
@@ -392,6 +434,13 @@ class SpriteEditor implements SceneInstance<EditorValues> {
     private readShortcuts(): void {
         const input = this.input
         const brush = this.brush
+
+        // Tools and history first, matching the builder key for key: the two
+        // scenes are the same kind of tool and should not need separate muscle memory
+        if (input.pressed("sprite.toolBuild")) this.patchBrush({ tool: "build" })
+        if (input.pressed("sprite.toolDestroy")) this.patchBrush({ tool: "destroy" })
+        if (input.pressed("sprite.undo")) this.undo()
+        if (input.pressed("sprite.redo")) this.redo()
 
         if (input.pressed("sprite.rotate")) {
             this.patchBrush({ turns: (brush.turns + 1) % turnCount(brush.shape) })

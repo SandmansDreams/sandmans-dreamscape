@@ -24,6 +24,16 @@ for (const [path, data] of Object.entries(files)) {
 }
 
 /**
+ * Every piece of art in the game, by the id it is keyed on.
+ *
+ * For the sprite editor, which lists them to be opened rather than looking one
+ * up for a component. Sorted by id so the list does not reshuffle when a file is
+ * added - import.meta.glob's order is the filesystem's, not anything stable.
+ */
+export const ART_PIECES: readonly ComponentArt[] = [...byId.values()]
+    .sort((a, b) => a.id.localeCompare(b.id))
+
+/**
  * The art a component wears at a level, or null to fall back to the placeholder.
  *
  * `artIds` yields the level-specific id first, so a level only needs its own file

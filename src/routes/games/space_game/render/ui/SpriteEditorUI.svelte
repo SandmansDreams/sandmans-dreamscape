@@ -1,4 +1,10 @@
 <script lang="ts">
+    import screwDriverIconSRC from "../../assets/icons/SpaceGame-Screw_Driver.png"
+    import eraserIconSRC from "../../assets/icons/SpaceGame-Eraser.png"
+    import undoIconSRC from "../../assets/icons/SpaceGame-Undo.png"
+    import clearLayerIconSRC from "../../assets/icons/SpaceGame-X.png"
+    import clearAllIconSRC from "../../assets/icons/SpaceGame-Bomb.png"
+    import arrowIconSRC from "../../assets/icons/SpaceGame-Arrow.png"
     import { shapeSvgPath } from "../shapeSVG"
     import { DRAWN_SHAPES } from "../grid/palette"
     import { turnCount, type BlockShape } from "../grid/shapes"
@@ -11,11 +17,17 @@
      * Owns nothing. The scene holds the brush and the piece; every control asks
      * for a change and waits to be told what happened.
      */
-    let { brush, info = null, onPatch, onAction }: {
+    let { brush, info = null, onPatch, onAction, onIdentity, keyGuide = [] }: {
         brush: ArtBrush
         info?: ArtInfo | null
         onPatch: (patch: Partial<ArtBrush>) => void
         onAction: (name: string) => void
+        /**
+         * A patch rather than a whole identity, so the two fields never overwrite
+         * each other - the same contract the builder's name and creator use.
+         */
+        onIdentity: (patch: { id?: string; name?: string }) => void
+        keyGuide?: { keys: string; does: string }[]
     } = $props()
 
     const TOOLS = ["build", "destroy"] as const
@@ -36,6 +48,35 @@
     function set(patch: Partial<ArtBrush>) {
         onPatch(patch)
     }
+
+    /** Which destructive button is armed, if any. */
+    let confirming = $state<string | null>(null)
+
+    /**
+     * First click arms, second fires.
+     *
+     * In-panel rather than window.confirm: it matches the rest of the UI, it does
+     * not block the render loop, and it is testable. Lifted from the builder,
+     * where clearing is exactly as easy to hit by accident.
+     */
+    function armOrRun(name: string) {
+        if (confirming !== name) {
+            confirming = name
+            return
+        }
+
+        confirming = null
+        onAction(name)
+    }
+
+    // An armed button that stays armed is a trap: come back in a minute and a
+    // single click wipes the piece
+    $effect(() => {
+        if (confirming === null) return
+
+        const timer = setTimeout(() => (confirming = null), 3000)
+        return () => clearTimeout(timer)
+    })
 
     /** Squares on a layer and role, or zero before the scene has published. */
     function cellsOn(layer: ArtLayer, role: ArtRole): number {
@@ -85,40 +126,71 @@
 </script>
 
 <div id="sprite-ui">
+    <!-- Grouped and iconed the way the builder's is: the two scenes are the same
+         kind of tool, and a shared shape is what makes one teach the other -->
     <div id="top-panel" class="panel">
         <div class="group">
-            {#each TOOLS as name (name)}
-                <button class={brush.tool === name ? "active" : ""} onclick={() => set({ tool: name })}>
-                    {name}
-                </button>
-            {/each}
+            <button class={`icon-button ${brush.tool === "build" ? "active" : ""}`} onclick={() => set({ tool: "build" })}>
+                <img class="image-icon" src={screwDriverIconSRC} alt="screw-driver.png">
+                BUILD
+            </button>
+            <button class={`icon-button ${brush.tool === "destroy" ? "active" : ""}`} onclick={() => set({ tool: "destroy" })}>
+                <img class="image-icon" src={eraserIconSRC} alt="eraser.png">
+                DESTROY
+            </button>
         </div>
 
         <span class="divider"></span>
 
         <div class="group">
-            <button onclick={() => onAction("undo")}>undo</button>
-            <button onclick={() => onAction("redo")}>redo</button>
-            <button onclick={() => onAction("clearRole")}>clear role</button>
-            <button onclick={() => onAction("clearLayer")}>clear layer</button>
-            <button onclick={() => onAction("clearAll")}>clear all</button>
+            <button class="icon-button" onclick={() => onAction("undo")}>
+                <img class="image-icon" src={undoIconSRC} alt="undo.png">
+                UNDO
+            </button>
+            <button class="icon-button" onclick={() => onAction("redo")}>
+                <img class="image-icon" src={undoIconSRC} style="transform: scaleX(-1)" alt="redo.png">
+                REDO
+            </button>
+            <button class={`icon-button ${confirming === "clearRole" ? "arming" : ""}`} onclick={() => armOrRun("clearRole")}>
+                <img class="image-icon" src={clearLayerIconSRC} alt="clear.png">
+                {confirming === "clearRole" ? "YOU SURE?" : "CLEAR ROLE"}
+            </button>
+            <button class={`icon-button ${confirming === "clearLayer" ? "arming" : ""}`} onclick={() => armOrRun("clearLayer")}>
+                <img class="image-icon" src={clearLayerIconSRC} alt="clear.png">
+                {confirming === "clearLayer" ? "YOU SURE?" : "CLEAR LAYER"}
+            </button>
+            <button class={`icon-button ${confirming === "clearAll" ? "arming" : ""}`} onclick={() => armOrRun("clearAll")}>
+                <img class="image-icon" src={clearAllIconSRC} alt="bomb.png">
+                {confirming === "clearAll" ? "YOU SURE?" : "CLEAR ALL"}
+            </button>
         </div>
 
         <span class="divider"></span>
 
         <div class="group">
-            <button onclick={() => onAction("upload")}>upload</button>
-            <button onclick={() => onAction("download")}>download</button>
-        </div>
-
-        <span class="divider"></span>
-
-        <div class="group hints">
-            <span><b>R</b> rotate</span>
-                <span><b>M</b> mirror</span>
-            <span><b>L</b> layer</span>
+            <button class="icon-button" onclick={() => onAction("upload")}>
+                <img class="image-icon" src={arrowIconSRC} alt="upload.png">
+                UPLOAD
+            </button>
+            <button class="icon-button" onclick={() => onAction("download")}>
+                <img class="image-icon" src={arrowIconSRC} style="transform: scaleY(-1)" alt="download.png">
+                DOWNLOAD
+            </button>
         </div>
     </div>
+
+    <!-- Top right, above the readout: a card you glance at while your other hand
+         is on the keyboard, the same place the builder puts its own -->
+    {#if keyGuide.length > 0}
+        <div id="key-guide" class="panel">
+            <div class="heading">KEYS</div>
+            <dl class="readout">
+                {#each keyGuide as entry (entry.does)}
+                    <dt>{entry.keys}</dt><dd>{entry.does}</dd>
+                {/each}
+            </dl>
+        </div>
+    {/if}
 
     <div id="left-panel" class="panel">
         <!-- Layer above role: it decides which canvas every other control acts
@@ -186,8 +258,24 @@
         <div class="heading">PIECE</div>
         {#if info}
             <dl class="readout">
-                <dt>id</dt><dd>{info.id}</dd>
-                <dt>name</dt><dd>{info.name}</dd>
+                <dt>id</dt>
+                <dd>
+                    <input
+                        class="identity-input"
+                        value={info.id}
+                        oninput={(e) => onIdentity({ id: e.currentTarget.value })}
+                        aria-label="Sprite id"
+                    />
+                </dd>
+                <dt>name</dt>
+                <dd>
+                    <input
+                        class="identity-input"
+                        value={info.name}
+                        oninput={(e) => onIdentity({ name: e.currentTarget.value })}
+                        aria-label="Sprite name"
+                    />
+                </dd>
                 <dt>grid</dt><dd>{info.grid}x{info.grid}</dd>
             </dl>
 
@@ -307,8 +395,77 @@
     }
     .group { display: flex; gap: 5px; align-items: center; }
     .divider { width: 1px; align-self: stretch; background: var(--ui-separator); }
-    .hints { gap: 10px; font-size: 11px; opacity: .7; }
-    .hints b { color: var(--active); }
+    /* Same 85px column as the builder's toolbar, and for the same reason: an
+       explicit column rather than a label left to wrap past an inline icon, so a
+       short label like UNDO lays out exactly like CLEAR LAYER beside it */
+    .icon-button {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+
+        width: 85px;
+        height: 85px;
+        padding: 3px;
+        color: white;
+        font-weight: bold;
+        font-size: 12px;
+        border-radius: 0;
+        margin: 0;
+        text-align: center;
+    }
+    .image-icon {
+        /* Must be a factor of 16 */
+        width: 48px;
+        height: 48px;
+        margin-bottom: 5px;
+        image-rendering: pixelated;
+    }
+    /* Armed and waiting for a second click, so it cannot be mistaken for ready */
+    .icon-button.arming {
+        background-color: rgba(255, 90, 90, .35);
+        border-color: rgb(255, 120, 120);
+    }
+
+    /* Top right, clear of the piece readout below it */
+    #key-guide {
+        right: 14px;
+        top: 14px;
+        width: 186px;
+        /* Eleven shortcuts, not the builder's nine: sized to show the last one
+           rather than to match a number that was right for a different scene */
+        max-height: 260px;
+        overflow-y: auto;
+    }
+    /* Keys left, what they do right - the opposite of the readouts, because here
+       the key is what you are looking up */
+    #key-guide .readout {
+        grid-template-columns: auto 1fr;
+        font-size: 11px;
+    }
+    #key-guide dt { font-weight: bold; }
+    #key-guide dd { opacity: .7; text-align: right; }
+
+    .identity-input {
+        width: 100%;
+        min-width: 0;
+        /* Or the padding and border are added to the 100% and the value is pushed
+           out past the panel, which clips it */
+        box-sizing: border-box;
+        padding: 2px 4px;
+        font-family: inherit;
+        font-size: 12px;
+        font-weight: bold;
+        text-align: right;
+        color: var(--text-color);
+        background: rgba(0, 0, 0, .35);
+        border: 1px solid var(--ui-separator);
+        border-radius: 3px;
+    }
+    .identity-input:focus {
+        outline: none;
+        border-color: var(--text-color);
+    }
 
     #left-panel {
         left: 14px;
@@ -367,11 +524,14 @@
     .swatch:hover { border-color: var(--ui-border); }
     .swatch.active { border-color: var(--active); }
 
+    /* Under the key card rather than centred: the two share the right edge, and a
+       vertically centred readout would slide up behind it as the piece grows */
     #info-panel {
         right: 14px;
-        top: 50%;
-        transform: translateY(-50%);
-        width: 170px;
+        top: 290px;
+        width: 186px;
+        max-height: calc(100vh - 320px);
+        overflow-y: auto;
     }
 
     .readout {

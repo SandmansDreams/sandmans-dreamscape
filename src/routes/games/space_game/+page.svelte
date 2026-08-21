@@ -215,8 +215,10 @@
         <SpriteEditorUI
             brush={artBrush}
             info={artInfo}
+            keyGuide={keyGuide}
             onPatch={(patch) => runner?.send("artBrush", patch)}
             onAction={(name) => runner?.send("action", name)}
+            onIdentity={(patch) => runner?.send("identity", patch)}
         />
     {:else if scene?.ui === "viewer"}
         <ViewerUI
