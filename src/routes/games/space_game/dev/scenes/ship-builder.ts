@@ -4,6 +4,7 @@ import { shipFromText, shipToText } from "../../game/shipJson"
 import { Camera, type Vec2 } from "../../render/camera"
 import { Color } from "../../render/color"
 import { emissiveSources, spillOnto } from "../../game/emissiveSpill"
+import { wiresFrom } from "../../game/powerNetwork"
 import type { Frame } from "../../render/frame"
 import type { Pipeline } from "../../render/webgpu/pipeline"
 import { canPlace, componentById, componentsOfKind, kindOf, maxLevel, type ComponentKind } from "../../render/grid/components"
@@ -107,6 +108,25 @@ const CELL = 32
  * relative to the blocks it is drawn around however far the camera is zoomed.
  */
 const OUTLINE_WIDTH = CELL * 0.03
+
+/*~~~ Power wires ~~~*/
+
+/**
+ * The two passes a wire is drawn in: a wide dim one under a narrow bright one.
+ *
+ * Additive, so where they overlap they sum to a hot core inside a soft halo -
+ * which is what makes a line read as glowing rather than as merely coloured. One
+ * pass at any width just looks like a line.
+ */
+const WIRE_HALO_WIDTH = CELL * 0.18
+const WIRE_CORE_WIDTH = CELL * 0.05
+
+/** Trunk between two sources, and the last hop to something that spends. */
+const WIRE_RELAY_COLOR = Color.from("#39d7ff")
+const WIRE_DRAW_COLOR = Color.from("#8bff6a")
+
+/** How much of its colour the halo carries. Low: it is spill, not the wire. */
+const WIRE_HALO_STRENGTH = 0.28
 
 /** What a DynamicMesh is written with to say it holds nothing this frame. */
 const EMPTY_MESH = new Float32Array(0)
@@ -388,6 +408,9 @@ class ShipBuilder implements SceneInstance<EditorValues> {
     private highlight: string | null = null
     private highlightKey = ""
     private readonly highlightBoxes: DynamicMesh
+    /** Where the selected part's power comes from, or goes to. Empty when nothing is selected. */
+    private readonly powerWires: DynamicMesh
+    private wiresKey = ""
 
     /**
      * The one brush there is.
@@ -555,6 +578,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         this.ghost = DynamicMesh.create(gpu, "ghost")
         this.selectedBox = DynamicMesh.create(gpu, "selected")
         this.highlightBoxes = DynamicMesh.create(gpu, "colour highlight")
+        this.powerWires = DynamicMesh.create(gpu, "power wires")
 
         this.camera.zoom = 1
 
@@ -619,6 +643,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         this.rebuildSteering()
         this.rebuildCursor(col, row)
         this.rebuildHighlight()
+        this.rebuildWires()
         this.publishSelection()
     }
 
@@ -670,6 +695,14 @@ class ShipBuilder implements SceneInstance<EditorValues> {
 
         if (markers) this.steeringBoxes.draw(frame)
         if (markers) this.highlightBoxes.draw(frame)
+
+        // Additive and over the hull: a wire is light running through the ship,
+        // and one hidden behind the plate it feeds would answer nothing
+        if (markers) {
+            frame.setPipeline(this.context.renderer.meshGlow).setBindGroup(0, camera.group)
+            this.powerWires.draw(frame)
+            frame.setPipeline(meshPipeline).setBindGroup(0, camera.group)
+        }
         if (markers) this.selectedBox.draw(frame)
 
         // The legal-cell marks are still lines: they are crosses in open space
@@ -787,6 +820,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         this.massMark?.destroy()
         this.selectedBox.destroy()
         this.highlightBoxes.destroy()
+        this.powerWires.destroy()
     }
 
     /*~~~ Brush ~~~*/
@@ -960,6 +994,60 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         const thick: number[] = []
         thickenSegments(thick, out, OUTLINE_WIDTH)
         this.highlightBoxes.write(new Float32Array(thick))
+    }
+
+    /**
+     * The wiring the selected part sits on, as glowing runs between cells.
+     *
+     * Rebuilt on the ship's plain revision rather than its geometry: moving a
+     * battery one cell changes no triangles on the hull and would otherwise leave
+     * the wires describing where it used to be.
+     *
+     * Nothing selected means nothing drawn. The wires answer "what does this
+     * feed" and "where does this come from", and both questions need a subject.
+     */
+    private rebuildWires(): void {
+        const at = this.selected
+        const key = `${at ? `${at.col},${at.row}` : ""}|${this.ship.revision}|${this.layerView.markers}`
+        if (key === this.wiresKey) return
+        this.wiresKey = key
+
+        this.powerWires.write(EMPTY_MESH)
+        if (!at || this.layerView.markers === "hidden") return
+
+        const links = wiresFrom(this.ship, at.col, at.row)
+        if (links.length === 0) return
+
+        const halo: number[] = []
+        const core: number[] = []
+
+        for (const link of links) {
+            const ink = this.markerInk(link.relay ? WIRE_RELAY_COLOR : WIRE_DRAW_COLOR)
+            const from = this.cellCentre(link.from.col, link.from.row)
+            const to = this.cellCentre(link.to.col, link.to.row)
+
+            core.push(from.x, from.y, ink.r, ink.g, ink.b, to.x, to.y, ink.r, ink.g, ink.b)
+            halo.push(
+                from.x, from.y, ink.r * WIRE_HALO_STRENGTH, ink.g * WIRE_HALO_STRENGTH, ink.b * WIRE_HALO_STRENGTH,
+                to.x, to.y, ink.r * WIRE_HALO_STRENGTH, ink.g * WIRE_HALO_STRENGTH, ink.b * WIRE_HALO_STRENGTH,
+            )
+        }
+
+        // Halo first so the core lands on top of it; additive makes the overlap
+        // the brightest part of the run
+        const out: number[] = []
+        thickenSegments(out, halo, WIRE_HALO_WIDTH)
+        thickenSegments(out, core, WIRE_CORE_WIDTH)
+
+        this.powerWires.write(new Float32Array(out))
+    }
+
+    /** The middle of a cell in world units, which is where a wire ends. */
+    private cellCentre(col: number, row: number): Vec2 {
+        return {
+            x: (col + 0.5 - this.origin.x) * CELL,
+            y: (row + 0.5 - this.origin.y) * CELL,
+        }
     }
 
     /*~~~ Selection ~~~*/

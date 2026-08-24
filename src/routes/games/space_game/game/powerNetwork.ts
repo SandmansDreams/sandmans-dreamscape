@@ -227,3 +227,143 @@ export function powerNetworkOf(ship: Ship): PowerNetwork {
 export function islandAt(network: PowerNetwork, col: number, row: number): number {
     return network.islandByCell.get(cellKey(col, row)) ?? -1
 }
+/** One run of wire between two cells, for showing how power gets somewhere. */
+export interface PowerLink {
+    from: { col: number; row: number }
+    to: { col: number; row: number }
+    /**
+     * True between two sources, false where wire meets something that spends.
+     *
+     * The distinction is worth drawing: a relay run is the trunk a battery
+     * extends, and a consumer run is the last hop off it.
+     */
+    relay: boolean
+}
+
+/**
+ * How power reaches things, as seen from one selected cell.
+ *
+ * Select a generator or a battery and this is everything downstream of it: the
+ * chain of batteries carrying its reach outward, and the last hop from each of
+ * those to whatever it feeds. Select a thruster or a gun and it is the path back
+ * the other way, to the generator actually paying for it.
+ *
+ * A tree rather than every link that exists. Two batteries in range of each
+ * other and of the same core would draw three wires for one supply, which says
+ * "there is a loop here" when what a player asked was "where does this come
+ * from" - so each source is reached once, by the shortest hop that found it.
+ *
+ * Empty when the cell is on no network, which is the honest answer: an orphaned
+ * turret has no wire to draw because nothing is feeding it.
+ */
+export function wiresFrom(ship: Ship, col: number, row: number): PowerLink[] {
+    const sources = sourcesOf(ship)
+    const at = sources.findIndex((source) => source.col === col && source.row === row)
+
+    return at >= 0 ? wiresOutFrom(ship, sources, at) : wiresBackFrom(ship, sources, col, row)
+}
+
+/** The tree of relays out from one source, and what each of them feeds. */
+function wiresOutFrom(ship: Ship, sources: readonly Source[], from: number): PowerLink[] {
+    const links: PowerLink[] = []
+    const parent = new Array<number>(sources.length).fill(-1)
+    const seen = new Array<boolean>(sources.length).fill(false)
+
+    seen[from] = true
+    const frontier = [from]
+
+    // Breadth-first, so a source is reached by the fewest hops rather than by
+    // whichever happened to be scanned first - the wire drawn is the short way
+    for (let head = 0; head < frontier.length; head++) {
+        const here = frontier[head]!
+
+        for (let next = 0; next < sources.length; next++) {
+            if (seen[next] || !linked(sources[here]!, sources[next]!)) continue
+
+            seen[next] = true
+            parent[next] = here
+            frontier.push(next)
+
+            links.push({
+                from: { col: sources[here]!.col, row: sources[here]!.row },
+                to: { col: sources[next]!.col, row: sources[next]!.row },
+                relay: true,
+            })
+        }
+    }
+
+    // The last hop: every consumer this run of wire is what feeds
+    for (const cell of consumerCells(ship)) {
+        const feeder = reachedBy(sources, seen, cell.col, cell.row)
+        if (feeder < 0) continue
+
+        links.push({
+            from: { col: sources[feeder]!.col, row: sources[feeder]!.row },
+            to: { col: cell.col, row: cell.row },
+            relay: false,
+        })
+    }
+
+    return links
+}
+
+/** The path from one consumer back to a generator, hop by hop. */
+function wiresBackFrom(
+    ship: Ship,
+    sources: readonly Source[],
+    col: number,
+    row: number,
+): PowerLink[] {
+    const network = powerNetworkOf(ship)
+    const island = islandAt(network, col, row)
+    if (island < 0) return []
+
+    // Whichever source actually reaches it, then that source's own tree - walked
+    // outward from there, which is the same set of wires seen from the other end
+    const all = sources.map(() => true)
+    const feeder = reachedBy(sources, all, col, row)
+    if (feeder < 0) return []
+
+    return [
+        { from: { col: sources[feeder]!.col, row: sources[feeder]!.row }, to: { col, row }, relay: false },
+        ...wiresOutFrom(ship, sources, feeder).filter((link) => link.relay),
+    ]
+}
+
+/** The nearest source that both reaches a cell and is in the set given. */
+function reachedBy(
+    sources: readonly Source[],
+    included: readonly boolean[],
+    col: number,
+    row: number,
+): number {
+    let best = -1
+    let bestDistance = Infinity
+
+    for (let i = 0; i < sources.length; i++) {
+        if (!included[i]) continue
+
+        const source = sources[i]!
+        const distance = distanceSquared(source, col, row)
+        if (distance > source.reach * source.reach) continue
+
+        if (distance < bestDistance) {
+            bestDistance = distance
+            best = i
+        }
+    }
+
+    return best
+}
+
+function consumerCells(ship: Ship): { col: number; row: number }[] {
+    const cells: { col: number; row: number }[] = []
+
+    for (const grid of ship.layersOf()) {
+        for (const cell of grid.list) {
+            if (drawsPower(componentById(cell.type))) cells.push({ col: cell.col, row: cell.row })
+        }
+    }
+
+    return cells
+}

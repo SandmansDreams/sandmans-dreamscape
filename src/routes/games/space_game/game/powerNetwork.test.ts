@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { islandAt, powerNetworkOf } from "./powerNetwork"
+import { islandAt, powerNetworkOf, wiresFrom } from "./powerNetwork"
 import { Ship } from "./ship"
 
 interface Part {
@@ -190,5 +190,101 @@ describe("degenerate ships", () => {
 
         expect(network.islands).toHaveLength(1)
         expect(islandAt(network, 1, 0)).toBe(-1)
+    })
+})
+describe("wires", () => {
+    const wires = (ship: Ship, col: number, row: number) => wiresFrom(ship, col, row)
+    const between = (links: ReturnType<typeof wiresFrom>, a: [number, number], b: [number, number]) =>
+        links.some((l) =>
+            (l.from.col === a[0] && l.from.row === a[1] && l.to.col === b[0] && l.to.row === b[1])
+            || (l.from.col === b[0] && l.from.row === b[1] && l.to.col === a[0] && l.to.row === a[1]))
+
+    it("runs from a generator to what it feeds", () => {
+        const ship = shipOf([
+            { type: "fusion-core", col: 0, row: 0 },
+            { type: "ion-thruster", col: 4, row: 0 },
+        ])
+
+        expect(between(wires(ship, 0, 0), [0, 0], [4, 0])).toBe(true)
+    })
+
+    it("carries on through a battery to what only the battery reaches", () => {
+        // The extension the battery exists for: the core cannot reach the engine,
+        // and the wire has to show that the battery is what closes the gap
+        const ship = shipOf([
+            { type: "fusion-core", col: 0, row: 0 },
+            { type: "battery", col: 6, row: 0 },
+            { type: "ion-thruster", col: 11, row: 0 },
+        ])
+        const links = wires(ship, 0, 0)
+
+        expect(between(links, [0, 0], [6, 0])).toBe(true)
+        expect(between(links, [6, 0], [11, 0])).toBe(true)
+        // And not straight there, because nothing reaches that far on its own
+        expect(between(links, [0, 0], [11, 0])).toBe(false)
+    })
+
+    it("marks a relay run apart from the last hop", () => {
+        const ship = shipOf([
+            { type: "fusion-core", col: 0, row: 0 },
+            { type: "battery", col: 6, row: 0 },
+            { type: "ion-thruster", col: 11, row: 0 },
+        ])
+        const links = wires(ship, 0, 0)
+
+        expect(links.find((l) => l.to.col === 6)!.relay).toBe(true)
+        expect(links.find((l) => l.to.col === 11)!.relay).toBe(false)
+    })
+
+    it("chains battery to battery", () => {
+        const ship = shipOf([
+            { type: "fusion-core", col: 0, row: 0 },
+            { type: "battery", col: 5, row: 0 },
+            { type: "battery", col: 10, row: 0 },
+            { type: "ion-thruster", col: 14, row: 0 },
+        ])
+        const links = wires(ship, 0, 0)
+
+        expect(between(links, [5, 0], [10, 0])).toBe(true)
+        expect(between(links, [10, 0], [14, 0])).toBe(true)
+    })
+
+    it("reaches each source once rather than drawing every link that exists", () => {
+        // Three sources all in range of each other would be three wires for one
+        // supply, which reads as a loop instead of as a route
+        const ship = shipOf([
+            { type: "fusion-core", col: 0, row: 0 },
+            { type: "battery", col: 1, row: 0 },
+            { type: "battery", col: 2, row: 0 },
+        ])
+        const relays = wires(ship, 0, 0).filter((l) => l.relay)
+
+        expect(relays).toHaveLength(2)
+    })
+
+    it("traces back the other way from a consumer", () => {
+        const ship = shipOf([
+            { type: "fusion-core", col: 0, row: 0 },
+            { type: "battery", col: 6, row: 0 },
+            { type: "ion-thruster", col: 11, row: 0 },
+        ])
+        const links = wires(ship, 11, 0)
+
+        expect(between(links, [6, 0], [11, 0])).toBe(true)
+        expect(between(links, [0, 0], [6, 0])).toBe(true)
+    })
+
+    it("draws nothing for a part nothing reaches", () => {
+        const ship = shipOf([
+            { type: "fusion-core", col: 0, row: 0 },
+            { type: "ion-thruster", col: 40, row: 0 },
+        ])
+
+        expect(wires(ship, 40, 0)).toEqual([])
+    })
+
+    it("draws nothing for a battery no generator reaches", () => {
+        const ship = shipOf([{ type: "battery", col: 0, row: 0 }])
+        expect(wires(ship, 0, 0).filter((l) => l.relay)).toEqual([])
     })
 })

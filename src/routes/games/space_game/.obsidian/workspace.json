@@ -201,9 +201,9 @@
   },
   "active": "d5971898faa58106",
   "lastOpenFiles": [
+    "game/_scratch.test.ts",
     "game/ease.test.ts",
     "game/ease.ts",
-    "game/_scratch.test.ts",
     "game/weapons.test.ts",
     "game/projectiles.test.ts",
     "game/targets.test.ts",

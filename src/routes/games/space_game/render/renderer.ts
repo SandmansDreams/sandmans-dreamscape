@@ -64,6 +64,7 @@ export class Renderer {
 
     private meshPipeline: Pipeline | null = null
     private meshLinesPipeline: Pipeline | null = null
+    private meshGlowPipeline: Pipeline | null = null
     private meshInvertPipeline: Pipeline | null = null
     private instancedPipeline: Pipeline | null = null
     private instancedLinesPipeline: Pipeline | null = null
@@ -180,6 +181,25 @@ export class Renderer {
         })
 
         return this.meshInvertPipeline
+    }
+
+    /**
+     * Plain triangles that add their colour to whatever is behind them.
+     *
+     * The uninstanced twin of instancedGlow, for geometry there is exactly one of
+     * and which is built rather than repeated - a run of wire between two named
+     * cells is not something you place a hundred copies of.
+     */
+    get meshGlow(): Pipeline {
+        this.meshGlowPipeline ??= Pipeline.create(this.gpu, {
+            label: "mesh 2d glow",
+            shader: this.mesh2d(),
+            layouts: [this.camera.layout],
+            vertexBuffers: [VERTEX_LAYOUT],
+            blend: "additive",
+        })
+
+        return this.meshGlowPipeline
     }
 
     /** The same vertices as a line list, for outlines and wireframes. */
