@@ -455,6 +455,7 @@
                 <dl class="readout">
                     <dt>hp</dt><dd>{stats.hitPoints}</dd>
                     <dt>mass</dt><dd>{stats.mass}</dd>
+                    <dt>cost</dt><dd>{stats.cost}</dd>
                     {#each component.extraStats(level) as line (line.label)}
                         <dt>{line.label}</dt><dd>{line.value}</dd>
                     {/each}
@@ -489,15 +490,18 @@
                 </label>
 
                 <dl class="readout">
+                    <dt>cost</dt><dd>{shipInfo.cost}</dd>
                     <dt>mass</dt><dd>{shipInfo.mass}</dd>
                     <dt>blocks</dt><dd>{shipInfo.blocks}</dd>
                     <dt>size</dt><dd>{shipInfo.width}x{shipInfo.height}</dd>
                     {#each SHIP_LAYERS as layer (layer)}
                         <dt>{layer}</dt><dd>{shipInfo.perLayer[layer]}</dd>
                     {/each}
+                    <!-- Count and price together: which category the money went
+                         on is the question the total immediately raises -->
                     {#each COMPONENT_KINDS as kind (kind)}
                         {#if kind !== "hull"}
-                            <dt>{kind}</dt><dd>{shipInfo.perKind[kind]}</dd>
+                            <dt>{kind}</dt><dd>{shipInfo.perKind[kind]} &middot; {shipInfo.costPerKind[kind]}</dd>
                         {/if}
                     {/each}
                 </dl>
@@ -765,6 +769,7 @@
                         aria-label="Creator"
                     />
                 </dd>
+                <dt>cost</dt><dd>{shipInfo.cost}</dd>
                 <dt>mass</dt><dd>{shipInfo.mass}</dd>
                 <dt>blocks</dt><dd>{shipInfo.blocks}</dd>
                 <dt>size</dt><dd>{shipInfo.width}x{shipInfo.height}</dd>
@@ -842,6 +847,7 @@
             <dl class="readout">
                 <dt>hp</dt><dd>{stats.hitPoints}</dd>
                 <dt>mass</dt><dd>{stats.mass}</dd>
+                <dt>cost</dt><dd>{stats.cost}</dd>
                 <dt>levels</dt><dd>{maxLevel(describing)}</dd>
             </dl>
         {:else if selected}

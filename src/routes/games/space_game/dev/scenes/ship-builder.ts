@@ -20,6 +20,7 @@ import { appendTriangleOutline, thickenSegments } from "../../render/grid/gridOu
 import type { InputService } from "../../input/service"
 import { actionsIn, keysFor, specOf, type ActionId } from "../../input/actions"
 import { countKinds, structuralIssues, type Issue, type KindCounts } from "../../game/shipReadiness"
+import { costByKind, shipCost, type PerKind } from "../../game/shipCost"
 import type { SceneContext, SceneInstance } from "../../render/scene"
 import type { ActionsOf, SearchColumn, SettingsSchema, ValuesOf } from "../../settings/settings"
 import {
@@ -226,6 +227,10 @@ export interface ShipInfo {
     perLayer: Record<ShipLayer, number>
     /** How many of each category, for the download dialog's summary. */
     perKind: KindCounts
+    /** What the ship costs to build. Hull and cosmetics are free. */
+    cost: number
+    /** The same total per category, for the dialog's breakdown. */
+    costPerKind: PerKind
     /** Everything standing between this ship and a file. Empty means ready. */
     issues: Issue[]
 }
@@ -1410,6 +1415,8 @@ class ShipBuilder implements SceneInstance<EditorValues> {
             height: bounds ? bounds.maxRow - bounds.minRow + 1 : 0,
             perLayer,
             perKind: countKinds(this.ship),
+            cost: shipCost(this.ship),
+            costPerKind: costByKind(this.ship),
             issues: structuralIssues(this.ship),
         }
 

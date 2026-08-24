@@ -11,7 +11,7 @@ import { FLOATS_PER_VERTEX, MeshBuilder } from "../mesh"
 import { findArt } from "../../assets/components"
 import { appendGlow } from "../glow"
 import type { ComponentArt } from "../../game/componentArt"
-import { ART_LAYERS, ART_ROLES, type ArtRole } from "./spriteMesh"
+import { ART_LAYERS, ART_ROLES, type ArtLayer, type ArtRole } from "./spriteMesh"
 import type { SpillMap } from "../../game/emissiveSpill"
 
 /**
@@ -180,6 +180,7 @@ function appendArt(
     cellSize: number,
     fade: number,
     fadeTo: Color,
+    layers: readonly ArtLayer[],
 ): void {
     const tint: Record<ArtRole, Color | null> = {
         static: null,
@@ -191,7 +192,7 @@ function appendArt(
 
     // Layers outermost so base always draws under top, which is the whole reason
     // the art is split in two
-    for (const layer of ART_LAYERS) {
+    for (const layer of layers) {
         for (const role of ART_ROLES) {
             const source = art.mesh[layer][role]
             if (source.length === 0) continue
@@ -247,6 +248,14 @@ export function appendBlock(
     fadeTo: Color = Color.BLACK,
     /** What the emissive cells around this one throw onto it. */
     spill?: Color,
+    /**
+     * Which art layers to draw. Both, unless something else is drawing one.
+     *
+     * A turret's `top` is its barrel, and a barrel that turns cannot be baked into
+     * the hull's mesh with everything else - it is drawn per mount instead, which
+     * is exactly what the layer split was for.
+     */
+    layers: readonly ArtLayer[] = ART_LAYERS,
 ): void {
     // Named before anything is appended, so art, shape and glyph all inherit it.
     // This is the one place that knows which cell a triangle belongs to, and the
@@ -255,7 +264,7 @@ export function appendBlock(
 
     const art = artFor(block)
     if (art) {
-        appendArt(builder, art, block, x, y, cellSize, fade, fadeTo)
+        appendArt(builder, art, block, x, y, cellSize, fade, fadeTo, layers)
         return
     }
 
@@ -295,12 +304,57 @@ export function appendLayer(
     fadeTo: Color = Color.BLACK,
     /** Per-cell glow from spillOnto(). Omitted for anything drawn unlit. */
     spill?: SpillMap,
+    /**
+     * Cells whose `top` art this mesh should leave out because it moves.
+     *
+     * A turret's barrel turns independently of the hull, so baking it in here
+     * would weld it straight ahead. Omit the predicate and every block is drawn
+     * whole, which is what the builder and the viewer want.
+     */
+    movesOwnTop?: (cell: Cell) => boolean,
 ): void {
     for (const cell of grid.list) {
         const { x, y } = cellCorner(cell, cellSize, origin)
-        appendBlock(builder, cell, x, y, cellSize, fade, fadeTo, spill?.get(cellKey(cell.col, cell.row)))
+        const layers = movesOwnTop?.(cell) ? BASE_ONLY : ART_LAYERS
+
+        appendBlock(
+            builder, cell, x, y, cellSize, fade, fadeTo,
+            spill?.get(cellKey(cell.col, cell.row)), layers,
+        )
     }
 }
+
+/** Everything but the moving part. */
+const BASE_ONLY: readonly ArtLayer[] = ["base"]
+
+/**
+ * Just the moving part of a block, about the cell's own centre.
+ *
+ * Centred rather than cornered because it is going to be spun: an instance
+ * rotates about its origin, and a barrel has to turn about its mount rather than
+ * about the corner of the cell it sits in.
+ *
+ * Drawn at facing 0 - the orientation the art was authored in - so the instance's
+ * rotation carries the whole aim rather than fighting a quarter turn baked in here.
+ */
+export function appendBlockTop(builder: MeshBuilder, block: BlockLike, cellSize: number): void {
+    const art = artFor(block)
+    if (!art) return
+
+    appendArt(
+        builder,
+        art,
+        { ...block, facing: 0 },
+        -cellSize / 2,
+        -cellSize / 2,
+        cellSize,
+        0,
+        Color.BLACK,
+        TOP_ONLY,
+    )
+}
+
+const TOP_ONLY: readonly ArtLayer[] = ["top"]
 
 /**
  * The triangles a block draws, in a unit cell, cached by what decides them.

@@ -14,6 +14,15 @@ function shipWith(types: string[] = [], name = "Test Ship"): Ship {
     return ship
 }
 
+/**
+ * Everything a ship needs before the rules stop complaining about it.
+ *
+ * Named rather than spelled out at each site: the list grows every time a rule
+ * is added, and three literals that have to be found and updated together is how
+ * one of them quietly gets missed.
+ */
+const COMPLETE = ["ion-thruster", "fusion-core", "fuel-tank"]
+
 function ids(ship: Ship, name?: string): string[] {
     return issuesFor(ship, name).map((issue) => issue.id)
 }
@@ -36,7 +45,7 @@ describe("counting", () => {
 
 describe("readiness", () => {
     it("passes a ship with a thruster and a generator", () => {
-        const ship = shipWith(["ion-thruster", "fusion-core"])
+        const ship = shipWith(COMPLETE)
 
         expect(issuesFor(ship)).toEqual([])
         expect(isReady(ship)).toBe(true)
@@ -49,7 +58,7 @@ describe("readiness", () => {
     })
 
     it("wants a thruster", () => {
-        expect(ids(shipWith(["fusion-core"]))).toEqual(["no-thruster"])
+        expect(ids(shipWith(["fusion-core", "fuel-tank"]))).toEqual(["no-thruster"])
     })
 
     it("wants a generator", () => {
@@ -69,16 +78,41 @@ describe("readiness", () => {
     })
 
     it("wants a name that is more than spaces", () => {
-        const ship = shipWith(["ion-thruster", "fusion-core"])
+        const ship = shipWith(COMPLETE)
 
         expect(ids(ship, "   ")).toEqual(["unnamed"])
         expect(ids(ship, "Kestrel")).toEqual([])
     })
 
+    it("wants a fuel tank once there is a generator to starve", () => {
+        expect(ids(shipWith(["ion-thruster", "fusion-core"]))).toEqual(["no-tank"])
+    })
+
+    it("says nothing about tanks on a ship with no generator", () => {
+        // It is already being told about the generator; a second line about what
+        // that generator would burn is piling on
+        expect(ids(shipWith(["ion-thruster"]))).toEqual(["no-generator"])
+    })
+
+    it("counts parts no generator can reach", () => {
+        const ship = shipWith(COMPLETE)
+        // fusion-core reaches 6 cells, so this one is well outside it
+        ship.layers.components.set(40, 0, "full", { type: "ion-thruster" })
+
+        expect(ids(ship)).toEqual(["unpowered"])
+    })
+
+    it("says nothing about reach when there is no generator to reach from", () => {
+        const ship = shipWith(["ion-thruster"])
+        ship.layers.components.set(40, 0, "full", { type: "ion-thruster" })
+
+        expect(ids(ship)).toEqual(["no-generator"])
+    })
+
     it("checks the name it is given rather than the one on the ship", () => {
         // The download dialog edits a name before it is committed, and it is that
         // pending name the rules have to judge
-        const ship = shipWith(["ion-thruster", "fusion-core"], "")
+        const ship = shipWith(COMPLETE, "")
 
         expect(ids(ship)).toEqual(["unnamed"])
         expect(ids(ship, "Renamed")).toEqual([])

@@ -176,3 +176,52 @@ describe("wiring to a ship", () => {
         expect(shipSystems(ship, shipPhysics(ship, DRY)).fuelCapacity).toBe(420)
     })
 })
+describe("one-off requests", () => {
+    it("grants a shot the island can pay for", () => {
+        const systems = easy([])
+        const tick = tickSystems(systems, fullReserves(systems), [], DT, [{ island: 0, amount: 12 }])
+
+        expect(tick.granted).toEqual([true])
+    })
+
+    it("refuses one it cannot, rather than half-paying it", () => {
+        // Half a shot is not a dimmer shot - it is a weapon that did not fire
+        const systems = plant([{ output: 0, capacity: 5, burn: 0 }], [])
+        const tick = tickSystems(systems, { fuel: 0, power: [5] }, [], DT, [{ island: 0, amount: 12 }])
+
+        expect(tick.granted).toEqual([false])
+        expect(tick.reserves.power[0]).toBe(5)
+    })
+
+    it("refuses a weapon no generator reaches", () => {
+        const systems = easy([])
+        const tick = tickSystems(systems, fullReserves(systems), [], DT, [{ island: -1, amount: 1 }])
+
+        expect(tick.granted).toEqual([false])
+    })
+
+    it("will not grant two shots the island can only pay for once", () => {
+        const systems = plant([{ output: 0, capacity: 20, burn: 0 }], [])
+        const tick = tickSystems(systems, { fuel: 0, power: [20] }, [], DT, [
+            { island: 0, amount: 12 },
+            { island: 0, amount: 12 },
+        ])
+
+        expect(tick.granted).toEqual([true, false])
+    })
+
+    it("pays the shot before the thrust it is competing with", () => {
+        // Thrust is the only load that degrades gracefully, so it absorbs the
+        // shortfall rather than the trigger doing it
+        const systems = plant(
+            [{ output: 0, capacity: 20, burn: 0 }],
+            [{ island: 0, draw: 600 }],
+        )
+        const tick = tickSystems(systems, { fuel: 0, power: [20] }, [1], DT, [
+            { island: 0, amount: 12 },
+        ])
+
+        expect(tick.granted).toEqual([true])
+        expect(tick.firing[0]).toBeLessThan(1)
+    })
+})

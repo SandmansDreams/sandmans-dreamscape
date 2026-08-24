@@ -52,6 +52,7 @@
         { key: "A / D", does: "burn sideways" },
         { key: "Q / E", does: "turn" },
         { key: "Z", does: "flight assist" },
+        { key: "Mouse", does: "aim and fire" },
     ]
 </script>
 
@@ -109,6 +110,21 @@
                     {info.drawing.toFixed(1)}/s
                 </dd>
             </dl>
+
+            {#if info.weapons > 0}
+                <div class="heading">WEAPONS</div>
+                <dl class="rows">
+                    <dt>mounts</dt><dd>{info.weapons}</dd>
+                    {#if info.limited}
+                        <dt>powered</dt>
+                        <dd class={info.weaponsPowered < info.weapons ? "warn" : ""}>
+                            {info.weaponsPowered}/{info.weapons}
+                        </dd>
+                    {/if}
+                    <dt>targets</dt><dd>{info.targets}</dd>
+                    <dt>in air</dt><dd>{info.shots}</dd>
+                </dl>
+            {/if}
 
             <div class="heading">FUEL</div>
             <div class="burn">

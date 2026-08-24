@@ -11,7 +11,7 @@ import {
 import { Camera, type Vec2 } from "../../render/camera"
 import { Color } from "../../render/color"
 import type { Frame } from "../../render/frame"
-import { appendEmissiveBloom, appendLayer } from "../../render/grid/blockDraw"
+import { appendBlockTop, appendEmissiveBloom, appendLayer } from "../../render/grid/blockDraw"
 import { DynamicMesh, Mesh, MeshBuilder } from "../../render/mesh"
 import type { Cell } from "../../render/grid/grid"
 import { InstanceBatch } from "../../render/webgpu/instance"
@@ -25,6 +25,15 @@ import type { ActionsOf, SearchColumn, SettingsSchema, ValuesOf } from "../../se
 import type { DevSceneDefinition } from "../DevScene"
 import { sendShip, shipOf, takeHandoff } from "../handoff"
 import { emissiveSources, falloff, spillOnto } from "../../game/emissiveSpill"
+import { islandAt, powerNetworkOf } from "../../game/powerNetwork"
+import { cellKey } from "../../render/grid/grid"
+import { ProjectileField } from "../../game/projectiles"
+import { driftTarget, isDestroyed, splitTarget, targetAt, type Target } from "../../game/targets"
+import {
+    aimOf, coolDown, freshStates, recoverRecoil, RECOIL_KICK, shotSpeed, weaponMountsOf, willFire,
+    type WeaponMount, type WeaponState,
+} from "../../game/weapons"
+import type { PowerRequest } from "../../game/shipSystems"
 import { FLOATS_PER_CELL_GLOW } from "../../render/lighting"
 
 /** World units per cell, matching the builder so a ship is the size you drew it. */
@@ -34,6 +43,24 @@ const WALL_COLOR = Color.from("#3d6b8c")
 
 function sum(values: readonly number[]): number {
     return values.reduce((total, value) => total + value, 0)
+}
+
+/** A unit-radius disc as a triangle fan, for drawing a rock at any size. */
+function discMesh(sides: number): MeshBuilder {
+    const builder = new MeshBuilder()
+
+    for (let i = 0; i < sides; i++) {
+        const from = (i / sides) * Math.PI * 2
+        const to = ((i + 1) / sides) * Math.PI * 2
+
+        builder.add([
+            0, 0,
+            Math.cos(from), Math.sin(from),
+            Math.cos(to), Math.sin(to),
+        ], Color.WHITE)
+    }
+
+    return builder
 }
 
 /** The opposite push, which is the way the exhaust actually leaves. */
@@ -95,6 +122,28 @@ const GLOW_RANGE = 220
 const GLOW_RADIUS = 26
 const GLOW_INTENSITY = 0.35
 
+/*~~~ Weapons and targets ~~~*/
+
+/** The most shots in the air at once, across every weapon on the ship. */
+const SHOT_CAPACITY = 400
+
+/** How far down the barrel a round appears, in cells. Matches the exhaust rule. */
+const MUZZLE_OFFSET = 0.6
+
+const SHOT_SIZE = 0.16
+const SHOT_COLOR = Color.from("#9fe8ff")
+
+/** Sparks thrown off where a round lands. */
+const IMPACT_SPARKS = 8
+const IMPACT_SPEED = 6
+const IMPACT_LIFE = 0.3
+
+const TARGET_COLOR = Color.from("#6b6f5a")
+/** Rocks start somewhere in this band of the arena, in cells. */
+const TARGET_MIN_RADIUS = 0.8
+const TARGET_MAX_RADIUS = 2.2
+const TARGET_DRIFT = 2.5
+
 const SHIP_COLUMNS: readonly SearchColumn[] = [
     { header: "Ship", cell: (id) => findShip(id)?.name ?? id },
     { header: "Creator", cell: (id) => findShip(id)?.creator ?? "" },
@@ -130,6 +179,8 @@ const SETTINGS = {
      * reaches go dead, the battery drains under a burn, and the hull browns out.
      */
     infinitePower: { type: "checkbox", label: "Infinite power / fuel", default: true },
+    targets:       { type: "range", label: "Targets", default: 8, min: 0, max: 40, step: 1 },
+    respawn:       { type: "button", label: "New Targets" },
     cargoFill:     { type: "range", label: "Cargo load", default: 0, min: 0, max: 1, step: 0.1 },
     refuel:        { type: "button", label: "Refuel" },
 
@@ -179,6 +230,12 @@ export interface FlightInfo {
     islands: number
     /** False while the panel is paying the bills for you. */
     limited: boolean
+    /** How many weapons the ship has, and how many can be fed. */
+    weapons: number
+    weaponsPowered: number
+    /** Rocks still in the arena, and rounds in the air. */
+    targets: number
+    shots: number
     /**
      * The scene the back button returns to, or null when there is nowhere to go.
      *
@@ -244,6 +301,43 @@ class ShipFlight implements SceneInstance<FlightValues> {
     /** rgb + pad per cell, rewritten every frame and handed to the lighting. */
     private cellGlow = new Float32Array(0)
 
+    /*~~~ Weapons ~~~*/
+    /** Rebuilt with the physics, since a mount's offset is from the centre of mass. */
+    private mounts: WeaponMount[] = []
+    private weaponStates: WeaponState[] = []
+    /** The island feeding each mount, resolved with the ship. -1 for none. */
+    private weaponIsland: number[] = []
+    private readonly shots = new ProjectileField(SHOT_CAPACITY)
+    private readonly shotBatch: InstanceBatch
+    private targets: Target[] = []
+    private readonly targetBatch: InstanceBatch
+    /** One unit disc, scaled per rock by its radius. */
+    private readonly discMesh: Mesh
+    /**
+     * A turret's barrel, centred so it turns about itself, one mesh per art.
+     *
+     * Shared by art rather than held per mount, because an InstanceBatch draws its
+     * mesh once for every instance in it: a mesh per mount would mean either a
+     * draw call per turret or every barrel appearing at every mount.
+     */
+    private readonly turretMeshes = new Map<string, Mesh>()
+    /**
+     * One batch per barrel design, rather than one batch reused across draws.
+     *
+     * `queue.writeBuffer` is ordered against submit, not against the draws
+     * recorded between the writes: refilling a single batch between draws means
+     * every draw reads whatever the *last* write left, so one design's barrels
+     * end up drawn at another's mounts. The same hazard the camera binding
+     * documents, and it looks like a mixup rather than like a race.
+     */
+    private readonly turretBatches = new Map<string, InstanceBatch>()
+    /** Which barrel each mount uses, or null for one that does not turn. */
+    private turretArt: (string | null)[] = []
+    /** Cells whose barrel is drawn per mount, so the hull mesh can skip it. */
+    private turretCells = new Set<number>()
+    /** Arena and count the rocks were laid out for, so they are not respawned every frame. */
+    private targetsKey = ""
+
     /*~~~ Exhaust ~~~*/
     private readonly exhaust = new ParticleField(EXHAUST_CAPACITY)
     private readonly exhaustBatch: InstanceBatch
@@ -272,6 +366,8 @@ class ShipFlight implements SceneInstance<FlightValues> {
     private load: LoadStages = DRY
     /** 0..1, how brightly the hull's emissive cells burn. */
     private emissionGain = 1
+    /** Which weapons the last tick agreed to pay for, parallel to `wants`. */
+    private granted: boolean[] = []
     /** Power per second made and spent last frame, for the readout only. */
     private producing = 0
     private drawing = 0
@@ -288,6 +384,9 @@ class ShipFlight implements SceneInstance<FlightValues> {
     readonly actions: Record<ActionsOf<typeof SETTINGS>, () => void> = {
         reset: () => this.resetBody(),
         refuel: () => { this.reserves = fullReserves(this.systems) },
+        // Cleared rather than refilled here: the key is what update() compares
+        // against, so blanking it is the one way to say "build them again"
+        respawn: () => { this.targetsKey = "" },
     }
 
     /**
@@ -327,6 +426,17 @@ class ShipFlight implements SceneInstance<FlightValues> {
             gpu, context.renderer.instanceLayout, 256, "exhaust markers",
         )
 
+        this.shotBatch = InstanceBatch.create(
+            gpu, context.renderer.instanceLayout, SHOT_CAPACITY, "shots",
+        )
+        this.targetBatch = InstanceBatch.create(
+            gpu, context.renderer.instanceLayout, 256, "targets",
+        )
+
+        // A ring of triangles rather than a quad: a rock reads as a rock and not
+        // as a crate, and at this size a dozen sides is already round enough
+        this.discMesh = discMesh(12).build(gpu, "target disc")
+
         // A real ship arrives on the first update; this keeps every field valid
         // until then rather than leaving them undefined
         this.ship = new Ship("empty", "Empty")
@@ -349,8 +459,18 @@ class ShipFlight implements SceneInstance<FlightValues> {
         // same controls and the same pre-step spin, so the two agreed by luck
         // rather than by construction - and would stop agreeing the moment either
         // side scaled its copy back.
+        // Aiming before the tick, so a trigger pull is asked for on the same
+        // budget as the thrust it competes with rather than after it
+        const wants = this.aimWeapons(dt, settings)
+        const requests: PowerRequest[] = wants.map((want) => ({
+            island: want.island,
+            amount: settings.infinitePower ? 0 : this.mounts[want.index]!.draw,
+        }))
+
         const wanted = throttles(this.physics, controls, before.spin, dt)
-        const firing = this.runSystems(wanted, dt, settings)
+        const firing = this.runSystems(wanted, dt, settings, requests)
+
+        this.fireWeapons(wants, this.granted)
 
         // dt arrives already clamped by the frame loop, which caps a backgrounded
         // tab's catch-up for exactly this reason. Clamping again here only made the
@@ -366,6 +486,8 @@ class ShipFlight implements SceneInstance<FlightValues> {
 
         this.firing = firing.filter((throttle) => throttle > 0).length
 
+        this.syncTargets(settings)
+        this.updateCombat(dt, settings)
         this.updateExhaust(firing, dt, settings)
         this.syncLights(settings, firing)
         this.publishInfo()
@@ -428,6 +550,274 @@ class ShipFlight implements SceneInstance<FlightValues> {
         this.reserves = fullReserves(this.systems)
     }
 
+    /*~~~ Weapons ~~~*/
+
+    /**
+     * Rebuilds the mounts and the island each one draws from.
+     *
+     * With the physics rather than with the ship: a mount's offset is measured
+     * from the centre of mass, so a load stage crossing has to rebuild these too
+     * or every barrel sits a little off the block it belongs to.
+     */
+    private syncWeapons(): void {
+        const network = powerNetworkOf(this.ship)
+
+        this.mounts = weaponMountsOf(this.ship, this.physics)
+        this.weaponStates = freshStates(this.mounts)
+        this.weaponIsland = this.mounts.map((mount) => islandAt(network, mount.col, mount.row))
+        this.shots.clear()
+
+        for (const mesh of this.turretMeshes.values()) mesh.destroy()
+        for (const batch of this.turretBatches.values()) batch.destroy()
+        this.turretMeshes.clear()
+        this.turretBatches.clear()
+        this.turretArt = []
+        this.turretCells = new Set()
+
+        // Only what actually turns: a fixed mount's barrel is welded to the hull,
+        // and lifting it out of the ship's mesh would cost a draw to change nothing
+        for (const mount of this.mounts) {
+            const cell = this.cellOf(mount)
+            if (!cell || mount.traverse <= 0) {
+                this.turretArt.push(null)
+                continue
+            }
+
+            // Colour is part of the key: two turrets of one type painted
+            // differently are two different barrels
+            const key = `${cell.type}|${cell.level}|${cell.color.hex}|${cell.accentColor?.hex ?? ""}`
+
+            if (!this.turretMeshes.has(key)) {
+                const builder = new MeshBuilder()
+                appendBlockTop(builder, cell, CELL)
+
+                if (builder.vertexCount === 0) {
+                    this.turretArt.push(null)
+                    continue
+                }
+
+                this.turretMeshes.set(key, builder.build(this.context.gpu, "turret"))
+                this.turretBatches.set(key, InstanceBatch.create(
+                    this.context.gpu, this.context.renderer.instanceLayout, 64, `turret ${key}`,
+                ))
+            }
+
+            this.turretCells.add(cellKey(mount.col, mount.row))
+            this.turretArt.push(key)
+        }
+    }
+
+    /**
+     * The cell a mount came from, since a mount is only a snapshot of one.
+     *
+     * By layer, not by searching: a weapon sits over a hull plate at the same
+     * column and row, and a search would find the plate every time.
+     */
+    private cellOf(mount: WeaponMount): Cell | null {
+        return this.ship.layers[mount.layer].get(mount.col, mount.row) ?? null
+    }
+
+    /**
+     * Places every turret's barrel at its mount, turned to where it is aiming.
+     *
+     * The art is authored pointing north, which atan2 calls -90 degrees, so the
+     * instance has to make up that quarter turn before the aim means anything.
+     */
+    private fillTurretBatch(key: string): InstanceBatch | null {
+        const batch = this.turretBatches.get(key)
+        if (!batch) return null
+
+        batch.begin()
+
+        const cos = Math.cos(this.body.angle)
+        const sin = Math.sin(this.body.angle)
+
+        this.mounts.forEach((mount, index) => {
+            if (this.turretArt[index] !== key) return
+
+            const state = this.weaponStates[index]!
+            const at = this.worldOf(mount.offset, cos, sin)
+            const aim = state.angle + this.body.angle
+
+            // Driven back down its own line, so the kick is along the barrel
+            // whichever way the turret happens to be pointing
+            const back = state.recoil
+            batch.add(
+                (at.x - Math.cos(aim) * back) * CELL,
+                (at.y - Math.sin(aim) * back) * CELL,
+                aim + Math.PI / 2,
+                1, 1, 1, 1, 1,
+            )
+        })
+
+        return batch
+    }
+
+    /** Where the pilot is pointing, in world cells. */
+    private aimPoint(): Vec2 {
+        const world = this.camera.screenToWorld(this.input.pointer.x, this.input.pointer.y)
+        return { x: world.x / CELL, y: world.y / CELL }
+    }
+
+    /**
+     * Where one mount has to point to put a round on the cursor, ship-local.
+     *
+     * Measured from the mount rather than from the ship, so a spread of turrets
+     * converges on the point instead of firing parallel past it. On a hull as
+     * wide as the Scooner that is the difference between a volley landing on the
+     * rock and landing either side of it.
+     *
+     * Rotated out of world space at the end, so a mount can compare it against
+     * its own facing without knowing the ship's heading.
+     */
+    private aimFor(mount: WeaponMount, cos: number, sin: number, at: Vec2): number {
+        const from = this.worldOf(mount.offset, cos, sin)
+        return Math.atan2(at.y - from.y, at.x - from.x) - this.body.angle
+    }
+
+    /**
+     * Slews every mount and returns what firing would cost, mount by mount.
+     *
+     * Aim and cooldown advance whether or not the trigger is down: a turret should
+     * already be tracking when you decide to shoot, not start turning afterwards.
+     */
+    private aimWeapons(dt: number, settings: FlightValues): { index: number; island: number }[] {
+        coolDown(this.weaponStates, dt)
+        recoverRecoil(this.weaponStates, dt)
+        if (this.mounts.length === 0) return []
+
+        const at = this.aimPoint()
+        const cos = Math.cos(this.body.angle)
+        const sin = Math.sin(this.body.angle)
+        const triggered = this.input.pointer.isDown()
+        const wants: { index: number; island: number }[] = []
+
+        this.mounts.forEach((mount, index) => {
+            const state = this.weaponStates[index]!
+            const aim = this.aimFor(mount, cos, sin, at)
+            state.angle = aimOf(mount, state, aim, dt)
+
+            const island = this.weaponIsland[index] ?? -1
+            const powered = settings.infinitePower || island >= 0
+            if (willFire(mount, state, aim, triggered, powered)) wants.push({ index, island })
+        })
+
+        return wants
+    }
+
+    /** Fires the mounts whose power was granted, in the order they asked. */
+    private fireWeapons(wants: { index: number }[], granted: readonly boolean[]): void {
+        const cos = Math.cos(this.body.angle)
+        const sin = Math.sin(this.body.angle)
+
+        wants.forEach((want, slot) => {
+            if (!granted[slot]) return
+
+            const mount = this.mounts[want.index]!
+            const state = this.weaponStates[want.index]!
+
+            const heading = state.angle + this.body.angle
+            const direction = { x: Math.cos(heading), y: Math.sin(heading) }
+            const at = this.worldOf(mount.offset, cos, sin)
+
+            this.shots.fire({
+                // Down the barrel, so a round is not born inside the block it left
+                at: {
+                    x: at.x + direction.x * MUZZLE_OFFSET,
+                    y: at.y + direction.y * MUZZLE_OFFSET,
+                },
+                direction,
+                speed: shotSpeed(mount),
+                carry: this.body.velocity,
+                damage: mount.damage,
+                range: mount.range,
+            })
+
+            state.cooldown = mount.cooldown
+            state.recoil = RECOIL_KICK
+        })
+    }
+
+    /**
+     * Advances every rock and every round, and breaks what was destroyed.
+     *
+     * Splitting happens here rather than in the projectile field because a rock
+     * coming apart is about the arena, not about the round that did it - and the
+     * field would otherwise have to know how to make rocks.
+     */
+    private updateCombat(dt: number, settings: FlightValues): void {
+        const arena = this.arenaOf(settings)
+
+        for (const target of this.targets) {
+            driftTarget(target, dt)
+
+            // The same walls the ship bounces off, so a rock cannot quietly leave
+            const bounced = bounce(
+                { position: target.position, velocity: target.velocity, angle: 0, spin: 0 },
+                target.radius, arena, 1,
+            )
+
+            target.position = bounced.position
+            target.velocity = bounced.velocity
+        }
+
+        for (const impact of this.shots.step(dt, this.targets)) {
+            this.exhaust.emit(IMPACT_SPARKS, {
+                at: impact.at,
+                direction: { x: 0, y: -1 },
+                speed: IMPACT_SPEED,
+                drift: { x: 0, y: 0 },
+                spread: Math.PI,
+                speedJitter: 0.6,
+                life: IMPACT_LIFE,
+                lifeJitter: 0.4,
+                size: EXHAUST_SIZE,
+                red: SHOT_COLOR.r,
+                green: SHOT_COLOR.g,
+                blue: SHOT_COLOR.b,
+            })
+        }
+
+        const broken = this.targets.filter(isDestroyed)
+        if (broken.length === 0) return
+
+        this.targets = this.targets.filter((target) => !isDestroyed(target))
+        for (const target of broken) this.targets.push(...splitTarget(target))
+    }
+
+    /** Lays out a fresh field of rocks, clear of where the ship starts. */
+    private syncTargets(settings: FlightValues): void {
+        const key = `${settings.targets}|${settings.width}x${settings.height}`
+        if (key === this.targetsKey) return
+        this.targetsKey = key
+
+        const arena = this.arenaOf(settings)
+        this.targets = []
+        this.shots.clear()
+
+        for (let i = 0; i < settings.targets; i++) {
+            const radius = TARGET_MIN_RADIUS + Math.random() * (TARGET_MAX_RADIUS - TARGET_MIN_RADIUS)
+            const spawn = {
+                x: arena.minX + Math.random() * (arena.maxX - arena.minX),
+                y: arena.minY + Math.random() * (arena.maxY - arena.minY),
+            }
+
+            // Not on top of the ship: a rock spawned inside the hull is one the
+            // player never had a chance to avoid
+            if (Math.hypot(spawn.x, spawn.y) < this.radius + radius + 4) continue
+
+            this.targets.push(targetAt(
+                spawn,
+                {
+                    x: (Math.random() - 0.5) * TARGET_DRIFT,
+                    y: (Math.random() - 0.5) * TARGET_DRIFT,
+                },
+                radius,
+                (Math.random() - 0.5) * 1.5,
+            ))
+        }
+    }
+
     /*~~~ Systems ~~~*/
 
     /** Where the cargo slider sits on the mass staircase. */
@@ -446,8 +836,10 @@ class ShipFlight implements SceneInstance<FlightValues> {
         wanted: readonly number[],
         dt: number,
         settings: FlightValues,
+        requests: readonly PowerRequest[] = [],
     ): number[] {
         if (settings.infinitePower) {
+            this.granted = requests.map(() => true)
             this.reserves = fullReserves(this.systems)
             this.emissionGain = 1
             this.producing = 0
@@ -457,8 +849,9 @@ class ShipFlight implements SceneInstance<FlightValues> {
             return [...wanted]
         }
 
-        const tick = tickSystems(this.systems, this.reserves, wanted, dt)
+        const tick = tickSystems(this.systems, this.reserves, wanted, dt, requests)
 
+        this.granted = tick.granted
         this.reserves = tick.reserves
         this.emissionGain = tick.emissionGain
         this.producing = tick.producing
@@ -487,6 +880,11 @@ class ShipFlight implements SceneInstance<FlightValues> {
         // The thruster array was just rebuilt, so the island each engine sits on
         // has to be looked up against the new order or the two fall out of step
         this.systems = shipSystems(this.ship, this.physics)
+
+        // Mounts hang off the centre of mass too, and it just moved
+        const aiming = this.weaponStates.map((state) => state.angle)
+        this.syncWeapons()
+        this.weaponStates.forEach((state, index) => { state.angle = aiming[index] ?? state.angle })
     }
 
     /*~~~ Ship ~~~*/
@@ -511,6 +909,7 @@ class ShipFlight implements SceneInstance<FlightValues> {
         this.load = { fuel: LOAD_STAGES, cargo: this.cargoStage(settings) }
         this.physics = shipPhysics(this.ship, this.load)
         this.systems = shipSystems(this.ship, this.physics)
+        this.syncWeapons()
         this.radius = boundingRadius(this.ship)
         this.resetBody()
 
@@ -529,7 +928,10 @@ class ShipFlight implements SceneInstance<FlightValues> {
         this.cellGlow = new Float32Array(this.glowCells.length * FLOATS_PER_CELL_GLOW)
 
         for (const grid of layers) {
-            appendLayer(builder, grid, CELL, this.ship.centerOfMass, 0, Color.BLACK, spillOnto(grid, sources))
+            appendLayer(
+                builder, grid, CELL, this.ship.centerOfMass, 0, Color.BLACK,
+                spillOnto(grid, sources), (cell) => this.turretCells.has(cellKey(cell.col, cell.row)),
+            )
         }
 
         this.shadingReach = Math.max(builder.cellReach, 1)
@@ -954,6 +1356,10 @@ class ShipFlight implements SceneInstance<FlightValues> {
             producing: this.producing,
             drawing: this.drawing,
             unpowered: this.systems.thrusters.filter((load) => load.island < 0).length,
+            weapons: this.mounts.length,
+            weaponsPowered: this.weaponIsland.filter((island) => island >= 0).length,
+            targets: this.targets.length,
+            shots: this.shots.count,
             islands: this.systems.islands.length,
             limited: !this.settings?.infinitePower,
             returnTo: this.arrived?.from ?? null,
@@ -985,6 +1391,37 @@ class ShipFlight implements SceneInstance<FlightValues> {
             this.shipBatch.draw(frame, ship)
         }
 
+        // Rocks under the ship and under everything glowing: they are scenery,
+        // and a plume passing over one should read as passing over it
+        if (this.targets.length > 0) {
+            this.targetBatch.begin()
+            for (const target of this.targets) {
+                this.targetBatch.add(
+                    target.position.x * CELL,
+                    target.position.y * CELL,
+                    target.angle,
+                    target.radius * CELL,
+                    TARGET_COLOR.r, TARGET_COLOR.g, TARGET_COLOR.b, 1,
+                )
+            }
+
+            frame.setPipeline(renderer.instanced).setBindGroup(0, camera.group)
+            this.targetBatch.draw(frame, this.discMesh)
+        }
+
+        // Barrels over the hull they are mounted on, still solid: they are part of
+        // the ship rather than something glowing on it
+        if (this.turretMeshes.size > 0) {
+            frame.setPipeline(renderer.instanced).setBindGroup(0, camera.group)
+
+            // One draw per barrel design, each with its own batch: sharing one
+            // would have every design drawn at the last design's mounts
+            for (const [key, mesh] of this.turretMeshes) {
+                const batch = this.fillTurretBatch(key)
+                if (batch && batch.size > 0) batch.draw(frame, mesh)
+            }
+        }
+
         // Glows and exhaust over the hull: a plume is in front of the nozzle it
         // left, and additive means it brightens the hull rather than hiding it
         this.fillGlowBatch()
@@ -997,6 +1434,23 @@ class ShipFlight implements SceneInstance<FlightValues> {
         if (this.bloomMesh) this.bloomBatch.draw(frame, this.bloomMesh)
         if (this.glowBatch.size > 0) this.glowBatch.draw(frame, this.glowMesh)
         if (this.exhaust.count > 0) this.exhaustBatch.draw(frame, this.spark)
+
+        // Rounds last of the additive pass: a shot leaving a muzzle should sit
+        // over its own flash rather than under it
+        if (this.shots.count > 0) {
+            this.shotBatch.begin().reserve(this.shots.count)
+            this.shots.forEach((shot) => {
+                this.shotBatch.add(
+                    shot.position.x * CELL,
+                    shot.position.y * CELL,
+                    0,
+                    SHOT_SIZE * CELL,
+                    SHOT_COLOR.r, SHOT_COLOR.g, SHOT_COLOR.b, 1,
+                )
+            })
+
+            this.shotBatch.draw(frame, this.spark)
+        }
 
         // Lines last so a wall stays visible with the ship pressed against it
         frame.setPipeline(linePipeline).setBindGroup(0, camera.group)
@@ -1021,6 +1475,11 @@ class ShipFlight implements SceneInstance<FlightValues> {
         this.shipBatch.destroy()
         this.markerBatch.destroy()
         this.bloomBatch.destroy()
+        this.shotBatch.destroy()
+        this.targetBatch.destroy()
+        for (const batch of this.turretBatches.values()) batch.destroy()
+        this.discMesh.destroy()
+        for (const mesh of this.turretMeshes.values()) mesh.destroy()
         this.glowBatch.destroy()
         this.lights.destroy()
     }

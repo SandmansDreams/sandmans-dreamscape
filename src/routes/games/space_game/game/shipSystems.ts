@@ -50,6 +50,19 @@ export interface Reserves {
     power: readonly number[]
 }
 
+/**
+ * A one-off draw asked for this frame, such as a weapon wanting to fire.
+ *
+ * Separate from the continuous loads because it is all-or-nothing: half a shot
+ * is not a dimmer shot, it is a weapon that did not fire. Thrust is the only
+ * load that degrades gracefully, which is why it is paid last.
+ */
+export interface PowerRequest {
+    /** Island index, or -1 for a part nothing reaches. */
+    island: number
+    amount: number
+}
+
 export interface SystemsTick {
     reserves: Reserves
     /** Throttles after gating: what step, the exhaust and the glow all read. */
@@ -59,6 +72,8 @@ export interface SystemsTick {
     /** Power per second made and spent this frame, for the readout. */
     producing: number
     drawing: number
+    /** Which one-off requests were paid, in the order they were asked. */
+    granted: boolean[]
 }
 
 export function shipSystems(ship: Ship, physics: ShipPhysics): ShipSystems {
@@ -107,6 +122,7 @@ export function tickSystems(
     reserves: Reserves,
     wanted: readonly number[],
     dt: number,
+    requests: readonly PowerRequest[] = [],
 ): SystemsTick {
     const power = systems.islands.map((_, index) => reserves.power[index] ?? 0)
     const firing = systems.thrusters.map((_, index) => wanted[index] ?? 0)
@@ -118,6 +134,7 @@ export function tickSystems(
             emissionGain: emissionGainOf(systems, power),
             producing: 0,
             drawing: 0,
+            granted: requests.map(() => false),
         }
     }
 
@@ -158,19 +175,36 @@ export function tickSystems(
     // is a far worse failure than simply accelerating more gently.
     let producing = 0
     let drawing = 0
-    const scale = systems.islands.map((island, index) => {
+
+    // Spent from what is stored *plus* what was just made, because a generator
+    // feeds a load directly and only the surplus has to find room in a battery.
+    // Storing first and spending second would strand this frame's output on any
+    // island whose batteries were already full.
+    const available = systems.islands.map((_, index) => {
         const rate = rates[index]! * affordable
         producing += rate
 
-        // Spent from what is stored *plus* what was just made, because a
-        // generator feeds a load directly and only the surplus has to find room
-        // in a battery. Storing first and spending second would strand this
-        // frame's output on any island whose batteries were already full.
-        const available = power[index]! + rate * dt
-        const need = demand[index]! * dt
-        const paid = Math.min(need, available)
+        return power[index]! + rate * dt
+    })
 
-        power[index] = Math.min(island.capacity, available - paid)
+    // One-off draws first: a shot is all-or-nothing, so it is paid before the one
+    // load that can be scaled back instead of refused. Asked in order, so two
+    // weapons on one island cannot both be granted the last of the charge.
+    const granted = requests.map((request) => {
+        if (request.island < 0 || request.amount <= 0) return request.amount <= 0
+        if (available[request.island]! < request.amount) return false
+
+        available[request.island]! -= request.amount
+        drawing += request.amount / dt
+
+        return true
+    })
+
+    const scale = systems.islands.map((island, index) => {
+        const need = demand[index]! * dt
+        const paid = Math.min(need, available[index]!)
+
+        power[index] = Math.min(island.capacity, available[index]! - paid)
         drawing += paid / dt
 
         return need > 0 ? paid / need : 1
@@ -187,6 +221,7 @@ export function tickSystems(
         emissionGain: emissionGainOf(systems, power),
         producing,
         drawing,
+        granted,
     }
 }
 

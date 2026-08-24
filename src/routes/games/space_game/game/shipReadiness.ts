@@ -1,6 +1,8 @@
 // What a ship has to be before it is worth saving
 
+import { componentById, TankComponent } from "../render/grid/components"
 import type { ComponentKind } from "../render/grid/components"
+import { drawsPower, islandAt, powerNetworkOf } from "./powerNetwork"
 import type { Ship } from "./ship"
 
 /** One thing wrong with a ship, in the words the builder shows. */
@@ -63,7 +65,61 @@ export function structuralIssues(ship: Ship): Issue[] {
         })
     }
 
+    if (counts.generator > 0 && tankCount(ship) === 0) {
+        // Only worth saying once there is a generator to starve: a hull with
+        // neither is already being told about the generator
+        issues.push({
+            id: "no-tank",
+            message: "No fuel tanks - the generators have nothing to burn.",
+        })
+    }
+
+    // Only once there is a generator to be out of reach *of*: on a hull with none,
+    // every part is orphaned and saying so adds nothing to "no generators"
+    const orphans = counts.generator > 0 ? unpoweredCount(ship) : 0
+    if (orphans > 0) {
+        issues.push({
+            id: "unpowered",
+            message: orphans === 1
+                ? "1 part is out of reach of a generator."
+                : `${orphans} parts are out of reach of a generator.`,
+        })
+    }
+
     return issues
+}
+
+function tankCount(ship: Ship): number {
+    let tanks = 0
+
+    for (const grid of ship.layersOf()) {
+        for (const cell of grid.list) {
+            if (componentById(cell.type) instanceof TankComponent) tanks++
+        }
+    }
+
+    return tanks
+}
+
+/**
+ * Parts that spend power with no generator able to reach them.
+ *
+ * The one rule that makes the spatial network learnable: without it a badly
+ * placed engine is simply dead in the flight sim with nothing ever having said
+ * why. Advisory like the rest - a ship with an orphaned turret still saves.
+ */
+function unpoweredCount(ship: Ship): number {
+    const network = powerNetworkOf(ship)
+    let orphans = 0
+
+    for (const grid of ship.layersOf()) {
+        for (const cell of grid.list) {
+            if (!drawsPower(componentById(cell.type))) continue
+            if (islandAt(network, cell.col, cell.row) < 0) orphans++
+        }
+    }
+
+    return orphans
 }
 
 /** The one rule about the name, checked wherever the pending name lives. */

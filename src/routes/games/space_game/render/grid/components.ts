@@ -36,9 +36,14 @@ export interface ComponentStats {
     /**
      * What this block costs to build.
      *
-     * On the base rather than a subclass so no consumer needs an instanceof, and
-     * so "hull is free" is the number 0 in a table instead of a branch somewhere
-     * that has to remember. A hull that should cost something later is one edit.
+     * On the base rather than a subclass so no consumer needs an instanceof: what
+     * a part is worth is a number in a table, not a branch somewhere that has to
+     * remember which kinds are exempt.
+     *
+     * Plating is priced too - a bigger hull is a more expensive ship. Only the
+     * *cosmetic layer* is free, and that rule lives in shipCost because it is
+     * about where a block sits rather than about what it is: the same plate costs
+     * money on the hull and nothing as decoration.
      */
     cost: number
 }
@@ -359,9 +364,9 @@ export class WeaponComponent extends Component<WeaponStats> {
  */
 const REGISTRY: readonly Component[] = [
     new HullComponent("hull-plate", "Hull Plate", [
-        { hitPoints: 10, mass: 1, cost: 0 },
-        { hitPoints: 15, mass: 2, cost: 0 },
-        { hitPoints: 30, mass: 4, cost: 0 },
+        { hitPoints: 10, mass: 1, cost: 3 },
+        { hitPoints: 15, mass: 2, cost: 7 },
+        { hitPoints: 30, mass: 4, cost: 16 },
     ]),
 
     // Ion is the efficient family and chem the thirsty-but-strong one: chem gives
