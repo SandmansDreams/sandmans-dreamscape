@@ -1,5 +1,6 @@
 // What a ship shoots with, and where each mount is pointing
 
+import { approach } from "./ease"
 import type { Vec2 } from "../render/camera"
 import { componentById, WeaponComponent } from "../render/grid/components"
 import { OFFSETS } from "../render/grid/shipLegality"
@@ -61,11 +62,19 @@ export const RECOIL_KICK = 0.15
 /**
  * What fraction of the remaining kick is left after a second.
  *
- * Exponential rather than linear so it snaps back fast and then settles, which
- * is what a recoil spring does. Framerate-independent by construction: the same
- * fraction is left after a second however many steps it took to get there.
+ * Exponential so it snaps back fast and then settles, which is what a recoil
+ * spring does. About a 90ms half-life.
  */
 const RECOIL_RECOVER = 0.0005
+
+/**
+ * The same, for the muzzle's light.
+ *
+ * Far faster than the recoil it accompanies, and faster again than an engine's
+ * glow: a nozzle is heat that lingers, a muzzle flash is a bang. About 30ms,
+ * which is a couple of frames of visible light.
+ */
+const FLASH_FADE = 1e-10
 
 /** How a mount is doing right now. Parallel to the mounts array. */
 export interface WeaponState {
@@ -75,6 +84,8 @@ export interface WeaponState {
     angle: number
     /** Cells the barrel is currently driven back down its own line. */
     recoil: number
+    /** 0..1, how brightly the muzzle is still burning from the last shot. */
+    flash: number
 }
 
 /** True for a mount that can be aimed rather than pointed with the whole ship. */
@@ -115,7 +126,7 @@ export function weaponMountsOf(ship: Ship, physics: ShipPhysics): WeaponMount[] 
 }
 
 export function freshStates(mounts: readonly WeaponMount[]): WeaponState[] {
-    return mounts.map((mount) => ({ cooldown: 0, angle: mount.facing, recoil: 0 }))
+    return mounts.map((mount) => ({ cooldown: 0, angle: mount.facing, recoil: 0, flash: 0 }))
 }
 
 /** Muzzle speed, derived so `range` stays the one knob a weapon is tuned by. */
@@ -141,10 +152,20 @@ export function angleDelta(from: number, to: number): number {
  * pilot's job. That is the whole difference between a railgun and a turret, and
  * it is why a railgun's placement in the builder matters.
  *
+ * An unpowered turret does not move at all. What turns a barrel is the ship, so
+ * a mount nothing is feeding sits exactly where it was left - which is also what
+ * makes an unwired gun visibly a problem rather than a silent one.
+ *
  * @param aim where the pilot is pointing, in ship-local radians
  */
-export function aimOf(mount: WeaponMount, state: WeaponState, aim: number, dt: number): number {
-    if (!isTurret(mount)) return mount.facing
+export function aimOf(
+    mount: WeaponMount,
+    state: WeaponState,
+    aim: number,
+    dt: number,
+    powered = true,
+): number {
+    if (!powered || !isTurret(mount)) return powered ? mount.facing : state.angle
 
     const delta = angleDelta(state.angle, aim)
     const step = mount.traverse * dt
@@ -230,14 +251,19 @@ export function coolDown(states: WeaponState[], dt: number): void {
     for (const state of states) state.cooldown = Math.max(0, state.cooldown - dt)
 }
 
-/** Eases every barrel back to where it sits at rest. */
-export function recoverRecoil(states: WeaponState[], dt: number): void {
-    const left = Math.pow(RECOIL_RECOVER, dt)
-
+/**
+ * Eases every barrel back to rest and lets its muzzle go dark.
+ *
+ * Both together because both are what firing did to a mount, and both are
+ * snapped to zero once they are under a thousandth - a barrel that crept back
+ * forever a subpixel at a time would keep the glow buffer busy for nothing.
+ */
+export function settleWeapons(states: WeaponState[], dt: number): void {
     for (const state of states) {
-        // Snapped to zero once it is under a thousandth of a cell, so a barrel
-        // does not creep back forever a subpixel at a time
-        state.recoil = state.recoil * left
+        state.recoil = approach(state.recoil, 0, RECOIL_RECOVER, dt)
         if (state.recoil < 0.001) state.recoil = 0
+
+        state.flash = approach(state.flash, 0, FLASH_FADE, dt)
+        if (state.flash < 0.001) state.flash = 0
     }
 }

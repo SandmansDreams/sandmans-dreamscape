@@ -3,6 +3,15 @@
 import type { Vec2 } from "../render/camera"
 import { isDestroyed, type Target } from "./targets"
 
+/**
+ * The last of a shot's range, over which it fades out.
+ *
+ * A round that reaches its limit and simply stops being drawn reads as a
+ * rendering fault - the eye catches the disappearance, not the distance. Fading
+ * the tail end says "this went as far as it goes" instead.
+ */
+const FADE_FRACTION = 0.3
+
 /** One shot. Plain data, held in a fixed pool. */
 export interface Projectile {
     position: Vec2
@@ -10,6 +19,22 @@ export interface Projectile {
     damage: number
     /** Cells left before it expires, counted down as it travels. */
     range: number
+    /** What it was fired with, so the last of it can be faded against something. */
+    spawnRange: number
+}
+
+/**
+ * How brightly a shot still draws, 1 down to 0 as it runs out of range.
+ *
+ * Full brightness for most of the flight and fading only over the tail, rather
+ * than dimming the whole way: a round should look like a round for as long as it
+ * is one, and start going out only when it is about to.
+ */
+export function projectileFade(projectile: Projectile): number {
+    const over = projectile.spawnRange * FADE_FRACTION
+    if (over <= 0) return projectile.range > 0 ? 1 : 0
+
+    return Math.min(Math.max(projectile.range / over, 0), 1)
 }
 
 /** What a weapon asks for when it fires. */
@@ -105,6 +130,7 @@ export class ProjectileField {
         projectile.velocity.y = shot.direction.y * shot.speed + shot.carry.y
         projectile.damage = shot.damage
         projectile.range = shot.range
+        projectile.spawnRange = shot.range
     }
 
     clear(): void {
@@ -187,5 +213,6 @@ function blank(): Projectile {
         velocity: { x: 0, y: 0 },
         damage: 0,
         range: 0,
+        spawnRange: 0,
     }
 }

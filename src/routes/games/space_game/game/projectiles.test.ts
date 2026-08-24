@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { ProjectileField, sweptDistanceSquared, type Shot } from "./projectiles"
+import { ProjectileField, projectileFade, sweptDistanceSquared, type Shot } from "./projectiles"
 import { targetAt, type Target } from "./targets"
 
 const STILL = { x: 0, y: 0 }
@@ -122,5 +122,55 @@ describe("the pool", () => {
 
         expect(field.count).toBe(2)
         expect(damages.sort()).toEqual([1, 2])
+    })
+})
+
+describe("running out of range", () => {
+    it("draws at full brightness for most of the flight", () => {
+        const field = new ProjectileField(4)
+        field.fire(shot({ range: 20 }))
+
+        let seen = 0
+        field.forEach((p) => { seen = projectileFade(p) })
+
+        expect(seen).toBe(1)
+    })
+
+    it("fades out over the last of it rather than vanishing", () => {
+        // The failure this exists for: a round that simply stops being drawn
+        // reads as a glitch, because the eye catches the disappearance
+        const field = new ProjectileField(4)
+        field.fire(shot({ speed: 10, range: 20 }))
+
+        // 17 of 20 cells travelled: into the last 30% and dimming
+        field.step(1.7, [])
+
+        let seen = 1
+        field.forEach((p) => { seen = projectileFade(p) })
+
+        expect(seen).toBeGreaterThan(0)
+        expect(seen).toBeLessThan(1)
+    })
+
+    it("is darker the closer it gets to its limit", () => {
+        const field = new ProjectileField(4)
+        field.fire(shot({ speed: 10, range: 20 }))
+
+        field.step(1.6, [])
+        let early = 1
+        field.forEach((p) => { early = projectileFade(p) })
+
+        field.step(0.3, [])
+        let late = 1
+        field.forEach((p) => { late = projectileFade(p) })
+
+        expect(late).toBeLessThan(early)
+    })
+
+    it("survives a weapon with no range to speak of", () => {
+        const field = new ProjectileField(4)
+        field.fire(shot({ range: 0 }))
+
+        field.forEach((p) => expect(Number.isFinite(projectileFade(p))).toBe(true))
     })
 })

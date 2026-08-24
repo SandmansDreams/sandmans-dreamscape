@@ -4,11 +4,11 @@ import { shipFromText, shipToText } from "../../game/shipJson"
 import { Camera, type Vec2 } from "../../render/camera"
 import { Color } from "../../render/color"
 import { emissiveSources, spillOnto } from "../../game/emissiveSpill"
-import { wiresFrom } from "../../game/powerNetwork"
+import { reachedCells, wiresFrom } from "../../game/powerNetwork"
 import type { Frame } from "../../render/frame"
 import type { Pipeline } from "../../render/webgpu/pipeline"
 import { canPlace, componentById, componentsOfKind, kindOf, maxLevel, type ComponentKind } from "../../render/grid/components"
-import type { Cell } from "../../render/grid/grid"
+import { cellKey, type Cell } from "../../render/grid/grid"
 import { SHIP_LAYERS, type ShipLayer } from "../../render/grid/layers"
 import { appendShape, carriedTurns, shapeCovers, turnCount, type BlockShape } from "../../render/grid/shapes"
 import { bestThrusterFacing, canClearLayer, canEraseAt, canPlaceAt, nextFacing, thrusterFacings } from "../../render/grid/shipLegality"
@@ -127,6 +127,75 @@ const WIRE_DRAW_COLOR = Color.from("#8bff6a")
 
 /** How much of its colour the halo carries. Low: it is spill, not the wire. */
 const WIRE_HALO_STRENGTH = 0.28
+
+/**
+ * A pulse of charge running down a wire: how fast, how far apart, how big.
+ *
+ * Spaced by distance rather than one per wire, so a long run carries several and
+ * a short hop carries one - which is what makes the flow read as a rate rather
+ * than as a decoration. Speed is world units a second, so every run moves at the
+ * same pace whatever its length.
+ */
+const PULSE_SPEED = CELL * 3.2
+const PULSE_SPACING = CELL * 1.4
+const PULSE_SIZE = CELL * 0.11
+
+/** How much brighter a pulse is than the wire it rides. */
+const PULSE_STRENGTH = 1.6
+
+/*~~~ Reach ~~~*/
+
+/**
+ * The wash over cells a selected source reaches, and the edge where it stops.
+ *
+ * Very faint inside: the point is to read the *extent* at a glance without
+ * losing the ship under it, so the boundary carries the information and the fill
+ * only says which side of it you are on.
+ */
+const REACH_FILL_STRENGTH = 0.06
+const REACH_EDGE_STRENGTH = 0.5
+const REACH_EDGE_WIDTH = CELL * 0.05
+const REACH_COLOR = Color.from("#39d7ff")
+
+/** The four neighbours of a cell, for finding where a region stops. */
+const NEIGHBOURS = [[1, 0], [-1, 0], [0, 1], [0, -1]] as const
+
+/**
+ * A solid node on every part that spends power.
+ *
+ * Only on the parts the selection actually feeds, and only while something is
+ * selected. A node on every consumer at all times said "this needs power",
+ * which is true of all of them and so told you nothing; a node on the ones a
+ * particular source reaches says which, which is the question being asked.
+ *
+ * It is also what the last hop of a wire lands on, so a run terminates at
+ * something rather than in the middle of a plate.
+ *
+ * Solid rather than additive: this is a fixture on the ship, not light running
+ * through it, and glowing would put it in the same language as the wires.
+ */
+const NODE_SIZE = CELL * 0.13
+const NODE_COLOR = Color.from("#8bff6a")
+
+/** A square centred on a point, as two triangles of the shared vertex format. */
+function appendDot(
+    out: number[],
+    x: number,
+    y: number,
+    half: number,
+    r: number,
+    g: number,
+    b: number,
+): void {
+    out.push(
+        x - half, y - half, r, g, b,
+        x + half, y - half, r, g, b,
+        x + half, y + half, r, g, b,
+        x - half, y - half, r, g, b,
+        x + half, y + half, r, g, b,
+        x - half, y + half, r, g, b,
+    )
+}
 
 /** What a DynamicMesh is written with to say it holds nothing this frame. */
 const EMPTY_MESH = new Float32Array(0)
@@ -411,6 +480,21 @@ class ShipBuilder implements SceneInstance<EditorValues> {
     /** Where the selected part's power comes from, or goes to. Empty when nothing is selected. */
     private readonly powerWires: DynamicMesh
     private wiresKey = ""
+    /**
+     * The runs the pulses ride, kept because they are redrawn every frame.
+     *
+     * The wires themselves are a static mesh rebuilt only on selection; only the
+     * charge moving along them changes per frame, and rebuilding the wires to
+     * animate it would be rewriting a hundred vertices to move six.
+     */
+    private wireRuns: { from: Vec2; to: Vec2; ink: Color }[] = []
+    private readonly wirePulses: DynamicMesh
+    /** Which cells the selected source reaches. Empty for anything else. */
+    private readonly reachMark: DynamicMesh
+    /** A point on each part the selection feeds. Empty with nothing selected. */
+    private readonly drawNodes: DynamicMesh
+    /** How far the leading pulse has travelled down its run, in world units. */
+    private pulsePhase = 0
 
     /**
      * The one brush there is.
@@ -579,6 +663,9 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         this.selectedBox = DynamicMesh.create(gpu, "selected")
         this.highlightBoxes = DynamicMesh.create(gpu, "colour highlight")
         this.powerWires = DynamicMesh.create(gpu, "power wires")
+        this.wirePulses = DynamicMesh.create(gpu, "power pulses")
+        this.reachMark = DynamicMesh.create(gpu, "power reach")
+        this.drawNodes = DynamicMesh.create(gpu, "power nodes")
 
         this.camera.zoom = 1
 
@@ -604,6 +691,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         this.syncIdentity(settings)
 
         this.readShortcuts()
+        this.rebuildPulses(dt)
 
         const [col, row] = this.getGridPositionFromMouse()
 
@@ -700,8 +788,14 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         // and one hidden behind the plate it feeds would answer nothing
         if (markers) {
             frame.setPipeline(this.context.renderer.meshGlow).setBindGroup(0, camera.group)
+            // Reach under the wires: it is the area they run through
+            this.reachMark.draw(frame)
             this.powerWires.draw(frame)
+            this.wirePulses.draw(frame)
+
+            // Solid and last, so a wire terminates on a node rather than under it
             frame.setPipeline(meshPipeline).setBindGroup(0, camera.group)
+            this.drawNodes.draw(frame)
         }
         if (markers) this.selectedBox.draw(frame)
 
@@ -821,6 +915,9 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         this.selectedBox.destroy()
         this.highlightBoxes.destroy()
         this.powerWires.destroy()
+        this.wirePulses.destroy()
+        this.reachMark.destroy()
+        this.drawNodes.destroy()
     }
 
     /*~~~ Brush ~~~*/
@@ -1013,9 +1110,15 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         this.wiresKey = key
 
         this.powerWires.write(EMPTY_MESH)
+        this.wirePulses.write(EMPTY_MESH)
+        this.reachMark.write(EMPTY_MESH)
+        this.drawNodes.write(EMPTY_MESH)
+        this.wireRuns = []
         if (!at || this.layerView.markers === "hidden") return
 
-        const links = wiresFrom(this.ship, at.col, at.row)
+        this.buildReachMark(at)
+
+        const links = wiresFrom(this.ship, at.layer, at.col, at.row)
         if (links.length === 0) return
 
         const halo: number[] = []
@@ -1026,12 +1129,34 @@ class ShipBuilder implements SceneInstance<EditorValues> {
             const from = this.cellCentre(link.from.col, link.from.row)
             const to = this.cellCentre(link.to.col, link.to.row)
 
+            this.wireRuns.push({ from, to, ink })
+
             core.push(from.x, from.y, ink.r, ink.g, ink.b, to.x, to.y, ink.r, ink.g, ink.b)
             halo.push(
                 from.x, from.y, ink.r * WIRE_HALO_STRENGTH, ink.g * WIRE_HALO_STRENGTH, ink.b * WIRE_HALO_STRENGTH,
                 to.x, to.y, ink.r * WIRE_HALO_STRENGTH, ink.g * WIRE_HALO_STRENGTH, ink.b * WIRE_HALO_STRENGTH,
             )
         }
+
+        // From the links rather than from the ship, so a node can never mark
+        // something the wires do not reach - the same rule the outlines follow by
+        // being traced from the drawing code
+        const nodes: number[] = []
+        const marked = new Set<number>()
+        const ink = this.markerInk(NODE_COLOR)
+
+        for (const link of links) {
+            if (link.relay) continue
+
+            const key = cellKey(link.to.col, link.to.row)
+            if (marked.has(key)) continue
+            marked.add(key)
+
+            const at = this.cellCentre(link.to.col, link.to.row)
+            appendDot(nodes, at.x, at.y, NODE_SIZE, ink.r, ink.g, ink.b)
+        }
+
+        this.drawNodes.write(new Float32Array(nodes))
 
         // Halo first so the core lands on top of it; additive makes the overlap
         // the brightest part of the run
@@ -1040,6 +1165,105 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         thickenSegments(out, core, WIRE_CORE_WIDTH)
 
         this.powerWires.write(new Float32Array(out))
+    }
+
+    /**
+     * Moves every pulse a frame down its wire and rebuilds them.
+     *
+     * Positions come out of one phase rather than each pulse carrying its own:
+     * they are evenly spaced by construction, so where the first one is says
+     * where all of them are. Nothing to spawn, nothing to retire, and no drift
+     * between runs however long the selection is held.
+     */
+    private rebuildPulses(dt: number): void {
+        if (this.wireRuns.length === 0) return
+
+        // Wrapped at the spacing, so the phase stays small however long a
+        // selection is held rather than growing until it loses precision
+        this.pulsePhase = (this.pulsePhase + PULSE_SPEED * dt) % PULSE_SPACING
+
+        const out: number[] = []
+
+        for (const run of this.wireRuns) {
+            const dx = run.to.x - run.from.x
+            const dy = run.to.y - run.from.y
+            const length = Math.hypot(dx, dy)
+            if (length <= 0) continue
+
+            const stepX = dx / length
+            const stepY = dy / length
+
+            const { r, g, b } = run.ink
+            for (let along = this.pulsePhase; along <= length; along += PULSE_SPACING) {
+                appendDot(
+                    out,
+                    run.from.x + stepX * along,
+                    run.from.y + stepY * along,
+                    PULSE_SIZE,
+                    r * PULSE_STRENGTH, g * PULSE_STRENGTH, b * PULSE_STRENGTH,
+                )
+            }
+        }
+
+        this.wirePulses.write(new Float32Array(out))
+    }
+
+    /**
+     * Washes the cells a source reaches, and outlines where that stops.
+     *
+     * The edge is drawn only where a covered cell has an uncovered neighbour, so
+     * it comes out as the actual boundary of the reach rather than a border
+     * around every cell in it. Stepped rather than round, because the reach is
+     * decided cell by cell and a smooth circle would be drawing a promise the
+     * network does not keep.
+     */
+    private buildReachMark(at: { col: number; row: number; layer: ShipLayer }): void {
+        const cells = reachedCells(this.ship, at.layer, at.col, at.row)
+        if (cells.length === 0) return
+
+        const covered = new Set(cells.map((cell) => cellKey(cell.col, cell.row)))
+        const ink = this.markerInk(REACH_COLOR)
+
+        const fill: number[] = []
+        const edges: number[] = []
+
+        for (const cell of cells) {
+            const { x, y } = this.cellCorner(cell.col, cell.row)
+
+            fill.push(
+                x, y, ink.r * REACH_FILL_STRENGTH, ink.g * REACH_FILL_STRENGTH, ink.b * REACH_FILL_STRENGTH,
+                x + CELL, y, ink.r * REACH_FILL_STRENGTH, ink.g * REACH_FILL_STRENGTH, ink.b * REACH_FILL_STRENGTH,
+                x + CELL, y + CELL, ink.r * REACH_FILL_STRENGTH, ink.g * REACH_FILL_STRENGTH, ink.b * REACH_FILL_STRENGTH,
+                x, y, ink.r * REACH_FILL_STRENGTH, ink.g * REACH_FILL_STRENGTH, ink.b * REACH_FILL_STRENGTH,
+                x + CELL, y + CELL, ink.r * REACH_FILL_STRENGTH, ink.g * REACH_FILL_STRENGTH, ink.b * REACH_FILL_STRENGTH,
+                x, y + CELL, ink.r * REACH_FILL_STRENGTH, ink.g * REACH_FILL_STRENGTH, ink.b * REACH_FILL_STRENGTH,
+            )
+
+            for (const [dc, dr] of NEIGHBOURS) {
+                if (covered.has(cellKey(cell.col + dc, cell.row + dr))) continue
+
+                // The shared edge with the neighbour that is not covered
+                const ax = x + (dc > 0 ? CELL : 0)
+                const ay = y + (dr > 0 ? CELL : 0)
+                const bx = ax + (dc === 0 ? CELL : 0)
+                const by = ay + (dr === 0 ? CELL : 0)
+
+                const { r, g, b } = ink
+                edges.push(
+                    ax, ay, r * REACH_EDGE_STRENGTH, g * REACH_EDGE_STRENGTH, b * REACH_EDGE_STRENGTH,
+                    bx, by, r * REACH_EDGE_STRENGTH, g * REACH_EDGE_STRENGTH, b * REACH_EDGE_STRENGTH,
+                )
+            }
+        }
+
+        const out = fill
+        thickenSegments(out, edges, REACH_EDGE_WIDTH)
+        this.reachMark.write(new Float32Array(out))
+    }
+
+    /** The top-left corner of a cell in world units. */
+    private cellCorner(col: number, row: number): Vec2 {
+        return { x: (col - this.origin.x) * CELL, y: (row - this.origin.y) * CELL }
     }
 
     /** The middle of a cell in world units, which is where a wire ends. */

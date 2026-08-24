@@ -4,7 +4,7 @@ import { Ship } from "./ship"
 import { targetAt } from "./targets"
 import {
     aimOf, angleDelta, coolDown, freshStates, isTurret, leadAngle, nearestInRange,
-    recoverRecoil, RECOIL_KICK, shotSpeed, weaponMountsOf, willFire,
+    settleWeapons, RECOIL_KICK, shotSpeed, weaponMountsOf, willFire,
     type WeaponMount, type WeaponState,
 } from "./weapons"
 
@@ -85,7 +85,7 @@ describe("angles", () => {
 describe("aiming", () => {
     it("slews a turret at its traverse rate and no faster", () => {
         const mount = turret({ traverse: 3 })
-        const state: WeaponState = { cooldown: 0, angle: 0, recoil: 0 }
+        const state: WeaponState = { cooldown: 0, angle: 0, recoil: 0, flash: 0 }
 
         // Asked to spin right round in one frame; it may move 3 * dt
         expect(aimOf(mount, state, Math.PI, DT)).toBeCloseTo(3 * DT)
@@ -93,14 +93,14 @@ describe("aiming", () => {
 
     it("lands exactly on the aim once it is within reach", () => {
         const mount = turret({ traverse: 3 })
-        const state: WeaponState = { cooldown: 0, angle: 0, recoil: 0 }
+        const state: WeaponState = { cooldown: 0, angle: 0, recoil: 0, flash: 0 }
 
         expect(aimOf(mount, state, 0.01, DT)).toBeCloseTo(0.01)
     })
 
     it("leaves a fixed mount welded to its facing", () => {
         const rail = turret({ traverse: 0, facing: 1.2 })
-        const state: WeaponState = { cooldown: 0, angle: 1.2, recoil: 0 }
+        const state: WeaponState = { cooldown: 0, angle: 1.2, recoil: 0, flash: 0 }
 
         expect(aimOf(rail, state, -2.5, DT)).toBeCloseTo(1.2)
     })
@@ -109,7 +109,7 @@ describe("aiming", () => {
 describe("firing", () => {
     it("holds a turret until it is lined up", () => {
         const mount = turret()
-        const wide: WeaponState = { cooldown: 0, angle: 0, recoil: 0 }
+        const wide: WeaponState = { cooldown: 0, angle: 0, recoil: 0, flash: 0 }
 
         expect(willFire(mount, wide, 2, true, true)).toBe(false)
         expect(willFire(mount, wide, 0.01, true, true)).toBe(true)
@@ -118,24 +118,24 @@ describe("firing", () => {
     it("fires a fixed mount the moment the trigger is down", () => {
         // It cannot line itself up, so waiting for alignment would mean never
         const rail = turret({ traverse: 0 })
-        const state: WeaponState = { cooldown: 0, angle: 0, recoil: 0 }
+        const state: WeaponState = { cooldown: 0, angle: 0, recoil: 0, flash: 0 }
 
         expect(willFire(rail, state, 3.0, true, true)).toBe(true)
     })
 
     it("will not fire without the trigger, the power, or the cooldown", () => {
         const mount = turret()
-        const ready: WeaponState = { cooldown: 0, angle: 0, recoil: 0 }
+        const ready: WeaponState = { cooldown: 0, angle: 0, recoil: 0, flash: 0 }
 
         expect(willFire(mount, ready, 0, false, true)).toBe(false)
         expect(willFire(mount, ready, 0, true, false)).toBe(false)
-        expect(willFire(mount, { cooldown: 0.1, angle: 0, recoil: 0 }, 0, true, true)).toBe(false)
+        expect(willFire(mount, { cooldown: 0.1, angle: 0, recoil: 0, flash: 0 }, 0, true, true)).toBe(false)
     })
 })
 
 describe("cooldowns", () => {
     it("counts down and stops at zero", () => {
-        const states = [{ cooldown: 0.05, angle: 0, recoil: 0 }, { cooldown: 0, angle: 0, recoil: 0 }]
+        const states = [{ cooldown: 0.05, angle: 0, recoil: 0, flash: 0 }, { cooldown: 0, angle: 0, recoil: 0, flash: 0 }]
         coolDown(states, 0.1)
 
         expect(states[0]!.cooldown).toBe(0)
@@ -162,9 +162,9 @@ describe("shot speed", () => {
 
 describe("recoil", () => {
     it("eases back toward rest rather than snapping", () => {
-        const states = [{ cooldown: 0, angle: 0, recoil: RECOIL_KICK }]
+        const states = [{ cooldown: 0, angle: 0, recoil: RECOIL_KICK, flash: 0 }]
 
-        recoverRecoil(states, 1 / 60)
+        settleWeapons(states, 1 / 60)
         const afterOneFrame = states[0]!.recoil
 
         expect(afterOneFrame).toBeLessThan(RECOIL_KICK)
@@ -172,19 +172,19 @@ describe("recoil", () => {
     })
 
     it("settles at exactly zero rather than creeping forever", () => {
-        const states = [{ cooldown: 0, angle: 0, recoil: RECOIL_KICK }]
-        recoverRecoil(states, 1)
+        const states = [{ cooldown: 0, angle: 0, recoil: RECOIL_KICK, flash: 0 }]
+        settleWeapons(states, 1)
 
         expect(states[0]!.recoil).toBe(0)
     })
 
     it("recovers the same amount however many steps it took", () => {
         // Framerate independence: a kick must not last longer on a slow machine
-        const coarse = [{ cooldown: 0, angle: 0, recoil: RECOIL_KICK }]
-        const fine = [{ cooldown: 0, angle: 0, recoil: RECOIL_KICK }]
+        const coarse = [{ cooldown: 0, angle: 0, recoil: RECOIL_KICK, flash: 0 }]
+        const fine = [{ cooldown: 0, angle: 0, recoil: RECOIL_KICK, flash: 0 }]
 
-        recoverRecoil(coarse, 0.1)
-        for (let i = 0; i < 10; i++) recoverRecoil(fine, 0.01)
+        settleWeapons(coarse, 0.1)
+        for (let i = 0; i < 10; i++) settleWeapons(fine, 0.01)
 
         expect(fine[0]!.recoil).toBeCloseTo(coarse[0]!.recoil, 5)
     })
@@ -248,5 +248,50 @@ describe("leading a target", () => {
 
         expect(leadAngle({ x: 0, y: 0 }, crossing, 10))
             .toBeGreaterThan(leadAngle({ x: 0, y: 0 }, crossing, 60))
+    })
+})
+
+describe("power and movement", () => {
+    it("freezes an unpowered turret where it was left", () => {
+        const mount = turret({ traverse: 3 })
+        const state: WeaponState = { cooldown: 0, angle: 0.7, recoil: 0, flash: 0 }
+
+        expect(aimOf(mount, state, 2.5, DT, false)).toBe(0.7)
+    })
+
+    it("leaves an unpowered fixed mount alone too", () => {
+        const rail = turret({ traverse: 0, facing: 1.2 })
+        const state: WeaponState = { cooldown: 0, angle: 1.2, recoil: 0, flash: 0 }
+
+        expect(aimOf(rail, state, -2.5, DT, false)).toBe(1.2)
+    })
+
+    it("slews again the moment it is fed", () => {
+        const mount = turret({ traverse: 3 })
+        const state: WeaponState = { cooldown: 0, angle: 0, recoil: 0, flash: 0 }
+
+        expect(aimOf(mount, state, 2.5, DT, true)).not.toBe(0)
+    })
+})
+
+describe("muzzle flash", () => {
+    it("fades faster than the recoil it came with", () => {
+        // A nozzle is heat that lingers; a muzzle flash is a bang
+        const states = [{ cooldown: 0, angle: 0, recoil: RECOIL_KICK, flash: 1 }]
+        settleWeapons(states, 0.03)
+
+        expect(states[0]!.flash / 1).toBeLessThan(states[0]!.recoil / RECOIL_KICK)
+    })
+
+    it("goes out entirely rather than lingering at a fraction", () => {
+        const states = [{ cooldown: 0, angle: 0, recoil: 0, flash: 1 }]
+        settleWeapons(states, 0.5)
+
+        expect(states[0]!.flash).toBe(0)
+    })
+
+    it("starts dark", () => {
+        const mounts = mountsOf([{ type: "autocannon", col: 0, row: 0 }])
+        expect(freshStates(mounts)[0]!.flash).toBe(0)
     })
 })

@@ -10,6 +10,7 @@ import {
     type Component,
 } from "../render/grid/components"
 import { cellKey } from "../render/grid/grid"
+import type { ShipLayer } from "../render/grid/layers"
 import type { Ship } from "./ship"
 
 /** One connected run of generators and the batteries relaying for them. */
@@ -245,123 +246,297 @@ export interface PowerLink {
  *
  * Select a generator or a battery and this is everything downstream of it: the
  * chain of batteries carrying its reach outward, and the last hop from each of
- * those to whatever it feeds. Select a thruster or a gun and it is the path back
- * the other way, to the generator actually paying for it.
+ * those to whatever it feeds. Select a thruster or a gun and it is the run that
+ * feeds it, traced back to the generator paying for it.
+ *
+ * Every link points the way power actually travels, generator outward, whichever
+ * end you selected. That is what lets something be animated along one: a pulse
+ * running backwards up a wire would be worse than no pulse at all.
  *
  * A tree rather than every link that exists. Two batteries in range of each
  * other and of the same core would draw three wires for one supply, which says
  * "there is a loop here" when what a player asked was "where does this come
- * from" - so each source is reached once, by the shortest hop that found it.
+ * from" - so each source is reached once, by the shortest hop from a generator.
  *
  * Empty when the cell is on no network, which is the honest answer: an orphaned
  * turret has no wire to draw because nothing is feeding it.
  */
-export function wiresFrom(ship: Ship, col: number, row: number): PowerLink[] {
-    const sources = sourcesOf(ship)
-    const at = sources.findIndex((source) => source.col === col && source.row === row)
+export function wiresFrom(ship: Ship, layer: ShipLayer, col: number, row: number): PowerLink[] {
+    const cell = ship.layers[layer].get(col, row)
+    if (!cell) return []
 
-    return at >= 0 ? wiresOutFrom(ship, sources, at) : wiresBackFrom(ship, sources, col, row)
+    const component = componentById(cell.type)
+    const sources = sourcesOf(ship)
+    const depth = feedDepths(sources)
+
+    if (component instanceof GeneratorComponent || component instanceof BatteryComponent) {
+        const at = sources.findIndex((source) => source.col === col && source.row === row)
+        return at >= 0 ? wiresUnder(ship, sources, depth, at) : []
+    }
+
+    // Everything else only has a supply worth drawing if it actually spends
+    // something. A hull plate or a crate is wired to nothing because it needs
+    // nothing, and a line to it would claim a demand that is not there.
+    if (!drawsPower(component)) return []
+
+    return wiresFeeding(ship, sources, depth, col, row)
 }
 
-/** The tree of relays out from one source, and what each of them feeds. */
-function wiresOutFrom(ship: Ship, sources: readonly Source[], from: number): PowerLink[] {
-    const links: PowerLink[] = []
-    const parent = new Array<number>(sources.length).fill(-1)
-    const seen = new Array<boolean>(sources.length).fill(false)
+/**
+ * The most batteries one part is shown drawing from.
+ *
+ * More than one because a part sitting between two of them really is fed by
+ * both, and a single line would claim otherwise. Capped because past three the
+ * picture stops being a supply and starts being a mesh.
+ */
+const MAX_BATTERY_LINKS = 3
 
-    seen[from] = true
-    const frontier = [from]
+/**
+ * Which sources a part draws through, nearest first.
+ *
+ * Batteries before the generator: a battery is what a part is meant to be fed
+ * from, and the generator behind it is the supply of last resort - so a hull
+ * wired properly shows short local runs rather than everything reaching back to
+ * the core. A generator still connects directly when it is in range, which is
+ * what keeps a ship with no batteries working at all.
+ */
+function feedersFor(
+    sources: readonly Source[],
+    included: readonly boolean[],
+    col: number,
+    row: number,
+): number[] {
+    const inRange = sources
+        .map((source, index) => ({ index, source, away: distanceSquared(source, col, row) }))
+        .filter((entry) =>
+            included[entry.index] && entry.away <= entry.source.reach * entry.source.reach)
+        .sort((a, b) => a.away - b.away)
 
-    // Breadth-first, so a source is reached by the fewest hops rather than by
-    // whichever happened to be scanned first - the wire drawn is the short way
+    const feeders = inRange
+        .filter((entry) => !entry.source.root)
+        .slice(0, MAX_BATTERY_LINKS)
+        .map((entry) => entry.index)
+
+    const generator = inRange.find((entry) => entry.source.root)
+    if (generator) feeders.push(generator.index)
+
+    return feeders
+}
+
+/**
+ * How many hops each source is from the nearest generator.
+ *
+ * Generators are 0, a battery they reach is 1, and so on; Infinity means nothing
+ * feeds it. Depth is what gives the wiring a direction without inventing a
+ * single parent for anything: power flows from a lower depth to a higher one,
+ * and a source can be fed by every shallower source that reaches it.
+ *
+ * That last part is why this replaced a tree. Three cores in a row all reaching
+ * the same battery really do all feed it, and a tree could only say so about
+ * whichever one it happened to visit first - leaving the other two looking wired
+ * to nothing at all.
+ */
+function feedDepths(sources: readonly Source[]): number[] {
+    const depth = sources.map((source) => (source.root ? 0 : Infinity))
+    const frontier = sources.map((_, index) => index).filter((index) => depth[index] === 0)
+
     for (let head = 0; head < frontier.length; head++) {
         const here = frontier[head]!
 
         for (let next = 0; next < sources.length; next++) {
-            if (seen[next] || !linked(sources[here]!, sources[next]!)) continue
+            if (depth[next] !== Infinity || !linked(sources[here]!, sources[next]!)) continue
 
-            seen[next] = true
-            parent[next] = here
+            depth[next] = depth[here]! + 1
             frontier.push(next)
-
-            links.push({
-                from: { col: sources[here]!.col, row: sources[here]!.row },
-                to: { col: sources[next]!.col, row: sources[next]!.row },
-                relay: true,
-            })
         }
     }
 
-    // The last hop: every consumer this run of wire is what feeds
-    for (const cell of consumerCells(ship)) {
-        const feeder = reachedBy(sources, seen, cell.col, cell.row)
-        if (feeder < 0) continue
+    return depth
+}
 
-        links.push({
-            from: { col: sources[feeder]!.col, row: sources[feeder]!.row },
-            to: { col: cell.col, row: cell.row },
-            relay: false,
-        })
+/** Every source that feeds this one: shallower than it, and in reach of it. */
+function feedsInto(sources: readonly Source[], depth: readonly number[], into: number): number[] {
+    const feeders: number[] = []
+    if (depth[into] === Infinity) return feeders
+
+    for (let i = 0; i < sources.length; i++) {
+        if (depth[i]! < depth[into]! && linked(sources[i]!, sources[into]!)) feeders.push(i)
+    }
+
+    return feeders
+}
+
+/** Every source the power leaving this one can reach, itself included. */
+function downstreamOf(sources: readonly Source[], depth: readonly number[], from: number): boolean[] {
+    const under = sources.map(() => false)
+    if (depth[from] === Infinity) return under
+
+    under[from] = true
+    const frontier = [from]
+
+    // Depth strictly increases along a feed, so this cannot loop back on itself
+    for (let head = 0; head < frontier.length; head++) {
+        const here = frontier[head]!
+
+        for (let next = 0; next < sources.length; next++) {
+            if (under[next] || depth[next]! <= depth[here]!) continue
+            if (!linked(sources[here]!, sources[next]!)) continue
+
+            under[next] = true
+            frontier.push(next)
+        }
+    }
+
+    return under
+}
+
+/** Everything the selected source carries power to, directly or through a relay. */
+function wiresUnder(
+    ship: Ship,
+    sources: readonly Source[],
+    depth: readonly number[],
+    from: number,
+): PowerLink[] {
+    if (depth[from] === Infinity) return []
+
+    const links: PowerLink[] = []
+    const under = downstreamOf(sources, depth, from)
+
+    // Only feeds that both start and end downstream, so the run begins at the
+    // selection rather than at whatever happens to feed it
+    sources.forEach((source, index) => {
+        if (!under[index]) return
+
+        for (const feeder of feedsInto(sources, depth, index)) {
+            if (!under[feeder]) continue
+
+            links.push({
+                from: { col: sources[feeder]!.col, row: sources[feeder]!.row },
+                to: { col: source.col, row: source.row },
+                relay: true,
+            })
+        }
+    })
+
+    for (const cell of consumerCells(ship)) {
+        for (const feeder of feedersFor(sources, under, cell.col, cell.row)) {
+            links.push({
+                from: { col: sources[feeder]!.col, row: sources[feeder]!.row },
+                to: { col: cell.col, row: cell.row },
+                relay: false,
+            })
+        }
     }
 
     return links
 }
 
-/** The path from one consumer back to a generator, hop by hop. */
-function wiresBackFrom(
+/** The runs that feed one consumer, traced back to the generators paying for it. */
+function wiresFeeding(
     ship: Ship,
     sources: readonly Source[],
+    depth: readonly number[],
     col: number,
     row: number,
 ): PowerLink[] {
-    const network = powerNetworkOf(ship)
-    const island = islandAt(network, col, row)
-    if (island < 0) return []
+    const onNetwork = depth.map((d) => d !== Infinity)
+    const feeders = feedersFor(sources, onNetwork, col, row)
+    if (feeders.length === 0) return []
 
-    // Whichever source actually reaches it, then that source's own tree - walked
-    // outward from there, which is the same set of wires seen from the other end
-    const all = sources.map(() => true)
-    const feeder = reachedBy(sources, all, col, row)
-    if (feeder < 0) return []
+    const relays: PowerLink[] = []
+    const seen = new Set<string>()
+    const walk = [...feeders]
 
-    return [
-        { from: { col: sources[feeder]!.col, row: sources[feeder]!.row }, to: { col, row }, relay: false },
-        ...wiresOutFrom(ship, sources, feeder).filter((link) => link.relay),
-    ]
-}
+    // Upstream from every feeder at once, deduped: two feeders on one branch
+    // share most of it, and drawing that twice draws it thicker, not fuller
+    for (let head = 0; head < walk.length; head++) {
+        const here = walk[head]!
 
-/** The nearest source that both reaches a cell and is in the set given. */
-function reachedBy(
-    sources: readonly Source[],
-    included: readonly boolean[],
-    col: number,
-    row: number,
-): number {
-    let best = -1
-    let bestDistance = Infinity
+        for (const feeder of feedsInto(sources, depth, here)) {
+            const key = `${feeder}>${here}`
+            if (seen.has(key)) continue
 
-    for (let i = 0; i < sources.length; i++) {
-        if (!included[i]) continue
-
-        const source = sources[i]!
-        const distance = distanceSquared(source, col, row)
-        if (distance > source.reach * source.reach) continue
-
-        if (distance < bestDistance) {
-            bestDistance = distance
-            best = i
+            seen.add(key)
+            relays.push({
+                from: { col: sources[feeder]!.col, row: sources[feeder]!.row },
+                to: { col: sources[here]!.col, row: sources[here]!.row },
+                relay: true,
+            })
+            walk.push(feeder)
         }
     }
 
-    return best
+    // Shallowest first, so the run still reads generator outward however far up
+    // from the consumer it was found
+    relays.sort((a, b) => depthOfCell(sources, depth, a.from) - depthOfCell(sources, depth, b.from))
+
+    return [
+        ...relays,
+        ...feeders.map((feeder) => ({
+            from: { col: sources[feeder]!.col, row: sources[feeder]!.row },
+            to: { col, row },
+            relay: false,
+        })),
+    ]
 }
 
+function depthOfCell(
+    sources: readonly Source[],
+    depth: readonly number[],
+    at: { col: number; row: number },
+): number {
+    const index = sources.findIndex((source) => source.col === at.col && source.row === at.row)
+    return index >= 0 ? depth[index]! : Infinity
+}
 function consumerCells(ship: Ship): { col: number; row: number }[] {
     const cells: { col: number; row: number }[] = []
 
     for (const grid of ship.layersOf()) {
         for (const cell of grid.list) {
             if (drawsPower(componentById(cell.type))) cells.push({ col: cell.col, row: cell.row })
+        }
+    }
+
+    return cells
+}
+
+/**
+ * Every cell a selected source reaches, as grid coordinates.
+ *
+ * The cells themselves rather than a circle drawn at its radius. Reach is tested
+ * centre to centre against a squared distance, so whether a cell on the boundary
+ * counts is a yes or a no - and a circle drawn over a blocky grid leaves exactly
+ * that question open, with the answer differing by a pixel. A cell either lights
+ * up or it does not, which is what the network actually decides.
+ *
+ * Empty for anything that is not a generator or a battery: nothing else has a
+ * reach to show.
+ */
+export function reachedCells(
+    ship: Ship,
+    layer: ShipLayer,
+    col: number,
+    row: number,
+): { col: number; row: number }[] {
+    const cell = ship.layers[layer].get(col, row)
+    if (!cell) return []
+
+    const component = componentById(cell.type)
+    const reach = component instanceof GeneratorComponent || component instanceof BatteryComponent
+        ? component.statsAt(cell.level).reach
+        : 0
+
+    if (reach <= 0) return []
+
+    const cells: { col: number; row: number }[] = []
+    const span = Math.floor(reach)
+
+    // A box, filtered to the disc: the alternative is walking outward ring by
+    // ring, which is more code to visit the same cells
+    for (let dr = -span; dr <= span; dr++) {
+        for (let dc = -span; dc <= span; dc++) {
+            if (dc * dc + dr * dr > reach * reach) continue
+            cells.push({ col: col + dc, row: row + dr })
         }
     }
 

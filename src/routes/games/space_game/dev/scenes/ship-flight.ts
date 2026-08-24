@@ -28,10 +28,10 @@ import { emissiveSources, falloff, spillOnto } from "../../game/emissiveSpill"
 import { approach } from "../../game/ease"
 import { islandAt, powerNetworkOf } from "../../game/powerNetwork"
 import { cellKey } from "../../render/grid/grid"
-import { ProjectileField } from "../../game/projectiles"
+import { ProjectileField, projectileFade } from "../../game/projectiles"
 import { driftTarget, isDestroyed, splitTarget, targetAt, type Target } from "../../game/targets"
 import {
-    aimOf, coolDown, freshStates, leadAngle, nearestInRange, recoverRecoil, RECOIL_KICK,
+    aimOf, coolDown, freshStates, leadAngle, nearestInRange, RECOIL_KICK, settleWeapons,
     shotSpeed, weaponMountsOf, willFire,
     type WeaponMount, type WeaponState,
 } from "../../game/weapons"
@@ -149,6 +149,18 @@ const SHOT_COLOR = Color.from("#9fe8ff")
 const IMPACT_SPARKS = 8
 const IMPACT_SPEED = 6
 const IMPACT_LIFE = 0.3
+
+/**
+ * How far a firing muzzle throws light across the hull, and how much.
+ *
+ * Shorter and harder than an engine's: a burn is a steady wash over the plates
+ * around a nozzle, a shot is a bright moment right at the barrel's mouth.
+ */
+const MUZZLE_GLOW_RANGE = 2.2
+const MUZZLE_GLOW_STRENGTH = 0.65
+
+/** How much brighter a barrel itself goes at the instant it fires. */
+const BARREL_FLASH_BOOST = 0.85
 
 const TARGET_COLOR = Color.from("#6b6f5a")
 /** Rocks start somewhere in this band of the arena, in cells. */
@@ -665,15 +677,36 @@ class ShipFlight implements SceneInstance<FlightValues> {
             // Driven back down its own line, so the kick is along the barrel
             // whichever way the turret happens to be pointing
             const back = state.recoil
+
+            // Past one on purpose: the instanced shader multiplies the vertex
+            // colour by this, so over-driving it brightens the barrel's own art
+            // rather than tinting it
+            const lit = 1 + state.flash * BARREL_FLASH_BOOST
+
             batch.add(
                 (at.x - Math.cos(aim) * back) * CELL,
                 (at.y - Math.sin(aim) * back) * CELL,
                 aim + Math.PI / 2,
-                1, 1, 1, 1, 1,
+                1, lit, lit, lit, 1,
             )
         })
 
         return batch
+    }
+
+    /**
+     * Whether an island can move and fire what is wired to it.
+     *
+     * Wired *and* holding charge, not merely wired: a barrel is turned by the
+     * ship, so a hull that has browned out has nothing to turn it with. The
+     * reserves are last frame's - the tick has not run yet - and a single frame
+     * of lag on a turret seizing is not something anyone can see.
+     */
+    private isPowered(island: number, settings: FlightValues): boolean {
+        if (settings.infinitePower) return true
+        if (island < 0) return false
+
+        return (this.reserves.power[island] ?? 0) > 0
     }
 
     /** Where the pilot is pointing, in world cells. */
@@ -726,7 +759,7 @@ class ShipFlight implements SceneInstance<FlightValues> {
      */
     private aimWeapons(dt: number, settings: FlightValues): { index: number; island: number }[] {
         coolDown(this.weaponStates, dt)
-        recoverRecoil(this.weaponStates, dt)
+        settleWeapons(this.weaponStates, dt)
         if (this.mounts.length === 0) return []
 
         const at = this.aimPoint()
@@ -744,6 +777,8 @@ class ShipFlight implements SceneInstance<FlightValues> {
 
         this.mounts.forEach((mount, index) => {
             const state = this.weaponStates[index]!
+            const island = this.weaponIsland[index] ?? -1
+            const powered = this.isPowered(island, settings)
 
             // Null only reaches here on a mount left to itself with nothing in
             // reach: it holds where it is and holds fire, rather than shooting at
@@ -754,10 +789,8 @@ class ShipFlight implements SceneInstance<FlightValues> {
 
             if (aim === null) return
 
-            state.angle = aimOf(mount, state, aim, dt)
+            state.angle = aimOf(mount, state, aim, dt, powered)
 
-            const island = this.weaponIsland[index] ?? -1
-            const powered = settings.infinitePower || island >= 0
             if (willFire(mount, state, aim, triggered, powered)) wants.push({ index, island })
         })
 
@@ -794,6 +827,7 @@ class ShipFlight implements SceneInstance<FlightValues> {
 
             state.cooldown = mount.cooldown
             state.recoil = RECOIL_KICK
+            state.flash = 1
         })
     }
 
@@ -1191,7 +1225,42 @@ class ShipFlight implements SceneInstance<FlightValues> {
             })
         })
 
+        this.addMuzzleGlow(glow)
         this.lights.writeCellGlow(glow)
+    }
+
+    /**
+     * Adds each firing muzzle's light to the same per-cell buffer the engines use.
+     *
+     * The same falloff and the same buffer, so a shot and a burn light the hull
+     * in one language rather than two - only the colour, the range and how fast
+     * it dies tell them apart.
+     */
+    private addMuzzleGlow(glow: Float32Array): void {
+        const rangeSq = MUZZLE_GLOW_RANGE * MUZZLE_GLOW_RANGE
+
+        this.mounts.forEach((mount, index) => {
+            const state = this.weaponStates[index]!
+            if (state.flash <= 0.001) return
+
+            // The mouth of the barrel where it is pointing now, which is where
+            // the round left from
+            const atCol = mount.col + 0.5 + Math.cos(state.angle) * MUZZLE_OFFSET
+            const atRow = mount.row + 0.5 + Math.sin(state.angle) * MUZZLE_OFFSET
+            const amount = state.flash * MUZZLE_GLOW_STRENGTH
+
+            this.glowCells.forEach((cell, slot) => {
+                const dc = cell.col + 0.5 - atCol
+                const dr = cell.row + 0.5 - atRow
+                const strength = amount * falloff(dc * dc + dr * dr, rangeSq)
+                if (strength <= 0) return
+
+                const at = slot * FLOATS_PER_CELL_GLOW
+                glow[at] = (glow[at] ?? 0) + SHOT_COLOR.r * strength
+                glow[at + 1] = (glow[at + 1] ?? 0) + SHOT_COLOR.g * strength
+                glow[at + 2] = (glow[at + 2] ?? 0) + SHOT_COLOR.b * strength
+            })
+        })
     }
 
     private syncEngineGlows(firing: readonly number[]): void {
@@ -1513,12 +1582,17 @@ class ShipFlight implements SceneInstance<FlightValues> {
         if (this.shots.count > 0) {
             this.shotBatch.begin().reserve(this.shots.count)
             this.shots.forEach((shot) => {
+                // Fading the colour rather than the alpha, the same way the
+                // exhaust does: these draw additively, so a dimmer round simply
+                // adds less and needs no blend of its own
+                const fade = projectileFade(shot)
+
                 this.shotBatch.add(
                     shot.position.x * CELL,
                     shot.position.y * CELL,
                     0,
                     SHOT_SIZE * CELL,
-                    SHOT_COLOR.r, SHOT_COLOR.g, SHOT_COLOR.b, 1,
+                    SHOT_COLOR.r * fade, SHOT_COLOR.g * fade, SHOT_COLOR.b * fade, 1,
                 )
             })
 
