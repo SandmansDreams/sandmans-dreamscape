@@ -25,12 +25,14 @@ import type { ActionsOf, SearchColumn, SettingsSchema, ValuesOf } from "../../se
 import type { DevSceneDefinition } from "../DevScene"
 import { sendShip, shipOf, takeHandoff } from "../handoff"
 import { emissiveSources, falloff, spillOnto } from "../../game/emissiveSpill"
+import { approach } from "../../game/ease"
 import { islandAt, powerNetworkOf } from "../../game/powerNetwork"
 import { cellKey } from "../../render/grid/grid"
 import { ProjectileField } from "../../game/projectiles"
 import { driftTarget, isDestroyed, splitTarget, targetAt, type Target } from "../../game/targets"
 import {
-    aimOf, coolDown, freshStates, recoverRecoil, RECOIL_KICK, shotSpeed, weaponMountsOf, willFire,
+    aimOf, coolDown, freshStates, leadAngle, nearestInRange, recoverRecoil, RECOIL_KICK,
+    shotSpeed, weaponMountsOf, willFire,
     type WeaponMount, type WeaponState,
 } from "../../game/weapons"
 import type { PowerRequest } from "../../game/shipSystems"
@@ -118,6 +120,16 @@ const NOZZLE_OFFSET = 0.6
 const ENGINE_GLOW_RANGE = 3
 const ENGINE_GLOW_STRENGTH = 0.5
 
+/**
+ * How much of the gap an engine's light still has to close after a second.
+ *
+ * A nozzle does not reach full heat the instant the throttle opens, nor go cold
+ * the instant it shuts - and following the throttle exactly made a tapped key
+ * flash the hull. Small, so it still feels connected to the control: this is a
+ * glow settling, not a lamp on a dimmer.
+ */
+const ENGINE_GLOW_EASE = 0.0002
+
 const GLOW_RANGE = 220
 const GLOW_RADIUS = 26
 const GLOW_INTENSITY = 0.35
@@ -179,6 +191,7 @@ const SETTINGS = {
      * reaches go dead, the battery drains under a burn, and the hull browns out.
      */
     infinitePower: { type: "checkbox", label: "Infinite power / fuel", default: true },
+    autoAim:       { type: "checkbox", label: "Auto-aim", default: false },
     targets:       { type: "range", label: "Targets", default: 8, min: 0, max: 40, step: 1 },
     respawn:       { type: "button", label: "New Targets" },
     cargoFill:     { type: "range", label: "Cargo load", default: 0, min: 0, max: 1, step: 0.1 },
@@ -230,6 +243,8 @@ export interface FlightInfo {
     islands: number
     /** False while the panel is paying the bills for you. */
     limited: boolean
+    /** True while the turrets are picking their own targets. */
+    autoAim: boolean
     /** How many weapons the ship has, and how many can be fed. */
     weapons: number
     weaponsPowered: number
@@ -300,6 +315,14 @@ class ShipFlight implements SceneInstance<FlightValues> {
     private glowCells: Cell[] = []
     /** rgb + pad per cell, rewritten every frame and handed to the lighting. */
     private cellGlow = new Float32Array(0)
+    /**
+     * How brightly each engine is lighting the hull, easing toward its throttle.
+     *
+     * Separate from the throttle itself, which has to stay exact: thrust, exhaust
+     * and the readout all read that, and smoothing it would have the ship
+     * accelerating on a curve the physics never agreed to.
+     */
+    private glowLevel: number[] = []
 
     /*~~~ Weapons ~~~*/
     /** Rebuilt with the physics, since a mount's offset is from the centre of mass. */
@@ -489,7 +512,7 @@ class ShipFlight implements SceneInstance<FlightValues> {
         this.syncTargets(settings)
         this.updateCombat(dt, settings)
         this.updateExhaust(firing, dt, settings)
-        this.syncLights(settings, firing)
+        this.syncLights(settings, firing, dt)
         this.publishInfo()
     }
 
@@ -676,6 +699,26 @@ class ShipFlight implements SceneInstance<FlightValues> {
     }
 
     /**
+     * Where a mount should point to hit the nearest rock it can reach, or null.
+     *
+     * Per mount rather than one target for the ship: each barrel picks what is
+     * nearest to *it*, so a hull with turrets fore and aft covers both ends
+     * instead of every gun swinging onto the same rock.
+     *
+     * Null when nothing is in reach, and the caller holds fire rather than
+     * falling back to the cursor: auto-aim is a mode, not a hint, and a turret
+     * that keeps shooting at empty space because the pointer happens to be there
+     * is not aiming at anything.
+     */
+    private autoAimFor(mount: WeaponMount, cos: number, sin: number): number | null {
+        const from = this.worldOf(mount.offset, cos, sin)
+        const target = nearestInRange(from, mount.range, this.targets)
+        if (!target) return null
+
+        return leadAngle(from, target, shotSpeed(mount)) - this.body.angle
+    }
+
+    /**
      * Slews every mount and returns what firing would cost, mount by mount.
      *
      * Aim and cooldown advance whether or not the trigger is down: a turret should
@@ -689,12 +732,28 @@ class ShipFlight implements SceneInstance<FlightValues> {
         const at = this.aimPoint()
         const cos = Math.cos(this.body.angle)
         const sin = Math.sin(this.body.angle)
-        const triggered = this.input.pointer.isDown()
+
+        // Holding the mouse always means "aim here and fire". Auto-aim decides
+        // what the guns do when you are *not* pointing, not whether you may.
+        const manual = this.input.pointer.isDown()
+
+        // Auto-aim pulls its own trigger: making it wait for the mouse too would
+        // leave it a slower way of doing what pointing already does
+        const triggered = settings.autoAim || manual
         const wants: { index: number; island: number }[] = []
 
         this.mounts.forEach((mount, index) => {
             const state = this.weaponStates[index]!
-            const aim = this.aimFor(mount, cos, sin, at)
+
+            // Null only reaches here on a mount left to itself with nothing in
+            // reach: it holds where it is and holds fire, rather than shooting at
+            // wherever the pointer happens to be resting
+            const aim = manual || !settings.autoAim
+                ? this.aimFor(mount, cos, sin, at)
+                : this.autoAimFor(mount, cos, sin)
+
+            if (aim === null) return
+
             state.angle = aimOf(mount, state, aim, dt)
 
             const island = this.weaponIsland[index] ?? -1
@@ -1057,7 +1116,7 @@ class ShipFlight implements SceneInstance<FlightValues> {
      * its near-field strength would wash the whole sprite out. They still light
      * anything else, which is the point of having them at all.
      */
-    private syncLights(settings: FlightValues, firing: readonly number[]): void {
+    private syncLights(settings: FlightValues, firing: readonly number[], dt: number): void {
         const angle = (settings.lightAngle * Math.PI) / 180
 
         this.sun.position = {
@@ -1071,7 +1130,7 @@ class ShipFlight implements SceneInstance<FlightValues> {
 
         this.lights.setShading(DEFAULT_SHADING)
         this.syncEngineGlows(firing)
-        this.syncCellGlow(firing)
+        this.syncCellGlow(firing, dt)
     }
 
     /**
@@ -1085,7 +1144,16 @@ class ShipFlight implements SceneInstance<FlightValues> {
      * on a big ship, which is cheaper than the bookkeeping any index would need
      * to avoid them.
      */
-    private syncCellGlow(firing: readonly number[]): void {
+    private syncCellGlow(firing: readonly number[], dt: number): void {
+        // Eased even when there is no buffer to write into, or a ship swapped
+        // mid-burn would come back holding the last one's heat
+        this.physics.thrusters.forEach((_, index) => {
+            this.glowLevel[index] = approach(
+                this.glowLevel[index] ?? 0, firing[index] ?? 0, ENGINE_GLOW_EASE, dt,
+            )
+        })
+        this.glowLevel.length = this.physics.thrusters.length
+
         const glow = this.cellGlow
         if (glow.length === 0) return
 
@@ -1096,8 +1164,10 @@ class ShipFlight implements SceneInstance<FlightValues> {
         const rangeSq = ENGINE_GLOW_RANGE * ENGINE_GLOW_RANGE
 
         this.physics.thrusters.forEach((thruster, index) => {
-            const throttle = firing[index] ?? 0
-            if (throttle <= 0) return
+            const throttle = this.glowLevel[index] ?? 0
+            // Under a thousandth there is nothing to see, and skipping it keeps
+            // the inner loop off every cell for an engine that is effectively out
+            if (throttle <= 0.001) return
 
             // The nozzle mouth in grid space, matching where the specks appear
             const fx = -thruster.force.x
@@ -1151,7 +1221,9 @@ class ShipFlight implements SceneInstance<FlightValues> {
             const { at } = this.nozzleOf(thruster, cos, sin)
 
             glow.position = { x: at.x * CELL, y: at.y * CELL }
-            glow.intensity = (firing[index] ?? 0) * GLOW_INTENSITY
+            // The eased level, not the raw throttle, so a nozzle's own light comes
+            // up and dies away with the heat it is standing in for
+            glow.intensity = (this.glowLevel[index] ?? 0) * GLOW_INTENSITY
         })
     }
 
@@ -1362,6 +1434,7 @@ class ShipFlight implements SceneInstance<FlightValues> {
             shots: this.shots.count,
             islands: this.systems.islands.length,
             limited: !this.settings?.infinitePower,
+            autoAim: this.settings?.autoAim ?? false,
             returnTo: this.arrived?.from ?? null,
         } satisfies FlightInfo)
     }

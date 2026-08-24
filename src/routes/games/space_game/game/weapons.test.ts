@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest"
 import { DRY, shipPhysics } from "./physics"
 import { Ship } from "./ship"
+import { targetAt } from "./targets"
 import {
-    aimOf, angleDelta, coolDown, freshStates, isTurret, recoverRecoil, RECOIL_KICK,
-    shotSpeed, weaponMountsOf, willFire,
+    aimOf, angleDelta, coolDown, freshStates, isTurret, leadAngle, nearestInRange,
+    recoverRecoil, RECOIL_KICK, shotSpeed, weaponMountsOf, willFire,
     type WeaponMount, type WeaponState,
 } from "./weapons"
 
@@ -191,5 +192,61 @@ describe("recoil", () => {
     it("starts every barrel at rest", () => {
         const mounts = mountsOf([{ type: "autocannon", col: 0, row: 0 }])
         expect(freshStates(mounts)[0]!.recoil).toBe(0)
+    })
+})
+
+describe("finding a target", () => {
+    const rock = (x: number, y: number, radius = 1, vx = 0, vy = 0) =>
+        targetAt({ x, y }, { x: vx, y: vy }, radius)
+
+    it("picks the nearest one", () => {
+        const near = rock(3, 0)
+        const found = nearestInRange({ x: 0, y: 0 }, 20, [rock(10, 0), near, rock(6, 0)])
+
+        expect(found).toBe(near)
+    })
+
+    it("ignores anything out of reach", () => {
+        expect(nearestInRange({ x: 0, y: 0 }, 5, [rock(40, 0)])).toBeNull()
+    })
+
+    it("measures to a rock's edge, not its middle", () => {
+        // A rock four cells wide is in range before its centre is
+        expect(nearestInRange({ x: 0, y: 0 }, 5, [rock(8, 0, 4)])).not.toBeNull()
+        expect(nearestInRange({ x: 0, y: 0 }, 5, [rock(8, 0, 1)])).toBeNull()
+    })
+
+    it("skips one already destroyed", () => {
+        const dead = rock(2, 0)
+        dead.hitPoints = 0
+
+        expect(nearestInRange({ x: 0, y: 0 }, 20, [dead])).toBeNull()
+    })
+
+    it("finds nothing in an empty arena", () => {
+        expect(nearestInRange({ x: 0, y: 0 }, 20, [])).toBeNull()
+    })
+})
+
+describe("leading a target", () => {
+    it("aims straight at one that is not moving", () => {
+        const still = targetAt({ x: 10, y: 0 }, { x: 0, y: 0 }, 1)
+
+        expect(leadAngle({ x: 0, y: 0 }, still, 30)).toBeCloseTo(0)
+    })
+
+    it("aims ahead of one that is", () => {
+        // Crossing left to right, so the shot has to go above where it is now
+        const crossing = targetAt({ x: 10, y: 0 }, { x: 0, y: 5 }, 1)
+        const angle = leadAngle({ x: 0, y: 0 }, crossing, 30)
+
+        expect(angle).toBeGreaterThan(0)
+    })
+
+    it("leads further the slower the shot", () => {
+        const crossing = targetAt({ x: 10, y: 0 }, { x: 0, y: 5 }, 1)
+
+        expect(leadAngle({ x: 0, y: 0 }, crossing, 10))
+            .toBeGreaterThan(leadAngle({ x: 0, y: 0 }, crossing, 60))
     })
 })

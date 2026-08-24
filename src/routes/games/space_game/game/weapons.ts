@@ -6,6 +6,7 @@ import { OFFSETS } from "../render/grid/shipLegality"
 import type { ShipPhysics } from "./physics"
 import type { ShipLayer } from "../render/grid/layers"
 import type { Ship } from "./ship"
+import { isDestroyed, type Target } from "./targets"
 
 /**
  * How far off a turret may be and still fire, in radians.
@@ -55,7 +56,7 @@ export interface WeaponMount {
  * Small on purpose: the kick is meant to read as the gun working, not as the
  * barrel coming loose. A quarter of a cell is plainly visible at this scale.
  */
-export const RECOIL_KICK = 0.1
+export const RECOIL_KICK = 0.15
 
 /**
  * What fraction of the remaining kick is left after a second.
@@ -169,6 +170,59 @@ export function willFire(
     if (!isTurret(mount)) return true
 
     return Math.abs(angleDelta(state.angle, aim)) <= AIM_TOLERANCE
+}
+
+/**
+ * The nearest live target within reach of a point, or null.
+ *
+ * Squared throughout, so picking one costs no square roots: only the ordering
+ * matters and squaring preserves it. Nearest rather than largest or weakest,
+ * because the near one is the one about to be a problem.
+ */
+export function nearestInRange(
+    from: Vec2,
+    range: number,
+    targets: readonly Target[],
+): Target | null {
+    let best: Target | null = null
+    let bestDistance = range * range
+
+    for (const target of targets) {
+        if (isDestroyed(target)) continue
+
+        const dx = target.position.x - from.x
+        const dy = target.position.y - from.y
+        // Its edge, not its centre: a big rock is in range before its middle is
+        const reach = Math.max(0, Math.hypot(dx, dy) - target.radius)
+
+        if (reach * reach <= bestDistance) {
+            bestDistance = reach * reach
+            best = target
+        }
+    }
+
+    return best
+}
+
+/**
+ * Where to point to hit something that keeps moving, in world radians.
+ *
+ * One round of prediction rather than solving the intercept exactly: the error
+ * left over is the distance the target moves during the *correction*, which at
+ * rock speeds against shot speeds is a fraction of a rock. Solving it properly
+ * means a quadratic and a branch for "cannot be caught", and neither buys
+ * anything you could see.
+ */
+export function leadAngle(from: Vec2, target: Target, speed: number): number {
+    const dx = target.position.x - from.x
+    const dy = target.position.y - from.y
+
+    const flight = speed > 0 ? Math.hypot(dx, dy) / speed : 0
+
+    return Math.atan2(
+        dy + target.velocity.y * flight,
+        dx + target.velocity.x * flight,
+    )
 }
 
 /** Counts every mount's cooldown down, never past zero. */

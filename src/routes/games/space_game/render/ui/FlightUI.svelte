@@ -161,6 +161,7 @@
                 <span class={info.assist ? "flag on" : "flag"}>assist</span>
                 <span class={info.touching ? "flag hit" : "flag"}>contact</span>
                 <span class={info.limited ? "flag on" : "flag"}>systems</span>
+                <span class={info.autoAim ? "flag on" : "flag"}>auto-aim</span>
             </div>
         {:else}
             <p class="note">no ship yet</p>
