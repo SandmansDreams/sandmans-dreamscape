@@ -34,6 +34,34 @@ export function bodyAt(x: number, y: number): Body {
 }
 
 /**
+ * Keeps a hull where it looks like it is when its center of mass moves.
+ *
+ * A cell is drawn at `position + rotate(cellPos - center)`, so moving `center` by
+ * D moves every cell by `-rotate(D)`. Adding `rotate(D)` back to the position
+ * holds them still - and is also what is physically true, since the body tracks
+ * the center of mass and the new center genuinely is at that world point.
+ *
+ * Wanted twice: a destroyed block walks the center, and so does a tank crossing a
+ * load stage. Both teleport the ship without this.
+ */
+export function recenter(body: Body, from: Vec2, to: Vec2): Body {
+    const dx = to.x - from.x
+    const dy = to.y - from.y
+    if (dx === 0 && dy === 0) return body
+
+    const cos = Math.cos(body.angle)
+    const sin = Math.sin(body.angle)
+
+    return {
+        ...body,
+        position: {
+            x: body.position.x + dx * cos - dy * sin,
+            y: body.position.y + dx * sin + dy * cos,
+        },
+    }
+}
+
+/**
  * How many steps a fill is rounded to before it moves the ship's mass.
  *
  * Ten rather than a continuous fraction because mass feeds the centre of mass,

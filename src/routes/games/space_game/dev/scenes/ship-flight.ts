@@ -28,7 +28,9 @@ import { emissiveSources, falloff, spillOnto } from "../../game/emissiveSpill"
 import { approach } from "../../game/ease"
 import { islandAt, powerNetworkOf } from "../../game/powerNetwork"
 import { cellKey } from "../../render/grid/grid"
-import { ProjectileField, projectileFade } from "../../game/projectiles"
+import { SHIP_LAYERS, type ShipLayer } from "../../render/grid/layers"
+import { ProjectileField, projectileFade, type Projectile } from "../../game/projectiles"
+import { ShipDamage } from "../../game/damage"
 import { driftTarget, isDestroyed, splitTarget, targetAt, type Target } from "../../game/targets"
 import {
     aimOf, coolDown, freshStates, leadAngle, nearestInRange, RECOIL_KICK, settleWeapons,
@@ -36,6 +38,10 @@ import {
     type WeaponMount, type WeaponState,
 } from "../../game/weapons"
 import type { PowerRequest } from "../../game/shipSystems"
+import {
+    deflectOff, shieldArcsOf, shieldNode, SHIELD_SPREAD,
+    type ActiveShield, type ShieldArc,
+} from "../../game/shields"
 import { FLOATS_PER_CELL_GLOW } from "../../render/lighting"
 
 /** World units per cell, matching the builder so a ship is the size you drew it. */
@@ -162,6 +168,44 @@ const MUZZLE_GLOW_STRENGTH = 0.65
 /** How much brighter a barrel itself goes at the instant it fires. */
 const BARREL_FLASH_BOOST = 0.85
 
+/**
+ * The shield's face: a row of drifting nodes rather than a solid band.
+ *
+ * A band read as a wall bolted to the hull. What a shield is is a field being
+ * *held*, and a field of separate points that will not quite sit still is what
+ * says so - the same reason the exhaust is specks rather than a cone.
+ *
+ * Spaced about six a cell along the arc: dense enough that the face reads as one
+ * surface rather than a row of beads, and each small enough that it is the
+ * *field* you see rather than the individual points making it.
+ */
+const SHIELD_NODES_PER_CELL = 6
+const SHIELD_NODE_SIZE = 0.05
+const SHIELD_COLOR = Color.from("#5ad6ff")
+const SHIELD_STRENGTH = 0.9
+
+/** How much a node's brightness swings as it drifts. */
+const SHIELD_TWINKLE = 0.35
+/** How much of a rock's speed survives hitting one. */
+const SHIELD_RESTITUTION = 0.6
+
+/*~~~ The practice hull ~~~*/
+
+/** Which ship stands in as something to shoot at. */
+const ENEMY_SHIP = "test"
+
+/** Where it sits, in cells from the arena's middle. */
+const ENEMY_AT = { x: 0, y: -12 }
+
+/**
+ * How dark a block goes at the point it falls apart.
+ *
+ * Short of black: a plate smudged to nothing reads as a hole, and the hole is
+ * supposed to be what happens *next*. Additive cannot darken, so this goes
+ * through the plain pipeline over the hull.
+ */
+const SMUDGE_STRENGTH = 0.82
+
 const TARGET_COLOR = Color.from("#6b6f5a")
 /** Rocks start somewhere in this band of the arena, in cells. */
 const TARGET_MIN_RADIUS = 0.8
@@ -206,6 +250,8 @@ const SETTINGS = {
     autoAim:       { type: "checkbox", label: "Auto-aim", default: false },
     targets:       { type: "range", label: "Targets", default: 8, min: 0, max: 40, step: 1 },
     respawn:       { type: "button", label: "New Targets" },
+    enemy:         { type: "checkbox", label: "Practice hull", default: true },
+    repair:        { type: "button", label: "Repair Hull" },
     cargoFill:     { type: "range", label: "Cargo load", default: 0, min: 0, max: 1, step: 0.1 },
     refuel:        { type: "button", label: "Refuel" },
 
@@ -263,6 +309,9 @@ export interface FlightInfo {
     /** Rocks still in the arena, and rounds in the air. */
     targets: number
     shots: number
+    /** Shield projectors fitted, and how many are actually holding. */
+    shields: number
+    shieldsUp: number
     /**
      * The scene the back button returns to, or null when there is nowhere to go.
      *
@@ -373,6 +422,35 @@ class ShipFlight implements SceneInstance<FlightValues> {
     /** Arena and count the rocks were laid out for, so they are not respawned every frame. */
     private targetsKey = ""
 
+    /*~~~ The practice hull ~~~*/
+    /** Something to shoot at that is made of blocks rather than of rock. */
+    private enemy: Ship | null = null
+    private readonly enemyDamage = new ShipDamage()
+    /**
+     * What the player's own hull has taken.
+     *
+     * Empty until something can hurt it, which nothing yet can - rocks bounce and
+     * the practice hull does not shoot back. It is wired through anyway so that
+     * the day something does, thrust, guns and shields already answer for it
+     * rather than having to be found and taught to.
+     */
+    private readonly damage = new ShipDamage()
+    private enemyMesh: Mesh | null = null
+    private enemyRadius = 0
+    private enemyBuilt = -1
+    private readonly enemyBatch: InstanceBatch
+    private readonly enemySmudge: DynamicMesh
+
+    /*~~~ Shields ~~~*/
+    /** Rebuilt with the physics, since an arc hangs off the centre of mass. */
+    private shieldArcs: ShieldArc[] = []
+    private shieldIsland: number[] = []
+    /** Which arcs the last tick paid for, parallel to `shieldArcs`. */
+    private shieldsUp: boolean[] = []
+    private readonly shieldBatch: InstanceBatch
+    /** Seconds since the scene loaded, so the shields shimmer to a clock. */
+    private elapsed = 0
+
     /*~~~ Exhaust ~~~*/
     private readonly exhaust = new ParticleField(EXHAUST_CAPACITY)
     private readonly exhaustBatch: InstanceBatch
@@ -422,6 +500,7 @@ class ShipFlight implements SceneInstance<FlightValues> {
         // Cleared rather than refilled here: the key is what update() compares
         // against, so blanking it is the one way to say "build them again"
         respawn: () => { this.targetsKey = "" },
+        repair: () => this.resetEnemy(),
     }
 
     /**
@@ -472,6 +551,13 @@ class ShipFlight implements SceneInstance<FlightValues> {
         // as a crate, and at this size a dozen sides is already round enough
         this.discMesh = discMesh(12).build(gpu, "target disc")
 
+        this.shieldBatch = InstanceBatch.create(
+            gpu, context.renderer.instanceLayout, 512, "shields",
+        )
+
+        this.enemyBatch = InstanceBatch.create(gpu, context.renderer.instanceLayout, 4, "enemy")
+        this.enemySmudge = DynamicMesh.create(gpu, "enemy damage")
+
         // A real ship arrives on the first update; this keeps every field valid
         // until then rather than leaving them undefined
         this.ship = new Ship("empty", "Empty")
@@ -482,6 +568,7 @@ class ShipFlight implements SceneInstance<FlightValues> {
 
     update(dt: number, settings: FlightValues): void {
         this.settings = settings
+        this.elapsed += dt
         this.syncShip(settings)
         this.buildWalls(settings)
         this.fitCamera(settings)
@@ -497,15 +584,43 @@ class ShipFlight implements SceneInstance<FlightValues> {
         // Aiming before the tick, so a trigger pull is asked for on the same
         // budget as the thrust it competes with rather than after it
         const wants = this.aimWeapons(dt, settings)
-        const requests: PowerRequest[] = wants.map((want) => ({
-            island: want.island,
-            amount: settings.infinitePower ? 0 : this.mounts[want.index]!.draw,
-        }))
+
+        // Projectors before weapons, and both before thrust: holding a shield up
+        // is a standing commitment, and dropping it to pay for a shot is the
+        // wrong way round. Thrust is last because it is the only one that can be
+        // scaled back instead of refused.
+        const requests: PowerRequest[] = [
+            ...this.shieldArcs.map((arc, index) => ({
+                island: this.shieldIsland[index] ?? -1,
+                amount: settings.infinitePower ? 0 : arc.draw * dt,
+            })),
+            ...wants.map((want) => ({
+                island: want.island,
+                amount: settings.infinitePower ? 0 : this.mounts[want.index]!.draw,
+            })),
+        ]
 
         const wanted = throttles(this.physics, controls, before.spin, dt)
+
+        // Taken off the throttle rather than off the thrust: the exhaust and the
+        // nozzle glow both read the throttle, so a failing engine looks like one
+        // without either of them being told separately
+        this.physics.thrusters.forEach((thruster, index) => {
+            wanted[index] = (wanted[index] ?? 0)
+                * this.effectivenessAt("components", thruster.col, thruster.row)
+        })
+
         const firing = this.runSystems(wanted, dt, settings, requests)
 
-        this.fireWeapons(wants, this.granted)
+        // The shields' answers come first in the list, so the weapons' start
+        // after them
+        // Paid for *and* still working: a wrecked projector holds nothing, and
+        // the panel's infinite-power switch pays for everything, so the damage
+        // check cannot ride on the grant
+        this.shieldsUp = this.shieldArcs.map((arc, index) =>
+            (this.granted[index] ?? false)
+            && this.effectivenessAt(arc.layer, arc.col, arc.row) > 0)
+        this.fireWeapons(wants, this.granted.slice(this.shieldArcs.length))
 
         // dt arrives already clamped by the frame loop, which caps a backgrounded
         // tab's catch-up for exactly this reason. Clamping again here only made the
@@ -522,6 +637,7 @@ class ShipFlight implements SceneInstance<FlightValues> {
         this.firing = firing.filter((throttle) => throttle > 0).length
 
         this.syncTargets(settings)
+        this.syncEnemy(settings)
         this.updateCombat(dt, settings)
         this.updateExhaust(firing, dt, settings)
         this.syncLights(settings, firing, dt)
@@ -585,6 +701,156 @@ class ShipFlight implements SceneInstance<FlightValues> {
         this.reserves = fullReserves(this.systems)
     }
 
+    /*~~~ The practice hull ~~~*/
+
+    /**
+     * Puts a whole ship in the arena to shoot at.
+     *
+     * A real ship rather than another rock, because the thing being tested is
+     * damage to *blocks* - a rock has one number, a hull has one per plate and
+     * loses them one at a time.
+     */
+    private resetEnemy(): void {
+        this.enemy = buildShip(ENEMY_SHIP)
+        this.enemyDamage.clear()
+        this.enemyRadius = boundingRadius(this.enemy)
+        this.enemyBuilt = -1
+    }
+
+    /** Rebuilds its mesh when a block has been shot off it. */
+    private syncEnemy(settings: FlightValues): void {
+        if (!settings.enemy) {
+            this.enemy = null
+            return
+        }
+
+        if (!this.enemy) this.resetEnemy()
+        const enemy = this.enemy!
+
+        if (enemy.geometryRevision === this.enemyBuilt) return
+        this.enemyBuilt = enemy.geometryRevision
+
+        const builder = new MeshBuilder()
+        const sources = emissiveSources(enemy.layersOf())
+        for (const grid of enemy.layersOf()) {
+            appendLayer(builder, grid, CELL, enemy.centerOfMass, 0, Color.BLACK, spillOnto(grid, sources))
+        }
+
+        this.enemyMesh?.destroy()
+        this.enemyMesh = builder.vertexCount > 0
+            ? builder.build(this.context.gpu, "enemy")
+            : null
+
+        this.rebuildSmudge()
+    }
+
+    /** The cell of the practice hull a shot's step crosses, if any. */
+    private shootEnemy(projectile: Projectile, from: Vec2, to: Vec2): boolean {
+        const enemy = this.enemy
+        if (!enemy) return false
+
+        // The whole hull first: most shots in the air are nowhere near it, and a
+        // circle test is far cheaper than walking every plate
+        const near = Math.hypot(to.x - ENEMY_AT.x, to.y - ENEMY_AT.y)
+        if (near > this.enemyRadius + 1) return false
+
+        const origin = enemy.centerOfMass
+        const col = Math.floor(to.x - ENEMY_AT.x + origin.x)
+        const row = Math.floor(to.y - ENEMY_AT.y + origin.y)
+
+        // Topmost layer first, so a shot hits the plate you can see rather than
+        // the hull underneath it
+        for (const layer of [...SHIP_LAYERS].reverse()) {
+            const result = this.enemyDamage.hit(enemy, layer, col, row, projectile.damage)
+            if (result === "missed") continue
+
+            this.exhaust.emit(IMPACT_SPARKS, {
+                at: to,
+                direction: { x: 0, y: -1 },
+                speed: IMPACT_SPEED,
+                drift: { x: 0, y: 0 },
+                spread: Math.PI,
+                speedJitter: 0.6,
+                life: IMPACT_LIFE,
+                lifeJitter: 0.4,
+                size: EXHAUST_SIZE,
+                red: SHOT_COLOR.r,
+                green: SHOT_COLOR.g,
+                blue: SHOT_COLOR.b,
+            })
+
+            // A destroyed block changes the hull's shape; anything less only
+            // changes how dirty it looks
+            if (result === "destroyed") this.enemyBuilt = -1
+            else this.rebuildSmudge()
+
+            return true
+        }
+
+        return false
+    }
+
+    /**
+     * The black wash over every block that has been hurt.
+     *
+     * Drawn solid rather than additive for the obvious reason: additive can only
+     * brighten, and damage should darken. Deepening with the damage, so a plate
+     * about to go is visibly about to go.
+     *
+     * Built in world space rather than on the hull's own instance: the practice
+     * hull does not move, and a DynamicMesh draws plainly, so baking the offset
+     * in costs nothing and saves a second instanced pass.
+     */
+    private rebuildSmudge(): void {
+        const enemy = this.enemy
+        if (!enemy) {
+            this.enemySmudge.write(new Float32Array(0))
+            return
+        }
+
+        const out: number[] = []
+        const origin = enemy.centerOfMass
+
+        this.enemyDamage.forEach(enemy, (_layer, cell, fraction) => {
+            const x = (cell.col - origin.x + ENEMY_AT.x) * CELL
+            const y = (cell.row - origin.y + ENEMY_AT.y) * CELL
+            const ink = fraction * SMUDGE_STRENGTH
+
+            // Inset a little, so a smudge reads as grime on a plate rather than
+            // as the plate having been replaced by a black square
+            const pad = CELL * 0.1
+            out.push(
+                x + pad, y + pad, 0, 0, 0,
+                x + CELL - pad, y + pad, 0, 0, 0,
+                x + CELL - pad, y + CELL - pad, 0, 0, 0,
+                x + pad, y + pad, 0, 0, 0,
+                x + CELL - pad, y + CELL - pad, 0, 0, 0,
+                x + pad, y + CELL - pad, 0, 0, 0,
+            )
+
+            // The vertex format has no alpha, so the wash is the colour itself
+            // and the blend is what makes it a wash
+            for (let v = out.length - 30; v < out.length; v += 5) {
+                out[v + 2] = ink
+                out[v + 3] = ink
+                out[v + 4] = ink
+            }
+        })
+
+        this.enemySmudge.write(new Float32Array(out))
+    }
+
+    /**
+     * How well the block at a grid position still does its job, 0..1.
+     *
+     * One lookup for thrust, guns and shields alike: they all fail the same way,
+     * and three copies of the rule would be three places for it to drift.
+     */
+    private effectivenessAt(layer: ShipLayer, col: number, row: number): number {
+        const cell = this.ship.layers[layer].get(col, row)
+        return cell ? this.damage.effectivenessAt(layer, cell) : 0
+    }
+
     /*~~~ Weapons ~~~*/
 
     /**
@@ -596,6 +862,10 @@ class ShipFlight implements SceneInstance<FlightValues> {
      */
     private syncWeapons(): void {
         const network = powerNetworkOf(this.ship)
+
+        this.shieldArcs = shieldArcsOf(this.ship, this.physics)
+        this.shieldIsland = this.shieldArcs.map((arc) => islandAt(network, arc.col, arc.row))
+        this.shieldsUp = this.shieldArcs.map(() => false)
 
         this.mounts = weaponMountsOf(this.ship, this.physics)
         this.weaponStates = freshStates(this.mounts)
@@ -709,6 +979,56 @@ class ShipFlight implements SceneInstance<FlightValues> {
         return (this.reserves.power[island] ?? 0) > 0
     }
 
+    /**
+     * Lays every standing shield out as a row of drifting nodes.
+     *
+     * Node count comes off the arc's own length, so a bigger projector gets a
+     * denser face rather than the same handful of points stretched thinner.
+     */
+    private fillShieldBatch(): void {
+        this.shieldBatch.begin()
+
+        for (const shield of this.liveShields()) {
+            const across = shield.radius * SHIELD_SPREAD
+            const count = Math.max(3, Math.round(across * SHIELD_NODES_PER_CELL))
+
+            for (let i = 0; i < count; i++) {
+                const at = shieldNode(shield, i, count, this.elapsed)
+
+                // Twinkling off the same phase that moves it, so a node coming
+                // forward brightens rather than the two reading as separate
+                const lift = 1 + Math.sin(this.elapsed * 5.5 + i * 2.399963) * SHIELD_TWINKLE
+                const glow = SHIELD_STRENGTH * lift
+
+                this.shieldBatch.add(
+                    at.x * CELL, at.y * CELL,
+                    0,
+                    SHIELD_NODE_SIZE * CELL,
+                    SHIELD_COLOR.r * glow, SHIELD_COLOR.g * glow, SHIELD_COLOR.b * glow, 1,
+                )
+            }
+        }
+    }
+
+    /** The shields standing this frame, in world space. Empty when none are up. */
+    private liveShields(): ActiveShield[] {
+        const cos = Math.cos(this.body.angle)
+        const sin = Math.sin(this.body.angle)
+        const live: ActiveShield[] = []
+
+        this.shieldArcs.forEach((arc, index) => {
+            if (!this.shieldsUp[index]) return
+
+            live.push({
+                at: this.worldOf(arc.offset, cos, sin),
+                facing: arc.facing + this.body.angle,
+                radius: arc.radius,
+            })
+        })
+
+        return live
+    }
+
     /** Where the pilot is pointing, in world cells. */
     private aimPoint(): Vec2 {
         const world = this.camera.screenToWorld(this.input.pointer.x, this.input.pointer.y)
@@ -778,7 +1098,8 @@ class ShipFlight implements SceneInstance<FlightValues> {
         this.mounts.forEach((mount, index) => {
             const state = this.weaponStates[index]!
             const island = this.weaponIsland[index] ?? -1
-            const powered = this.isPowered(island, settings)
+            const powered = this.effectivenessAt(mount.layer, mount.col, mount.row) > 0
+                && this.isPowered(island, settings)
 
             // Null only reaches here on a mount left to itself with nothing in
             // reach: it holds where it is and holds fire, rather than shooting at
@@ -821,7 +1142,10 @@ class ShipFlight implements SceneInstance<FlightValues> {
                 direction,
                 speed: shotSpeed(mount),
                 carry: this.body.velocity,
-                damage: mount.damage,
+                // A damaged gun still fires, it just does not hit as hard. Rate
+                // is what a cooldown is for, and slowing that as well would take
+                // a wounded weapon out of the fight twice over.
+                damage: mount.damage * this.effectivenessAt(mount.layer, mount.col, mount.row),
                 range: mount.range,
             })
 
@@ -841,8 +1165,22 @@ class ShipFlight implements SceneInstance<FlightValues> {
     private updateCombat(dt: number, settings: FlightValues): void {
         const arena = this.arenaOf(settings)
 
+        const shields = this.liveShields()
+
         for (const target of this.targets) {
             driftTarget(target, dt)
+
+            // Shields before walls: a rock turned by one is somewhere new, and
+            // the wall test should be against where it actually ended up
+            for (const shield of shields) {
+                const turned = deflectOff(
+                    shield, target.position, target.velocity, target.radius, SHIELD_RESTITUTION,
+                )
+                if (!turned) continue
+
+                target.position = turned.position
+                target.velocity = turned.velocity
+            }
 
             // The same walls the ship bounces off, so a rock cannot quietly leave
             const bounced = bounce(
@@ -854,7 +1192,9 @@ class ShipFlight implements SceneInstance<FlightValues> {
             target.velocity = bounced.velocity
         }
 
-        for (const impact of this.shots.step(dt, this.targets)) {
+        for (const impact of this.shots.step(
+            dt, this.targets, (projectile, from, to) => this.shootEnemy(projectile, from, to),
+        )) {
             this.exhaust.emit(IMPACT_SPARKS, {
                 at: impact.at,
                 direction: { x: 0, y: -1 },
@@ -1501,6 +1841,8 @@ class ShipFlight implements SceneInstance<FlightValues> {
             weaponsPowered: this.weaponIsland.filter((island) => island >= 0).length,
             targets: this.targets.length,
             shots: this.shots.count,
+            shields: this.shieldArcs.length,
+            shieldsUp: this.shieldsUp.filter(Boolean).length,
             islands: this.systems.islands.length,
             limited: !this.settings?.infinitePower,
             autoAim: this.settings?.autoAim ?? false,
@@ -1511,7 +1853,7 @@ class ShipFlight implements SceneInstance<FlightValues> {
     render(frame: Frame): void {
         const gpu = this.context.gpu
         const renderer = this.context.renderer
-        const { camera, meshLines: linePipeline } = renderer
+        const { camera, mesh: meshPipeline, meshLines: linePipeline } = renderer
         const settings = this.settings
 
         camera.upload(this.camera, gpu.width, gpu.height)
@@ -1531,6 +1873,20 @@ class ShipFlight implements SceneInstance<FlightValues> {
             }
 
             this.shipBatch.draw(frame, ship)
+        }
+
+        // The practice hull, drawn flat: it is a target, and shading it as
+        // carefully as the player's ship would say it mattered as much
+        const enemy = this.enemyMesh
+        if (enemy) {
+            this.enemyBatch.begin().add(ENEMY_AT.x * CELL, ENEMY_AT.y * CELL, 0, 1, 1, 1, 1, 1)
+
+            frame.setPipeline(renderer.instanced).setBindGroup(0, camera.group)
+            this.enemyBatch.draw(frame, enemy)
+
+            // Over the plates it dirties, and solid so it can actually darken them
+            frame.setPipeline(meshPipeline).setBindGroup(0, camera.group)
+            this.enemySmudge.draw(frame)
         }
 
         // Rocks under the ship and under everything glowing: they are scenery,
@@ -1562,6 +1918,15 @@ class ShipFlight implements SceneInstance<FlightValues> {
                 const batch = this.fillTurretBatch(key)
                 if (batch && batch.size > 0) batch.draw(frame, mesh)
             }
+        }
+
+        // Shields over the hull they cover: the face is in front of the ship, and
+        // additive means it lights what is behind it rather than hiding it
+        this.fillShieldBatch()
+
+        if (this.shieldBatch.size > 0) {
+            frame.setPipeline(renderer.instancedGlow).setBindGroup(0, camera.group)
+            this.shieldBatch.draw(frame, this.discMesh)
         }
 
         // Glows and exhaust over the hull: a plume is in front of the nozzle it
@@ -1626,6 +1991,10 @@ class ShipFlight implements SceneInstance<FlightValues> {
         this.targetBatch.destroy()
         for (const batch of this.turretBatches.values()) batch.destroy()
         this.discMesh.destroy()
+        this.shieldBatch.destroy()
+        this.enemyBatch.destroy()
+        this.enemySmudge.destroy()
+        this.enemyMesh?.destroy()
         for (const mesh of this.turretMeshes.values()) mesh.destroy()
         this.glowBatch.destroy()
         this.lights.destroy()

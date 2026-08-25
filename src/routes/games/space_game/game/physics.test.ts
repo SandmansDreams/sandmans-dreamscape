@@ -3,8 +3,10 @@ import {
     bodyAt, bounce, boundingRadius, DRY, FULL, loadStage, LOAD_STAGES,
     shipPhysics, step, throttles,
     type Arena, type Body, type Controls, type ShipPhysics,
+    recenter,
 } from "./physics"
 import { Ship } from "./ship"
+import type { Vec2 } from "../render/camera"
 
 /** Where a thruster sits and which way its exhaust points. */
 interface Engine {
@@ -603,5 +605,65 @@ describe("gated thrust", () => {
         const half = step(bodyAt(0, 0), physics, [0.5], DT)
 
         expect(half.velocity.y).toBeCloseTo(full.velocity.y / 2)
+    })
+})
+
+describe("recenter", () => {
+    /** Where a cell at `local` from the centre actually draws. */
+    function worldOf(body: Body, centre: Vec2, local: Vec2): Vec2 {
+        const dx = local.x - centre.x
+        const dy = local.y - centre.y
+        const cos = Math.cos(body.angle)
+        const sin = Math.sin(body.angle)
+
+        return {
+            x: body.position.x + dx * cos - dy * sin,
+            y: body.position.y + dx * sin + dy * cos,
+        }
+    }
+
+    const cell = { x: 3, y: 1 }
+    const from = { x: 0, y: 0 }
+    const to = { x: 0.4, y: -0.2 }
+
+    it("holds a cell where it was drawn when the centre moves", () => {
+        const body = bodyAt(10, 5)
+        const before = worldOf(body, from, cell)
+        const after = worldOf(recenter(body, from, to), to, cell)
+
+        expect(after.x).toBeCloseTo(before.x)
+        expect(after.y).toBeCloseTo(before.y)
+    })
+
+    it("holds it on a rotated ship too", () => {
+        // The case a naive fix gets wrong: the offset has to be rotated into
+        // world space, not added to the position raw
+        const body = { ...bodyAt(10, 5), angle: 1.1 }
+        const before = worldOf(body, from, cell)
+        const after = worldOf(recenter(body, from, to), to, cell)
+
+        expect(after.x).toBeCloseTo(before.x)
+        expect(after.y).toBeCloseTo(before.y)
+    })
+
+    it("moves the body itself, so the centre of mass really is where it says", () => {
+        const body = bodyAt(10, 5)
+
+        expect(recenter(body, from, to).position).not.toEqual(body.position)
+    })
+
+    it("leaves a body alone when the centre did not move", () => {
+        const body = bodyAt(10, 5)
+
+        expect(recenter(body, from, { ...from })).toBe(body)
+    })
+
+    it("touches nothing but the position", () => {
+        const body = { position: { x: 1, y: 2 }, velocity: { x: 3, y: 4 }, angle: 0.5, spin: 0.2 }
+        const moved = recenter(body, from, to)
+
+        expect(moved.velocity).toEqual(body.velocity)
+        expect(moved.angle).toBe(body.angle)
+        expect(moved.spin).toBe(body.spin)
     })
 })

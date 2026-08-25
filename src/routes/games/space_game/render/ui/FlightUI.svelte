@@ -126,6 +126,17 @@
                 </dl>
             {/if}
 
+            {#if info.shields > 0}
+                <div class="heading">SHIELDS</div>
+                <dl class="rows">
+                    <dt>projectors</dt><dd>{info.shields}</dd>
+                    <dt>holding</dt>
+                    <dd class={info.shieldsUp < info.shields ? "warn" : ""}>
+                        {info.shieldsUp}/{info.shields}
+                    </dd>
+                </dl>
+            {/if}
+
             <div class="heading">FUEL</div>
             <div class="burn">
                 <div class="burn-track">

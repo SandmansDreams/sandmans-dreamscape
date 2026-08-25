@@ -21,7 +21,19 @@ export interface SearchColumn {
     cell(option: string): string
 }
 
-export type SettingSpec =
+/**
+ * What every setting may say about itself, whatever kind it is.
+ *
+ * `transient` is the one thing here: a value the panel shows but does not carry
+ * across a reload. Some settings name something the scene only acts on when it
+ * *changes* - a picker that opens a ship, say - and remembering the last one
+ * leaves the panel claiming a selection the scene never made.
+ */
+interface SettingCommon {
+    transient?: boolean
+}
+
+export type SettingSpec = SettingCommon & (
     // A slider. `scale: "log"` is what makes a 100..200000 range usable - on a linear
     // track, 90% of the travel sits in the top decade and the low end is unreachable.
     | { type: "range"; label: string; default: number; min: number; max: number
@@ -56,6 +68,7 @@ export type SettingSpec =
 
     // Purely presentational: a heading to break a long panel into sections
     | { type: "separator"; label: string }
+)
 
 /** A scene's settings, keyed by name. Declaration order is panel order. */
 export type SettingsSchema = Record<string, SettingSpec>
@@ -173,7 +186,25 @@ function valuesKey(sceneId: string): string {
 }
 
 export function loadSceneValues(sceneId: string, schema: SettingsSchema): SettingValues {
-    return coerceValues(schema, loadStore(valuesKey(sceneId)))
+    return coerceValues(schema, forgetTransient(schema, loadStore(valuesKey(sceneId))))
+}
+
+/**
+ * Drops the stored values a scene asked not to be remembered.
+ *
+ * Dropped on the way in rather than never written, so nothing has to be cleaned
+ * up when a setting stops being transient - the store may hold whatever it likes
+ * and only this decides what is honoured.
+ */
+function forgetTransient(schema: SettingsSchema, stored: unknown): unknown {
+    if (stored === null || typeof stored !== "object") return stored
+
+    const kept: Record<string, unknown> = { ...stored as Record<string, unknown> }
+    for (const [key, spec] of Object.entries(schema)) {
+        if (spec.transient) delete kept[key]
+    }
+
+    return kept
 }
 
 export function saveSceneValues(sceneId: string, values: SettingValues): void {

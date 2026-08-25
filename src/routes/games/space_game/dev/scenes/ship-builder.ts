@@ -163,10 +163,14 @@ const NEIGHBOURS = [[1, 0], [-1, 0], [0, 1], [0, -1]] as const
 /**
  * A solid node on every part that spends power.
  *
- * Only on the parts the selection actually feeds, and only while something is
+ * Only on what the selection actually feeds, and only while something is
  * selected. A node on every consumer at all times said "this needs power",
  * which is true of all of them and so told you nothing; a node on the ones a
  * particular source reaches says which, which is the question being asked.
+ *
+ * Batteries get one too. Power arriving at a battery is power arriving, and one
+ * colour for both says so - the wire's own colour is already what distinguishes
+ * carrying it from spending it.
  *
  * It is also what the last hop of a wire lands on, so a run terminates at
  * something rather than in the middle of a plate.
@@ -199,6 +203,17 @@ function appendDot(
 
 /** What a DynamicMesh is written with to say it holds nothing this frame. */
 const EMPTY_MESH = new Float32Array(0)
+
+/**
+ * Where the ship waits out the reload that saving causes.
+ *
+ * Writing into assets/ships changes a file Vite's glob is watching, so the page
+ * reloads - which is what makes the saved ship appear in the picker, and would
+ * otherwise throw away the session that just saved it. Session storage rather
+ * than the handoff, because the handoff is module state and the reload is
+ * exactly what clears it.
+ */
+const RESTORE_KEY = "space-game-builder-restore"
 /** How far past the hull to offer cells. Two, so a thruster's reach stays visible. */
 const MARGIN = 2
 
@@ -216,6 +231,11 @@ const SETTINGS = {
         options: SHIPS.map((ship) => ship.id),
         placeholder: "Find a ship...",
         columns: SHIP_COLUMNS,
+        // Not carried across a reload: the builder only loads a ship when this
+        // *changes*, so a remembered id left the panel naming a ship that was
+        // never opened - and picking it again did nothing, because it had not
+        // changed
+        transient: true,
         // Past the default 8: the result box scrolls, so an unfiltered list
         // showing every ship beats one that silently stops at the eighth
         limit: 50,
@@ -225,6 +245,7 @@ const SETTINGS = {
     
     resolution: { type: "range", label: "Resolution", default: 1, min: 0.05, max: 1, step: 0.05 },
     test:       { type: "button", label: "Test Flight" },
+    save:       { type: "button", label: "Update Saved Ship" },
     download:   { type: "button", label: "Download Ship" },
     upload:     { type: "button", label: "Upload Ship" },
 } as const satisfies SettingsSchema
@@ -558,6 +579,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
             this.mutate(() => { for (const grid of this.ship.layersOf()) grid.clear() })
             this.notify(null)
         },
+        save: () => void this.saveInPlace(),
         download: () => downloadText(`${this.ship.id}.json`, shipToText(this.ship)),
         upload: () => uploadText((text) => this.load(text)),
         test: () => this.flyIt(),
@@ -565,6 +587,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
 
     readonly actions: Record<ActionsOf<typeof SETTINGS>, () => void> = {
         test: () => this.commands.test!(),
+        save: () => this.commands.save!(),
         download: () => this.commands.download!(),
         upload: () => this.commands.upload!(),
     }
@@ -680,6 +703,7 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         // - unsaved edits included, since nothing wrote it to a file in between
         const returning = takeHandoff()
         if (returning) this.replaceShip(shipOf(returning), true)
+        else this.restoreAfterSave()
     }
 
     update(dt: number, settings: EditorValues): void {
@@ -1145,9 +1169,10 @@ class ShipBuilder implements SceneInstance<EditorValues> {
         const marked = new Set<number>()
         const ink = this.markerInk(NODE_COLOR)
 
+        // Every run's far end, relay or not: a battery is as much a place the
+        // power arrives at as a thruster is, and marking only the last hop left
+        // the things carrying it looking like bare junctions in the wire
         for (const link of links) {
-            if (link.relay) continue
-
             const key = cellKey(link.to.col, link.to.row)
             if (marked.has(key)) continue
             marked.add(key)
@@ -1989,6 +2014,76 @@ class ShipBuilder implements SceneInstance<EditorValues> {
      * message: a panel that hid it on its own timer would leave the scene still
      * holding the string, and repeating the same refusal would publish nothing.
      */
+    /**
+     * Writes the ship straight back over its file in assets/ships.
+     *
+     * The same text the download button produces, put where the download would
+     * have had to be moved to by hand. Vite's glob picks the change up, so the
+     * ship reloads without a restart.
+     *
+     * Named for the id rather than the name, because the id is what the file is
+     * called and what the picker lists - renaming a ship in the panel should not
+     * quietly start writing a second file.
+     */
+    private async saveInPlace(): Promise<void> {
+        const id = this.ship.id
+        const text = shipToText(this.ship)
+
+        // Stashed before the request, because the reload the write triggers can
+        // land before the response does
+        try {
+            sessionStorage.setItem(RESTORE_KEY, text)
+        } catch (reason) {
+            console.warn("ship-builder: could not stash the ship before saving.", reason)
+        }
+
+        try {
+            const response = await fetch("/games/space_game/api/ship", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ id, text }),
+            })
+
+            if (!response.ok) {
+                // The endpoint says why in plain words, so pass its reason on
+                // rather than replacing it with a status code
+                this.notify(await response.text().catch(() => `Could not save ${id}.json`))
+                return
+            }
+
+            this.notify(`Saved ${id}.json`)
+        } catch (reason) {
+            console.error("ship-builder: saving failed.", reason)
+            this.notify("Could not reach the dev server to save.")
+        }
+    }
+
+    /**
+     * Picks the ship back up after the reload a save causes.
+     *
+     * Consumed on read, so it only ever restores the once - a later visit to the
+     * builder starts empty, the way it always has.
+     */
+    private restoreAfterSave(): void {
+        let text: string | null = null
+
+        try {
+            text = sessionStorage.getItem(RESTORE_KEY)
+            sessionStorage.removeItem(RESTORE_KEY)
+        } catch (reason) {
+            console.warn("ship-builder: could not read the stashed ship.", reason)
+            return
+        }
+
+        if (text === null) return
+
+        const { ship, warnings } = shipFromText(text)
+        for (const warning of warnings) console.warn(`restore: ${warning}`)
+
+        this.replaceShip(ship, true)
+        this.notify(`Saved ${ship.id}.json`)
+    }
+
     private ageNotice(dt: number): void {
         if (this.notice === null) return
 

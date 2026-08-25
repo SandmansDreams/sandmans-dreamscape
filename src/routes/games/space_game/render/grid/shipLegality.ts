@@ -3,7 +3,7 @@
 
 import type { Ship } from "../../game/ship"
 import { canPlace, componentById } from "./components"
-import type { Cell, Grid } from "./grid"
+import { cellKey, type Cell, type Grid } from "./grid"
 import { SHIP_LAYERS, type ShipLayer } from "./layers"
 
 export interface Legality {
@@ -171,48 +171,58 @@ export function canEraseAt(ship: Ship, layer: ShipLayer, col: number, row: numbe
     return { ok: true }
 }
 
-/** "col,row", for the visited set. Cold path, so a string key is fine here. */
-function positionKey(col: number, row: number): string {
-    return `${col},${row}`
+/**
+ * The hull's 4-connected pieces, as sets of cell keys, optionally as it would be
+ * with one cell taken out.
+ *
+ * The builder asks this to refuse a cut; the runtime asks it to perform one. Both
+ * want the same walk, and two copies of it is how a shot ends up splitting a ship
+ * along a seam the builder would have said was whole.
+ *
+ * Keyed by `cellKey` rather than a string: this runs per erase attempt in the
+ * builder, and packing into an integer is what the Grid already does.
+ */
+export function hullPieces(hull: Grid, skip?: { col: number; row: number }): Set<number>[] {
+    const remaining = new Map<number, Cell>()
+    for (const cell of hull.list) {
+        if (skip && cell.col === skip.col && cell.row === skip.row) continue
+        remaining.set(cellKey(cell.col, cell.row), cell)
+    }
+
+    const pieces: Set<number>[] = []
+
+    while (remaining.size > 0) {
+        // Deleted on the way into the queue rather than tracked in a second
+        // `seen` set - what is left to reach and what has been reached are the
+        // same question asked from opposite ends
+        const [startKey, start] = remaining.entries().next().value!
+        const piece = new Set<number>([startKey])
+        remaining.delete(startKey)
+
+        const queue: Cell[] = [start]
+        while (queue.length > 0) {
+            const at = queue.pop()!
+
+            for (const step of OFFSETS) {
+                const key = cellKey(at.col + step.col, at.row + step.row)
+                const next = remaining.get(key)
+                if (!next) continue
+
+                remaining.delete(key)
+                piece.add(key)
+                queue.push(next)
+            }
+        }
+
+        pieces.push(piece)
+    }
+
+    return pieces
 }
 
-/**
- * True when removing one cell would leave hull the rest cannot reach.
- *
- * A flood fill from any surviving cell: reaching fewer than survive means the
- * removal cut the hull into pieces. Hulls run to a few hundred cells, so one
- * fill per attempted erase costs nothing worth measuring.
- */
+/** True when removing one cell would leave hull the rest cannot reach. */
 function splitsHull(hull: Grid, col: number, row: number): boolean {
-    const remaining = new Set<string>()
-    let start: Cell | null = null
-
-    for (const cell of hull.list) {
-        if (cell.col === col && cell.row === row) continue
-        remaining.add(positionKey(cell.col, cell.row))
-        start ??= cell
-    }
-
-    // Erasing the only block strands nothing, so an empty hull is legal
-    if (start === null) return false
-
-    const seen = new Set<string>([positionKey(start.col, start.row)])
-    const queue: Cell[] = [start]
-
-    while (queue.length > 0) {
-        const at = queue.pop()!
-
-        for (const step of OFFSETS) {
-            const next = { col: at.col + step.col, row: at.row + step.row }
-            const key = positionKey(next.col, next.row)
-
-            if (seen.has(key) || !remaining.has(key)) continue
-            seen.add(key)
-            queue.push(next as Cell)
-        }
-    }
-
-    return seen.size !== remaining.size
+    return hullPieces(hull, { col, row }).length > 1
 }
 
 /** Whether a whole layer can be emptied. */

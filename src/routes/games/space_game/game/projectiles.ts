@@ -149,7 +149,18 @@ export class ProjectileField {
      * correct and needs a sort per shot per frame; with a few dozen of each, the
      * difference is invisible and the cost is not.
      */
-    step(dt: number, targets: readonly Target[]): Impact[] {
+    step(
+        dt: number,
+        targets: readonly Target[],
+        /**
+         * Asked whether a shot's step ran into something solid that is not a rock.
+         *
+         * A callback rather than a second collider type, because what a hull hit
+         * *does* - which block, whose ship, what damage - is the scene's business
+         * and none of this pool's. Returning true retires the round.
+         */
+        hitHull?: (projectile: Projectile, from: Vec2, to: Vec2) => boolean,
+    ): Impact[] {
         const impacts: Impact[] = []
 
         for (let i = this.live - 1; i >= 0; i--) {
@@ -162,6 +173,14 @@ export class ProjectileField {
             }
 
             const travelled = Math.hypot(to.x - from.x, to.y - from.y)
+
+            // Hulls before rocks: a round that reaches a ship has already crossed
+            // whatever it flew past to get there
+            if (hitHull?.(projectile, from, to)) {
+                this.retire(i)
+                continue
+            }
+
             const hit = firstHit(from, to, targets)
 
             if (hit) {
