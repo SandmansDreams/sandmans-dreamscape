@@ -1,0 +1,254 @@
+{
+  "main": {
+    "id": "96ff47d479a0d503",
+    "type": "split",
+    "children": [
+      {
+        "id": "43397999a5374baf",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "d5971898faa58106",
+            "type": "leaf",
+            "state": {
+              "type": "release-notes",
+              "state": {
+                "currentVersion": "1.13.7"
+              },
+              "icon": "lucide-book-up",
+              "title": "Release Notes 1.13.7"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "ec124109952efb65",
+    "type": "split",
+    "children": [
+      {
+        "id": "45ca1d95cd09128d",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "c74c92bff4f8041e",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Files"
+            }
+          },
+          {
+            "id": "333200bd81729393",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Search"
+            }
+          },
+          {
+            "id": "f7348b88feb27540",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-bookmark",
+              "title": "Bookmarks"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "de69699099d1097e",
+    "type": "split",
+    "children": [
+      {
+        "id": "d9ed761c18867ce7",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "eebbeb2f07475d0e",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "notes.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Backlinks"
+            }
+          },
+          {
+            "id": "4c1ef8efd49464b2",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "notes.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Outgoing links"
+            }
+          },
+          {
+            "id": "3dd69fa0b555cd1d",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
+            }
+          },
+          {
+            "id": "d879525772d18ef3",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "All properties"
+            }
+          },
+          {
+            "id": "73aa361ab0693723",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "notes.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Outline"
+            }
+          },
+          {
+            "id": "0ad965e8783defe9",
+            "type": "leaf",
+            "state": {
+              "type": "todo",
+              "state": {},
+              "icon": "checkmark",
+              "title": "Todo List"
+            }
+          }
+        ],
+        "currentTab": 5
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Open quick switcher": false,
+      "graph:Open graph view": false,
+      "canvas:Create new canvas": false,
+      "daily-notes:Open today's daily note": false,
+      "templates:Insert template": false,
+      "command-palette:Open command palette": false,
+      "bases:Create new base": false,
+      "vscode-editor:Create Code File": false,
+      "iconic:Open rulebook": false
+    }
+  },
+  "active": "d5971898faa58106",
+  "lastOpenFiles": [
+    "+page.svelte",
+    "_Old Versions/Vers_4 - WebGPU Mostly Vibed/+page.svelte",
+    "_Old Versions/Vers_4 - WebGPU Mostly Vibed/download.ts",
+    "_Old Versions/Vers_4 - WebGPU Mostly Vibed/render/ui/ViewerUI.svelte",
+    "_Old Versions/Vers_4 - WebGPU Mostly Vibed/render/ui/SpriteEditorUI.svelte",
+    "_Old Versions/Vers_4 - WebGPU Mostly Vibed/render/ui/FlightUI.svelte",
+    "_Old Versions/Vers_4 - WebGPU Mostly Vibed/render/ui/BuilderUI.svelte",
+    "_Old Versions/Vers_4 - WebGPU Mostly Vibed/render/webgpu/shader.ts",
+    "_Old Versions/Vers_4 - WebGPU Mostly Vibed/render/webgpu/pipeline.ts",
+    "_Old Versions/Vers_4 - WebGPU Mostly Vibed/render/webgpu/instance.ts",
+    "_Old Versions/Vers_4 - WebGPU Mostly Vibed/render/webgpu/gpu.ts",
+    "assets/bitmap_fonts/SpaceGameStylized_spaced_5x7.png",
+    "assets/bitmap_fonts/SpaceGameSpheron_mono_10x10.png",
+    "assets/bitmap_fonts/SpaceGameMono_mono_5x7.png",
+    "assets/bitmap_fonts/SpaceGameGalactic_spaced_5x7.png",
+    "assets/icons/SpaceGame-Test.png",
+    "_notes/Claude Plans/9 Lighting.md",
+    "_notes/Claude Plans/8 Shared render layer.md",
+    "_notes/Claude Plans/physics-look-good-bak-shimmying-wren.md",
+    "assets/icons/SpaceGame-Circle_Half.png",
+    "assets/icons/SpaceGame-Weapon.png",
+    "assets/icons/SpaceGame-Thruster.png",
+    "assets/icons/SpaceGame-Storage.png",
+    "assets/icons/SpaceGame-Square.png",
+    "_notes/Game Design/Ship Design.md",
+    "_notes/Game Design/SpaceGame (title tbd).md",
+    "_notes/Claude Plans/5 WebGPU 2D render layer — Block grid, shapes and hulls.md",
+    "_notes/Claude Plans/6 Actual Game Design — Ship editor and JSON round-trip.md",
+    "_notes/Claude Plans/7 Actual Game Design — Ship builder UI.md",
+    "_notes/Claude Plans/4 WebGPU 2D render layer — Fonts.md",
+    "_notes/Claude Plans/3 WebGPU 2D render layer — camera, batching, scenes, benchmark.md",
+    "_notes/Claude Plans/2 WebGPU 2D render layer — camera, batching, scenes, benchmark.md",
+    "_notes/Claude Plans/1 WebGPU 2D render layer — foundation milestone.md",
+    "_notes/old notes.md",
+    "_notes/WebGPU.md",
+    "_notes/WebGPU Flow.canvas",
+    "_notes/WebGL.md",
+    "_notes/Vertex Shader.md",
+    "_notes/Vectors.md",
+    "_notes/Attributes.md",
+    "_notes/SpaceGame Structure.canvas",
+    "_notes/Shaders.md",
+    "_notes/Matrices.md",
+    "_notes/Fragment Shader.md",
+    "_notes/Compute Shader.md",
+    "_Old Versions/Vers_1 - Canvas/notes.md",
+    "CLAUDE.md",
+    "notes.md",
+    "How WebGL Works.canvas"
+  ]
+}
