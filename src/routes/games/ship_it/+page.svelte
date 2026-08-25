@@ -1,11 +1,38 @@
 <script lang="ts">
+    import Notification from "./Notification.svelte";
+    import { notifications } from "./notifications.svelte";
     import { onMount, untrack } from "svelte"
-    import { Assert } from "../ship_it/assert"
+    import { Assert } from "./Assert"
+    import { Renderer } from "./render/webGPU/Renderer";
 
     const DEV_COLOR = "#87CEEB"
 
     let canvas = $state<HTMLCanvasElement | null>(null)
-    let devMode = $state(true) // If want only in dev, swith to 'import.meta.env.DEV'
+    let devMode = $state(true) // If want only in dev environment, swith to 'import.meta.env.DEV'
+
+    $effect(() => {
+        notifications.devEnabled = devMode
+    })
+
+    onMount(() => {
+        Assert.exists(canvas, "Variable 'canvas' does not exist")
+
+        let renderer: Renderer | null = null
+        let unmounted = false
+
+        void Renderer.create(canvas)
+            .then((createdRenderer) => {
+                // create() awaits twice, so it can resolve after the page is gone
+                if (unmounted) return createdRenderer.destroy()
+
+                renderer = createdRenderer
+                notifications.dev.success("WebGPU ready")
+            })
+            .catch((error: unknown) => {
+                notifications.dev.error(error instanceof Error ? error.message : String(error))
+            })
+        return () => notifications.clear()
+    }) 
 </script>
 
 <div id="container">
@@ -20,6 +47,8 @@
     {/if}
 
     <canvas bind:this={canvas}></canvas>
+
+    <Notification />
 </div>
 
 <style>

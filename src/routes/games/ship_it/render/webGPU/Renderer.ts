@@ -1,13 +1,13 @@
 import { devicePixelRatio } from "svelte/reactivity/window" // Svelte reactive version of the built-in dpr
 import { Assert } from "../../Assert"
 import { clamp } from "../../utils"
-import { Color } from "../Color"
+import { Buffer } from "./Buffer"
 
 
 /** Communicates between the code and the computer's GPU to render things */
-export class WebGPURenderer {
+export class Renderer {
     readonly canvas: HTMLCanvasElement
-    readonly device: GPUDevice
+    readonly gpu: GPUDevice
     readonly context: GPUCanvasContext
     readonly format: GPUTextureFormat
 
@@ -20,15 +20,15 @@ export class WebGPURenderer {
 
     private constructor(
         canvas: HTMLCanvasElement,
-        device: GPUDevice,
+        gpu: GPUDevice,
         context: GPUCanvasContext,
         format: GPUTextureFormat,
     ) {
         this.canvas = canvas
-        this.device = device
+        this.gpu = gpu
         this.context = context
         this.format = format
-        this.maxSize = device.limits.maxTextureDimension2D
+        this.maxSize = gpu.limits.maxTextureDimension2D
 
         this.resize(
             canvas.clientWidth * (devicePixelRatio.current ?? 1), 
@@ -38,7 +38,7 @@ export class WebGPURenderer {
         this.observer = this.createObserver()
     }
 
-    static async create(canvas: HTMLCanvasElement): Promise<WebGPURenderer> {
+    static async create(canvas: HTMLCanvasElement): Promise<Renderer> {
         Assert.exists(navigator.gpu, "navigator.gpu — this browser has no WebGPU") // Make sure the browser supports WebGPU
 
         const adapter = await navigator.gpu.requestAdapter()
@@ -63,7 +63,7 @@ export class WebGPURenderer {
             console.error("WebGPU device error:", event.error.message)
         }
 
-        return new WebGPURenderer(canvas, device, context, format)
+        return new Renderer(canvas, device, context, format)
     }
 
     /** Resize the renderer to match specified dimensions */
@@ -108,7 +108,7 @@ export class WebGPURenderer {
    
    destroy(): void {
        this.observer.disconnect()
-       this.device.destroy()
+       this.gpu.destroy()
     }
 
     get width(): number {
@@ -135,3 +135,82 @@ export class WebGPURenderer {
         this.applyScale()
     }
 }   
+
+/** Gets query data from the gpu for rendering and profiling purposes */
+export class GPUTimer {
+    private readonly querySet: GPUQuerySet | null = null
+    private readonly resolveBuffer: Buffer | null = null
+
+    // A pool, because a buffer cannot be mapped again while a previous mapAsync is still outstanding. One buffer would mean timing every third frame at best.
+    private readonly readbackBuffers: Buffer[] = []
+    private currentBuffer: Buffer | null = null
+
+    private readonly timestamps = 2
+    private readonly bytes = this.timestamps * 2
+
+    lastMs: number | null = null
+
+    constructor (
+        renderer: Renderer, 
+        readbackCount = 3, 
+        label = "pass timer"
+    ) {
+        if (!renderer.gpu.features.has("timestamp-query")) return // May not be supported
+
+        this.querySet = renderer.gpu.createQuerySet({ label, type: "timestamp", count: this.timestamps })
+
+        // Create buffers
+        this.resolveBuffer = Buffer.makeQueryResolveBuffer(renderer, this.bytes, `${label} resolve`)
+
+        for (let i = 0; i < readbackCount; i++) {
+            this.readbackBuffers.push(Buffer.makeReadbackBuffer(renderer, this.bytes, `${label} readback ${i}`))
+        }
+    }
+
+    writes(): GPURenderPassTimestampWrites | undefined {
+        if (!this.querySet) return undefined
+        return { querySet: this.querySet, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 }
+    }
+
+    resolve(encoder: GPUCommandEncoder): void {
+        if (!this.querySet || !this.resolveBuffer) return
+
+        // Every readback buffer still mapped means the GPU is behind
+        const readback = this.readbackBuffers.pop()
+        if (!readback) return
+
+        // DestinationOffset must be a multiple of 256, which is why this is always 0
+        encoder.resolveQuerySet(this.querySet, 0, this.timestamps, this.resolveBuffer.handle, 0)
+        encoder.copyBufferToBuffer(this.resolveBuffer.handle, 0, readback.handle, 0, this.bytes)
+        this.currentBuffer = readback
+    }
+
+    read(): void {
+        const readback = this.currentBuffer
+        if (!readback) return
+        this.currentBuffer = null
+
+        void readback.handle
+            .mapAsync(GPUMapMode.READ)
+            .then(() => {
+                const times = new BigUint64Array(readback.handle.getMappedRange())
+                const delta = times[1]! - times[0]! // nanoseconds
+
+                if (delta > 0n) this.lastMs = Number(delta) / 1e6 // Only accept forward progress
+
+                readback.handle.unmap()
+                this.readbackBuffers.push(readback)
+            })
+            .catch(() => {
+                // Device lost or destroyed mid-flight - recycle and carry on
+                this.readbackBuffers.push(readback)
+            })
+    }
+
+    destroy(): void {
+        this.querySet?.destroy()
+        this.resolveBuffer?.destroy()
+        this.currentBuffer?.destroy()
+        for (const buffer of this.readbackBuffers) buffer.destroy()
+    }
+}

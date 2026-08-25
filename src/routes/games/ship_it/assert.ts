@@ -1,5 +1,8 @@
+import { notifications } from "./notifications.svelte";
+
 export class Assert {
     private static fail(reason: string, stack: string | undefined): never { // Creates log and stops anything after from running
+        notifications.error(`Assertion Failed: ${reason}`)
         throw new Error(
             [
                 "Assertion Failed",
@@ -11,13 +14,6 @@ export class Assert {
 
     private static location(stack: string | undefined): string { // Gets the call stack for the error
         return stack?.split("\n")[3].trim() ?? "Unknown location";
-    }
-
-    private static unpack<T>(
-        variable: T
-    ): [string, T] {
-        const name = Object.keys({variable})[0]
-        return [name, variable]
     }
 
     static exists<T>( // Checks that a variable is non-null
