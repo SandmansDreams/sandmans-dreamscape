@@ -2,6 +2,8 @@ import { devicePixelRatio } from "svelte/reactivity/window" // Svelte reactive v
 import { Assert } from "../../Assert"
 import { clamp } from "../../utils"
 import { Buffer } from "./Buffer"
+import type { Pipeline } from "./Pipeline"
+import { Color } from "../Color"
 
 
 /** Communicates between the code and the computer's GPU to render things */
@@ -102,9 +104,9 @@ export class Renderer {
         return observer
     }
 
-    /*beginFrame(clearColor: GPUColor = Color.grey(0), timer: GpuTimer | null = null): Frame {
-        return new Frame(this, clear, timer)
-    }*/
+    beginFrame(clearColor: GPUColor = Color.grey(0), timer: GPUTimer | null = null): Frame {
+        return new Frame(this, clearColor, timer)
+    }
    
    destroy(): void {
        this.observer.disconnect()
@@ -213,4 +215,67 @@ export class GPUTimer {
         this.currentBuffer?.destroy()
         for (const buffer of this.readbackBuffers) buffer.destroy()
     }
+}
+
+/** An individual frame that handles determines how it should render and yields profiling information */
+export class Frame {
+    private readonly gpu: GPUDevice
+    private readonly encoder: GPUCommandEncoder
+    private readonly renderPass: GPURenderPassEncoder
+    private readonly timer: GPUTimer | null
+    private drawCalls = 0
+    private ended = false
+
+    constructor(renderer: Renderer, clearValue: GPUColor, timer: GPUTimer | null = null, label = "frame") {
+        this.gpu = renderer.gpu
+        this.timer = timer
+
+        // Fetch the current texture
+        const view = renderer.context.getCurrentTexture().createView({ label: `${label} view`})
+
+        // Create a command encoder and begin passing rendering information
+        this.encoder = renderer.gpu.createCommandEncoder({ label: `${label} encoder` })
+        this.renderPass = this.encoder.beginRenderPass({
+            label: `${label} pass`,
+            colorAttachments: [{ view, clearValue, loadOp: "clear", storeOp: "store" }],
+            timestampWrites: timer?.writes(),
+        })
+    }
+
+    get calls(): number {
+        return this.drawCalls
+    }
+
+    setPipeline(pipeline: Pipeline): this {
+        this.renderPass.setPipeline(pipeline.handle)
+        return this
+    }
+
+    setBindGroup(index: number, group: GPUBindGroup): this {
+        this.renderPass.setBindGroup(index, group)
+        return this
+    }
+
+    setVertex(slot: number, buffer: Buffer): this {
+        this.renderPass.setVertexBuffer(slot, buffer.handle)
+        return this
+    }
+
+    draw(vertexCount: number, instanceCount = 1): this {
+        this.renderPass.draw(vertexCount, instanceCount)
+        this.drawCalls++
+        return this
+    }
+
+    end(): void {
+        Assert.that(!this.ended, "frame ended twice")
+        this.ended = true
+        this.renderPass.end()
+
+        // Must be encoded on this encoder, after the pass, before finish()
+        this.timer?.resolve(this.encoder)
+        this.gpu.queue.submit([this.encoder.finish()])
+        this.timer?.read()
+    }
+
 }

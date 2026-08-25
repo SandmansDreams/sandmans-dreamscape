@@ -1,4 +1,4 @@
-import type { Renderer } from "../Renderer"
+import type { Renderer } from "../render"
 
 /** A WebGPU shader management class */
 export class Shader {

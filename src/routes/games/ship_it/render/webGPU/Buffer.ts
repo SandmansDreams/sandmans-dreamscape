@@ -1,6 +1,6 @@
 import { Assert } from "../../Assert"
 import { roundBytesToNearest4x } from "../../utils"
-import type { Renderer } from "./Renderer"
+import type { Renderer } from "./render"
 
 /** A representation of a GPUBuffer that takes data in 1D array or matrix form */
 export class Buffer {

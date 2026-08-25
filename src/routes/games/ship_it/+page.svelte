@@ -1,14 +1,34 @@
 <script lang="ts">
-    import Notification from "./Notification.svelte";
-    import { notifications } from "./notifications.svelte";
-    import { onMount, untrack } from "svelte"
+    import { onMount } from "svelte"
     import { Assert } from "./Assert"
-    import { Renderer } from "./render/webGPU/Renderer";
+    import Notification from "./Notification.svelte"
+    import { notifications } from "./notifications.svelte"
+    import { Game } from "./Game"
+    import type { StatEntry } from "./dev/performance"
 
     const DEV_COLOR = "#87CEEB"
 
     let canvas = $state<HTMLCanvasElement | null>(null)
-    let devMode = $state(true) // If want only in dev environment, swith to 'import.meta.env.DEV'
+    let devMode = $state(true) // For dev environment only, switch to 'import.meta.env.DEV'
+
+    let fps = $state(0)
+    let statLines = $state<StatEntry[]>([])
+    let gpuTimingSupported = $state(true)
+
+    function formatStat(entry: StatEntry): string {
+        // Smoothing is right for milliseconds and wrong for counts: an averaged
+        // draw-call count reports values that never actually happened
+        if (entry.unit === "ms") return `${entry.average.toFixed(2)} ms`
+        if (entry.unit === "value") return entry.latest.toFixed(2)
+        return Math.round(entry.latest).toLocaleString()
+    }
+
+    function healthColor(t: number): string {
+        const clamped = Math.min(1, Math.max(0, t))
+        return `hsl(${(120 * (1 - clamped)).toFixed(0)} 90% 62%)`
+    }
+
+    let fpsColor = $derived(healthColor((60 - fps) / 30))
 
     $effect(() => {
         notifications.devEnabled = devMode
@@ -17,22 +37,50 @@
     onMount(() => {
         Assert.exists(canvas, "Variable 'canvas' does not exist")
 
-        let renderer: Renderer | null = null
+        let game: Game | null = null
         let unmounted = false
+        let ticker: ReturnType<typeof setInterval> | undefined
 
-        void Renderer.create(canvas)
-            .then((createdRenderer) => {
+        const onKeyDown = (event: KeyboardEvent) => {
+            // Otherwise a backtick typed into a ship-name field toggles the panel
+            if (event.target instanceof HTMLInputElement) return
+            if (event.key === "`") devMode = !devMode
+        }
+        window.addEventListener("keydown", onKeyDown)
+
+        void Game.create(canvas)
+            .then((created) => {
                 // create() awaits twice, so it can resolve after the page is gone
-                if (unmounted) return createdRenderer.destroy()
+                if (unmounted) return created.destroy()
 
-                renderer = createdRenderer
+                game = created
+                created.onError = (error) => notifications.error(error.message)
+
+                gpuTimingSupported = created.gpuTimingSupported
+                if (!gpuTimingSupported) notifications.dev.warn("timestamp-query unavailable — no GPU timing")
+
+                created.start()
                 notifications.dev.success("WebGPU ready")
+
+                // Five times a second: enough to read, cheap to render. Reading
+                // these from the frame loop would re-render the panel at 60fps.
+                ticker = setInterval(() => {
+                    fps = created.fps
+                    statLines = created.stats.entries()
+                }, 200)
             })
             .catch((error: unknown) => {
-                notifications.dev.error(error instanceof Error ? error.message : String(error))
+                notifications.error(error instanceof Error ? error.message : String(error))
             })
-        return () => notifications.clear()
-    }) 
+
+        return () => {
+            unmounted = true
+            clearInterval(ticker)
+            window.removeEventListener("keydown", onKeyDown)
+            game?.destroy()
+            notifications.clear()
+        }
+    })
 </script>
 
 <div id="container">
@@ -41,6 +89,21 @@
             <header>
                 <span class="title">DEV MODE: ON</span>
             </header>
+
+            <div class="stats">
+                <span class="label">fps</span>
+                <span class="value" style:color={fpsColor}>{fps.toFixed(0)}</span>
+
+                {#each statLines as line (line.name)}
+                    <span class="label">{line.name}</span>
+                    <span class="value">{formatStat(line)}</span>
+                {/each}
+
+                {#if !gpuTimingSupported}
+                    <span class="label">gpu pass</span>
+                    <span class="value muted">unsupported</span>
+                {/if}
+            </div>
 
             <footer>` toggles this panel</footer>
         </div>

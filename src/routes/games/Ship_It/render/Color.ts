@@ -111,7 +111,7 @@ export class Color {
         return [this.r, this.g, this.b, this.a]
     }
 
-    get rgb(): RGB {
+    get rgba(): RGB {
         return {
             r: Math.round(this.r * 255),
             g: Math.round(this.g * 255),
@@ -120,7 +120,7 @@ export class Color {
         }
     }
 
-    get rgbArray(): [number, number, number, number] {
+    get rgbaArray(): [number, number, number, number] {
         return [
             Math.round(this.r * 255),
             Math.round(this.g * 255),
@@ -130,7 +130,7 @@ export class Color {
     }
 
     get hex(): string {
-        const [r, g, b, a] = this.rgbArray
+        const [r, g, b, a] = this.rgbaArray
 
         return `#${toHexSegment(r)}${toHexSegment(g)}${toHexSegment(b)}${this.a === 1 ? "" : toHexSegment(a)}`
     }
@@ -156,7 +156,7 @@ export class Color {
     get css(): string {
         if (this.a === 1) return this.hex
 
-        const [r, g, b, a] = this.rgbArray
+        const [r, g, b, a] = this.rgbaArray
         return `rgb(${r} ${g} ${b} / ${a})` // Modern css format instead of rgba
     }
 
