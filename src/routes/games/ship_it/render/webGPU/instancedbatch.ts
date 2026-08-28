@@ -1,5 +1,5 @@
 import type { Mesh } from "../mesh"
-import { Buffer } from "./Buffer"
+import { Buffer } from "./buffer"
 import type { Frame, Renderer } from "./render"
 
 export class InstanceBatch {

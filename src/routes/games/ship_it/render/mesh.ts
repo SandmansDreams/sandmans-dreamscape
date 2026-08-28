@@ -1,7 +1,7 @@
-import { Assert } from "../Assert"
+import { Assert } from "../utilities/assert"
 import type { Frame, Renderer } from "./webGPU/render"
-import { Buffer } from "./webGPU/Buffer"
-import type { Color } from "./Color"
+import { Buffer } from "./webGPU/buffer"
+import type { Color } from "./color"
 
 export const FLOATS_PER_VERTEX = 5 // x, y, r, g, b
 const STRIDE = FLOATS_PER_VERTEX * 4 // Bytes from one vertex to the next

@@ -1,9 +1,13 @@
 <script lang="ts">
     import { onMount } from "svelte"
-    import { Assert } from "./Assert"
-    import Notification from "./Notification.svelte"
-    import { notifications } from "./notifications.svelte"
-    import { Game } from "./Game"
+    import { Assert } from "./utilities/assert"
+    import Notification from "./ui/Notification.svelte"
+    import { notifications } from "./ui/notifications.svelte"
+    import { installConsoleNotifications } from "./dev/consoleNotifications"
+    import { Game } from "./game/game"
+    import SettingsPanel from "./ui/SettingsPanel.svelte"
+    import { DEV_SCENES, initialScene, type DevSceneDefinition } from "./dev/scenes"
+    import { loadSceneId, type SettingValues } from "./settings/settings"
     import type { StatEntry } from "./dev/performance"
 
     const DEV_COLOR = "#87CEEB"
@@ -11,7 +15,14 @@
     let canvas = $state<HTMLCanvasElement | null>(null)
     let devMode = $state(true) // For dev environment only, switch to 'import.meta.env.DEV'
 
+    // Mirrored off the game by a ticker rather than written from the frame loop -
+    // these are $state, and assigning them per frame re-renders the panel at 60fps
+    let game = $state<Game | null>(null)
+    let scene = $state<DevSceneDefinition | null>(null)
+    let values = $state<SettingValues>({})
+
     let fps = $state(0)
+    let budgetMs = $state(1000 / 60)
     let statLines = $state<StatEntry[]>([])
     let gpuTimingSupported = $state(true)
 
@@ -28,25 +39,54 @@
         return `hsl(${(120 * (1 - clamped)).toFixed(0)} 90% 62%)`
     }
 
+    /** Milliseconds go green to red against the display's own budget, not against 60. */
+    function statColor(entry: StatEntry): string {
+        if (entry.unit !== "ms") return ""
+        return healthColor((entry.average / budgetMs - 0.4) / 0.6)
+    }
+
     let fpsColor = $derived(healthColor((60 - fps) / 30))
 
     $effect(() => {
         notifications.devEnabled = devMode
     })
 
+    /**
+     * Loads a scene and reads back the values Game restored for it.
+     *
+     * A function rather than an effect on `scene`: loading rebuilds every GPU
+     * resource the outgoing scene owned, and an effect would re-run it on any
+     * dependency that happened to be read in the same block.
+     */
+    function selectScene(definition: DevSceneDefinition): void {
+        const active = game
+        if (!active) return
+
+        active.load(definition)
+        scene = definition
+
+        // Game is the one that reads storage, so the panel takes its values from
+        // there rather than computing defaults a second time
+        values = { ...active.settings }
+    }
+
+    // The spread is what makes this fire: setValues only reads the object, so
+    // without touching every key a slider drag would not register as a change
+    $effect(() => {
+        const snapshot = { ...values }
+        if (Object.keys(snapshot).length > 0) game?.setValues(snapshot)
+    })
+
     onMount(() => {
         Assert.exists(canvas, "Variable 'canvas' does not exist")
 
-        let game: Game | null = null
+        // First, so anything logged while the device is coming up is mirrored too -
+        // including the failure of Renderer.create itself
+        const stopMirroring = installConsoleNotifications()
+
         let unmounted = false
         let ticker: ReturnType<typeof setInterval> | undefined
-
-        const onKeyDown = (event: KeyboardEvent) => {
-            // Otherwise a backtick typed into a ship-name field toggles the panel
-            if (event.target instanceof HTMLInputElement) return
-            if (event.key === "`") devMode = !devMode
-        }
-        window.addEventListener("keydown", onKeyDown)
+        let offDevPanel: (() => void) | null = null
 
         void Game.create(canvas)
             .then((created) => {
@@ -56,16 +96,25 @@
                 game = created
                 created.onError = (error) => notifications.error(error.message)
 
+                // Through the input service rather than a raw keydown, so the key
+                // is rebindable and the typing guard is the same one every action gets
+                offDevPanel = created.input.onGlobalPress((action) => {
+                    if (action === "global.devPanel") devMode = !devMode
+                })
+
                 gpuTimingSupported = created.gpuTimingSupported
-                if (!gpuTimingSupported) notifications.dev.warn("timestamp-query unavailable — no GPU timing")
+
+                // Restores whichever scene was open last, or the first registered one
+                const first = initialScene(loadSceneId())
+                if (first) selectScene(first)
+                else notifications.dev.warn("No dev scenes registered")
 
                 created.start()
-                notifications.dev.success("WebGPU ready")
 
-                // Five times a second: enough to read, cheap to render. Reading
-                // these from the frame loop would re-render the panel at 60fps.
+                // Five times a second: enough to read, cheap to render
                 ticker = setInterval(() => {
                     fps = created.fps
+                    budgetMs = created.budgetMs
                     statLines = created.stats.entries()
                 }, 200)
             })
@@ -76,8 +125,13 @@
         return () => {
             unmounted = true
             clearInterval(ticker)
-            window.removeEventListener("keydown", onKeyDown)
+            offDevPanel?.()
+
+            // Before the console is put back, so anything logged while tearing
+            // down still reaches the stack it is about to clear
             game?.destroy()
+            game = null
+            stopMirroring()
             notifications.clear()
         }
     })
@@ -90,13 +144,30 @@
                 <span class="title">DEV MODE: ON</span>
             </header>
 
+            <select
+                class="scene-select"
+                value={scene?.id ?? ""}
+                onchange={(event) => {
+                    const found = DEV_SCENES.find((definition) => definition.id === event.currentTarget.value)
+                    if (found) selectScene(found)
+                }}
+            >
+                {#each DEV_SCENES as definition (definition.id)}
+                    <option value={definition.id}>{definition.name}</option>
+                {/each}
+            </select>
+
+            {#if scene}
+                <p class="description">{scene.description}</p>
+            {/if}
+
             <div class="stats">
                 <span class="label">fps</span>
                 <span class="value" style:color={fpsColor}>{fps.toFixed(0)}</span>
 
                 {#each statLines as line (line.name)}
                     <span class="label">{line.name}</span>
-                    <span class="value">{formatStat(line)}</span>
+                    <span class="value" style:color={statColor(line)}>{formatStat(line)}</span>
                 {/each}
 
                 {#if !gpuTimingSupported}
@@ -104,6 +175,14 @@
                     <span class="value muted">unsupported</span>
                 {/if}
             </div>
+
+            {#if scene}
+                <SettingsPanel
+                    schema={scene.settings}
+                    bind:values
+                    onAction={(name) => game?.invoke(name)}
+                />
+            {/if}
 
             <footer>` toggles this panel</footer>
         </div>

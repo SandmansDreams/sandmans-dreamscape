@@ -23,7 +23,7 @@
 		"src/service-worker/**/*.ts",
 		"src/service-worker.d.ts",
 		"src/service-worker/**/*.d.ts",
-		"src/routes/games/Ship_It/_Old Versions/**"
+		"**/_Old Versions/**"
 	]
 	// Path aliases are handled by https://svelte.dev/docs/kit/configuration#alias
 	// except $lib which is handled by https://svelte.dev/docs/kit/configuration#files

@@ -27,10 +27,11 @@ describe("notifications", () => {
     })
 
     it("drops the oldest once past the visible cap", () => {
-        for (const message of ["1", "2", "3", "4", "5"]) notifications.info(message)
+        const raised = ["1", "2", "3", "4", "5", "6", "7", "8", "9"]
+        for (const message of raised) notifications.info(message)
 
-        // Five raised, four kept, and it is "1" that goes
-        expect(messages()).toEqual(["2", "3", "4", "5"])
+        // Nine raised, eight kept, and it is "1" that goes
+        expect(messages()).toEqual(raised.slice(1))
     })
 
     it("times out the kinds that have a lifetime", () => {

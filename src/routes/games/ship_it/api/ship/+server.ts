@@ -7,7 +7,7 @@ import { join } from "node:path"
 import type { RequestHandler } from "./$types"
 
 /** Where the ship glob looks. Relative to the project root, which is cwd in dev. */
-const SHIPS = "src/routes/games/space_game/assets/ships"
+const SHIPS = "src/routes/games/ship_it/assets/ships"
 
 /**
  * Lowercase, digits and dashes: exactly what a ship id already looks like.

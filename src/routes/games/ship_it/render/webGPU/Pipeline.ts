@@ -1,6 +1,6 @@
-import { Assert } from "../../Assert"
-import { Renderer } from "./render"
-import type { Shader } from "./shaders/Shader"
+import { Assert } from "../../utilities/assert"
+import type { Renderer } from "./render"
+import type { Shader } from "./shader"
 
 export type BlendMode = "none" | "alpha" | "additive" | "invert"
 

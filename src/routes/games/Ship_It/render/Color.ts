@@ -1,4 +1,4 @@
-import { clamp } from "../utils"
+import { clamp } from "../utilities/utils"
 
 export type HSL = {
     /** Degrees, 0-360. */

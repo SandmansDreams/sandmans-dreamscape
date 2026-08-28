@@ -1,4 +1,4 @@
-import { notifications } from "./notifications.svelte";
+import { notifications } from "../ui/notifications.svelte"
 
 export class Assert {
     private static fail(reason: string, stack: string | undefined): never { // Creates log and stops anything after from running
